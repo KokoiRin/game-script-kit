@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from game_automation.core.actions import Action
-from game_automation.core.windows import Window
+from game_automation.domain.actions import Action
+from game_automation.domain.windows import Window
 
 
 @dataclass(frozen=True, slots=True)

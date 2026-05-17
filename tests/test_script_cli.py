@@ -2,7 +2,7 @@
 
 from types import ModuleType
 
-from game_automation.core import Point
+from game_automation.domain import Point
 from game_automation.script_cli import main
 
 

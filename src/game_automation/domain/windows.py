@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol
 
-from game_automation.core.geometry import Point, Rect
+from game_automation.domain.geometry import Point, Rect
 
 
 class Window(Protocol):

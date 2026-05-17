@@ -2,10 +2,7 @@
 
 from __future__ import annotations
 
-from game_automation.core.actions import Click, Drag, Wait
-from game_automation.core.geometry import Point
-from game_automation.core.script import Script
-from game_automation.core.windows import ScreenWindow
+from game_automation.domain import Click, Drag, Point, ScreenWindow, Script, Wait
 
 
 DEMO_SCRIPT = Script(

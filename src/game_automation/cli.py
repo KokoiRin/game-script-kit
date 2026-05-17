@@ -5,7 +5,8 @@ from __future__ import annotations
 import argparse
 from dataclasses import dataclass, field
 
-from game_automation.core import InputDevice, Point, run_demo_workflow
+from game_automation.core import InputDevice, run_demo_workflow
+from game_automation.domain import Point
 
 
 @dataclass(frozen=True, slots=True)

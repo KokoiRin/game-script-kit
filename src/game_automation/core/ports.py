@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from game_automation.core.geometry import Point
+from game_automation.domain import Point
 
 
 class InputDevice(Protocol):

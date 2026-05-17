@@ -11,7 +11,8 @@ from game_automation.adapters.desktop import (
     TerminalKeyStateReader,
 )
 from game_automation.coordinate_recorder_cli import main
-from game_automation.core import AdapterSetupError, Point
+from game_automation.core import AdapterSetupError
+from game_automation.domain import Point
 
 
 def test_pyautogui_pointer_reader_returns_point_from_tuple() -> None:

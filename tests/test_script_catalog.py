@@ -2,8 +2,8 @@
 
 import pytest
 
-from game_automation.core import Click, Point, ScreenWindow, Script
 from game_automation.core.script_catalog import ScriptCatalog, ScriptNotFoundError
+from game_automation.domain import Click, Point, ScreenWindow, Script
 
 
 def build_script(name: str) -> Script:

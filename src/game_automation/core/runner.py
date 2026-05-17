@@ -6,9 +6,8 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from game_automation.core.actions import Click, Drag, Wait
 from game_automation.core.ports import InputDevice
-from game_automation.core.script import Script
+from game_automation.domain import Click, Drag, Script, Wait
 
 
 Sleeper = Callable[[float], None]

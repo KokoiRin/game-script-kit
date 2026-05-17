@@ -2,10 +2,7 @@
 
 from __future__ import annotations
 
-from game_automation.core.actions import Click, Wait
-from game_automation.core.geometry import Point
-from game_automation.core.script import Script
-from game_automation.core.windows import ScreenWindow
+from game_automation.domain import Click, Point, ScreenWindow, Script, Wait
 
 
 RECORDED_CLICKS_SCRIPT = Script(

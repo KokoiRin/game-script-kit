@@ -6,7 +6,8 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from game_automation.core import KeyStateReader, Point, PointerPositionReader
+from game_automation.core import KeyStateReader, PointerPositionReader
+from game_automation.domain import Point
 
 
 Sleeper = Callable[[float], None]
