@@ -13,15 +13,27 @@ def test_script_preserves_action_order() -> None:
         Wait(0.1),
     )
 
-    script = Script(window=ScreenWindow(), actions=actions)
+    script = Script(name="demo", window=ScreenWindow(), actions=actions)
 
+    assert script.name == "demo"
     assert script.actions == actions
 
 
 def test_script_rejects_empty_actions() -> None:
     """验证空脚本会被拒绝。"""
     with pytest.raises(ValueError, match="script requires at least one action"):
-        Script(window=ScreenWindow(), actions=())
+        Script(name="empty", window=ScreenWindow(), actions=())
+
+
+def test_script_rejects_empty_name() -> None:
+    """验证空名称和纯空白名称会被拒绝。"""
+    actions = (Click(Point(1, 2)),)
+
+    with pytest.raises(ValueError, match="script name cannot be empty"):
+        Script(name="", window=ScreenWindow(), actions=actions)
+
+    with pytest.raises(ValueError, match="script name cannot be empty"):
+        Script(name="   ", window=ScreenWindow(), actions=actions)
 
 
 def test_rect_rejects_non_positive_size() -> None:
@@ -51,7 +63,7 @@ def test_script_binds_window_at_script_level() -> None:
     """验证窗口属于脚本，而不是属于单个动作。"""
     window = AreaWindow(Rect(10, 20, 100, 200))
     action = Click(Point(1, 2))
-    script = Script(window=window, actions=(action,))
+    script = Script(name="area-click", window=window, actions=(action,))
 
     assert script.window == window
     assert not hasattr(action, "window")

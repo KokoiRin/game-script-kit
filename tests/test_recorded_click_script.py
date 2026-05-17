@@ -8,6 +8,7 @@ def test_recorded_click_script_contains_requested_sequence() -> None:
     """验证脚本按用户记录的坐标和等待时间编排。"""
     script = build_recorded_click_script()
 
+    assert script.name == "recorded-clicks"
     assert [type(action).__name__ for action in script.actions] == [
         "Wait",
         "Click",

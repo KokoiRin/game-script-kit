@@ -14,6 +14,7 @@ from game_automation.core.recorded_click_script import (
 )
 from game_automation.core.runner import ScriptRunner
 from game_automation.core.script import Script
+from game_automation.core.script_catalog import ScriptCatalog, ScriptNotFoundError
 from game_automation.core.windows import AreaWindow, ScreenWindow
 
 __all__ = [
@@ -29,6 +30,8 @@ __all__ = [
     "Rect",
     "ScreenWindow",
     "Script",
+    "ScriptCatalog",
+    "ScriptNotFoundError",
     "ScriptRunner",
     "Wait",
     "build_recorded_click_script",

@@ -9,6 +9,7 @@ def test_runner_maps_actions_to_device_with_script_window() -> None:
     device = FakeInputDevice()
     sleeps: list[float] = []
     script = Script(
+        name="area-runner",
         window=AreaWindow(Rect(100, 200, 800, 600)),
         actions=(
             Click(Point(10, 20)),

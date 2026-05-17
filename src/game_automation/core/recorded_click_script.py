@@ -1,33 +1,18 @@
-"""定义基于已记录坐标的点击脚本。"""
+"""提供已记录点击脚本的兼容入口，实际定义位于 scripts 包。"""
 
 from __future__ import annotations
 
 import time
 
-from game_automation.core.actions import Click, Wait
-from game_automation.core.geometry import Point
 from game_automation.core.ports import InputDevice
 from game_automation.core.runner import Sleeper, ScriptRunner
 from game_automation.core.script import Script
-from game_automation.core.windows import ScreenWindow
-
-
-RECORDED_CLICK_SCRIPT = Script(
-    window=ScreenWindow(),
-    actions=(
-        Wait(3),
-        Click(Point(242, 92)),
-        Wait(3),
-        Click(Point(736, 323)),
-        Wait(10),
-        Click(Point(741, 400)),
-    ),
-)
+from game_automation.scripts.recorded_clicks import build_recorded_clicks_script
 
 
 def build_recorded_click_script() -> Script:
-    """构造按已记录坐标顺序点击的脚本。"""
-    return RECORDED_CLICK_SCRIPT
+    """返回已记录点击命名脚本，保留旧 core API。"""
+    return build_recorded_clicks_script()
 
 
 def run_recorded_click_script(

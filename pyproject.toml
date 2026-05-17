@@ -21,6 +21,7 @@ dev = [
 game-automation-demo = "game_automation.cli:main"
 game-coordinate-recorder = "game_automation.coordinate_recorder_cli:main"
 game-recorded-clicks = "game_automation.recorded_click_cli:main"
+game-scripts = "game_automation.script_cli:main"
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

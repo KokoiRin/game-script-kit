@@ -22,6 +22,7 @@ def test_demo_workflow_builds_script() -> None:
     """验证 demo workflow 使用脚本领域模型表达固定动作序列。"""
     script = build_demo_script()
 
+    assert script.name == "demo"
     assert len(script.actions) == 3
 
 

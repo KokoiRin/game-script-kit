@@ -10,10 +10,13 @@ from game_automation.core.windows import Window
 
 @dataclass(frozen=True, slots=True)
 class Script:
+    name: str
     window: Window
     actions: tuple[Action, ...]
 
     def __post_init__(self) -> None:
-        """校验脚本至少包含一个动作，并冻结动作顺序。"""
+        """校验脚本名称和动作序列都可用于执行。"""
+        if self.name.strip() == "":
+            raise ValueError("script name cannot be empty")
         if len(self.actions) == 0:
             raise ValueError("script requires at least one action")
