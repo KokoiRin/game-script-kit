@@ -1,4 +1,4 @@
-"""定义核心层依赖的跨平台端口。"""
+"""定义执行引擎的跨平台端口。"""
 
 from __future__ import annotations
 
@@ -13,6 +13,9 @@ class InputDevice(Protocol):
 
     def drag_to(self, start: Point, end: Point, duration_seconds: float = 0.0) -> None:
         """从屏幕起点拖拽到屏幕终点。"""
+
+    def wait(self, duration_seconds: float) -> None:
+        """等待指定秒数。"""
 
 
 class PointerPositionReader(Protocol):

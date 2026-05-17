@@ -1,11 +1,12 @@
 # script-action-model Specification
 
 ## Purpose
-定义脚本、动作、窗口、点和矩形的核心领域模型，以及脚本执行时的坐标解析规则。
+定义脚本、动作、窗口、点和矩形的核心领域模型（位于 `domain` 包内），以及脚本执行时的坐标解析规则。
+
 ## Requirements
 ### Requirement: Script 由有序动作组成
 
-系统 SHALL 提供 `Script` 领域模型，用于保存一个稳定脚本名称、一个执行窗口和一组按顺序编排的动作。
+系统 SHALL 在 `domain.script` 中提供 `Script` 领域模型，用于保存一个稳定脚本名称、一个执行窗口和一组按顺序编排的动作。
 
 #### Scenario: 创建包含多个动作的命名脚本
 
@@ -15,7 +16,7 @@
 #### Scenario: 脚本绑定单个窗口
 
 - **WHEN** 调用方创建脚本
-- **THEN** 脚本会记录一个窗口，脚本内所有点击和拖拽动作默认都在该窗口内执行
+- **THEN** 脚本会记录一个 `Window`，脚本内所有点击和拖拽动作默认都在该窗口内执行
 
 #### Scenario: 空脚本被拒绝
 
@@ -29,21 +30,21 @@
 
 ### Requirement: Action 支持点击拖拽等待
 
-系统 SHALL 定义平台无关的动作模型，第一版只包含点击、拖拽和等待三类动作。
+系统 SHALL 在 `domain.actions` 中定义平台无关的动作模型，第一版只包含 `Click`、`Drag` 和 `Wait` 三类动作，通过 `Action` 类型别名统一引用。
 
 #### Scenario: 点击动作记录点击点
 
-- **WHEN** 调用方创建点击动作
-- **THEN** 点击动作只记录点击点，不记录单独的窗口
+- **WHEN** 调用方创建 `Click` 动作
+- **THEN** 点击动作只记录 `Point`，不记录单独的窗口
 
 #### Scenario: 拖拽动作记录起止点
 
-- **WHEN** 调用方创建拖拽动作
-- **THEN** 拖拽动作只记录起点和终点，不记录单独的窗口
+- **WHEN** 调用方创建 `Drag` 动作
+- **THEN** 拖拽动作只记录起点和终点 `Point`，不记录单独的窗口
 
 #### Scenario: 等待动作记录等待时长
 
-- **WHEN** 调用方创建等待动作
+- **WHEN** 调用方创建 `Wait` 动作
 - **THEN** 等待动作会记录以秒为单位的等待时长
 
 #### Scenario: 动作模型不包含移动动作
@@ -58,26 +59,26 @@
 
 ### Requirement: Window 表达动作坐标所属范围
 
-系统 SHALL 定义窗口模型，用于表示脚本内点击和拖拽动作中点坐标所属的坐标范围。
+系统 SHALL 在 `domain.windows` 中定义 `Window` 协议，以及 `ScreenWindow` 和 `AreaWindow` 实现，用于表示脚本内点击和拖拽动作中点坐标所属的坐标范围。
 
 #### Scenario: 屏幕窗口使用屏幕坐标
 
-- **WHEN** 脚本绑定屏幕窗口
+- **WHEN** 脚本绑定 `ScreenWindow`
 - **THEN** 脚本内动作点会被解释为屏幕绝对坐标
 
 #### Scenario: 区域窗口使用区域内坐标
 
-- **WHEN** 脚本绑定指定区域窗口
+- **WHEN** 脚本绑定 `AreaWindow`
 - **THEN** 脚本内动作点会被解释为该区域左上角原点下的区域内坐标
 
 ### Requirement: Rect 表达区域窗口范围
 
-系统 SHALL 提供 `Rect` 领域模型，用于记录指定区域窗口在屏幕上的整体范围。
+系统 SHALL 在 `domain.geometry` 中提供 `Rect` 领域模型，用于记录 `AreaWindow` 在屏幕上的整体范围。
 
 #### Scenario: 区域矩形记录位置和尺寸
 
-- **WHEN** 调用方创建指定区域窗口
-- **THEN** 区域窗口会通过矩形记录左上角坐标、宽度和高度
+- **WHEN** 调用方创建 `AreaWindow`
+- **THEN** 区域窗口会通过 `Rect` 记录左上角坐标、宽度和高度
 
 #### Scenario: 非法矩形被拒绝
 
@@ -86,24 +87,24 @@
 
 ### Requirement: Point 表达点击和拖拽位置
 
-系统 SHALL 提供 `Point` 领域模型，用于表达点击位置以及拖拽起点和终点。
+系统 SHALL 在 `domain.geometry` 中提供 `Point` 领域模型，用于表达点击位置以及拖拽起点和终点。
 
 #### Scenario: 点记录二维坐标
 
-- **WHEN** 调用方创建点
+- **WHEN** 调用方创建 `Point`
 - **THEN** 点会记录 x 和 y 两个坐标值
 
 #### Scenario: 区域窗口解析点为屏幕坐标
 
-- **WHEN** 区域窗口解析一个区域内点
+- **WHEN** `AreaWindow` 解析一个区域内点
 - **THEN** 解析结果会等于区域左上角坐标加上该点坐标
 
 #### Scenario: 屏幕窗口解析点为屏幕坐标
 
-- **WHEN** 屏幕窗口解析一个点
+- **WHEN** `ScreenWindow` 解析一个点
 - **THEN** 解析结果会保留该点的 x 和 y 坐标
 
 #### Scenario: 坐标解析不做边界夹取
 
-- **WHEN** 区域窗口解析一个位于矩形范围外的点
+- **WHEN** `AreaWindow` 解析一个位于矩形范围外的点
 - **THEN** 解析结果仍然会按区域左上角坐标加上该点坐标计算

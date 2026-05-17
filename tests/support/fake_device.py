@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from game_automation.domain import Point
+from game_automation.engine.ports import InputDevice
 
 
 @dataclass(frozen=True, slots=True)
@@ -17,7 +18,7 @@ class RecordedAction:
 
 
 @dataclass(slots=True)
-class FakeInputDevice:
+class FakeInputDevice(InputDevice):
     actions: list[RecordedAction] = field(default_factory=list)
 
     def click(self, target: Point) -> None:
@@ -34,3 +35,7 @@ class FakeInputDevice:
                 duration_seconds=duration_seconds,
             )
         )
+
+    def wait(self, duration_seconds: float) -> None:
+        """记录一次等待请求。"""
+        self.actions.append(RecordedAction("wait", duration_seconds=duration_seconds))

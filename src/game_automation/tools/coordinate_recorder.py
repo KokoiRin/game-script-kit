@@ -6,7 +6,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from game_automation.core import KeyStateReader, PointerPositionReader
+from game_automation.engine.ports import KeyStateReader, PointerPositionReader
 from game_automation.domain import Point
 
 

@@ -1,11 +1,12 @@
 # coordinate-recorder-tool Specification
 
 ## Purpose
-TBD - created by archiving change add-coordinate-recorder-tool. Update Purpose after archive.
+定义独立坐标记录工具的行为，通过 `engine.ports.PointerPositionReader` 和 `engine.ports.KeyStateReader` 端口读取鼠标坐标和按键状态，用户通过 `star recorder` 启动。
+
 ## Requirements
 ### Requirement: 工具实时打印鼠标坐标
 
-系统 SHALL 提供独立坐标记录工具，用于通过坐标读取端口实时读取并打印当前鼠标屏幕坐标。
+系统 SHALL 提供独立坐标记录工具，用于通过 `PointerPositionReader` 端口实时读取并打印当前鼠标屏幕坐标。
 
 #### Scenario: 每秒打印当前坐标
 
@@ -20,12 +21,12 @@ TBD - created by archiving change add-coordinate-recorder-tool. Update Purpose a
 #### Scenario: 坐标使用 Point 表达
 
 - **WHEN** 工具读取到当前鼠标位置
-- **THEN** 工具会用现有 `Point` 模型表达该坐标
+- **THEN** 工具会用 `domain.geometry.Point` 模型表达该坐标
 
 #### Scenario: 工具通过坐标读取端口获取坐标
 
 - **WHEN** 工具需要获取当前鼠标位置
-- **THEN** 工具会调用坐标读取端口，而不是直接调用平台库
+- **THEN** 工具会调用 `PointerPositionReader` 端口，而不是直接调用平台库
 
 ### Requirement: 工具按 1 记录坐标
 
@@ -72,7 +73,7 @@ TBD - created by archiving change add-coordinate-recorder-tool. Update Purpose a
 #### Scenario: 工具使用独立入口
 
 - **WHEN** 用户启动坐标记录工具
-- **THEN** 用户会通过独立工具入口启动，而不是通过现有 demo CLI 参数启动
+- **THEN** 用户会通过 `star recorder` 启动，而不是通过脚本运行入口启动
 
 ### Requirement: 工具报告 setup 问题
 
@@ -90,7 +91,7 @@ TBD - created by archiving change add-coordinate-recorder-tool. Update Purpose a
 
 ### Requirement: 平台 adapter 实现坐标和按键读取
 
-系统 SHALL 通过平台 adapter 实现坐标读取端口和按键状态读取端口。
+系统 SHALL 通过平台 adapter 实现 `engine.ports.PointerPositionReader` 和 `engine.ports.KeyStateReader` 端口。
 
 #### Scenario: adapter 读取鼠标坐标
 
@@ -106,4 +107,3 @@ TBD - created by archiving change add-coordinate-recorder-tool. Update Purpose a
 
 - **WHEN** 系统提供坐标记录工具所需的真实 adapter
 - **THEN** 桌面通用实现会放在 `adapters/desktop/`，macOS 专用实现会放在 `adapters/macos/`
-
