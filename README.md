@@ -21,11 +21,12 @@
 
 ```text
 src/game_automation/
+├── domain/              # 纯领域数据模型
+│   ├── actions.py       # Click / Drag / Wait
+│   ├── geometry.py      # Point / Rect
+│   ├── windows.py       # ScreenWindow / AreaWindow
+│   └── script.py        # Script
 ├── core/
-│   ├── actions.py        # Click / Drag / Wait
-│   ├── geometry.py       # Point / Rect
-│   ├── windows.py        # ScreenWindow / AreaWindow
-│   ├── script.py         # Script
 │   ├── script_catalog.py # ScriptCatalog / ScriptNotFoundError
 │   ├── runner.py         # ScriptRunner
 │   └── ports.py          # InputDevice / PointerPositionReader / KeyStateReader

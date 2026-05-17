@@ -2,7 +2,7 @@
 
 import pytest
 
-from game_automation.core import AreaWindow, Click, Drag, Point, Rect, ScreenWindow, Script, Wait
+from game_automation.domain import AreaWindow, Click, Drag, Point, Rect, ScreenWindow, Script, Wait
 
 
 def test_script_preserves_action_order() -> None:
@@ -53,7 +53,7 @@ def test_actions_do_not_expose_move_or_mouse_button() -> None:
     assert not hasattr(click, "button")
     assert not hasattr(drag, "button")
 
-    import game_automation.core.actions as actions
+    import game_automation.domain.actions as actions
 
     assert not hasattr(actions, "Move")
     assert not hasattr(actions, "MouseButton")

@@ -6,11 +6,8 @@ from types import SimpleNamespace
 import pytest
 
 from game_automation.adapters.macos import MacOSPointerDevice
-from game_automation.core import (
-    AdapterSetupError,
-    AdapterUnsupportedError,
-    Point,
-)
+from game_automation.core import AdapterSetupError, AdapterUnsupportedError
+from game_automation.domain import Point
 
 
 class Backend:

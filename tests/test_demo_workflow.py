@@ -1,6 +1,7 @@
 """验证核心 demo workflow 的平台无关行为。"""
 
-from game_automation.core import Point, build_demo_script, run_demo_workflow
+from game_automation.core import build_demo_script, run_demo_workflow
+from game_automation.domain import Point
 from tests.support.fake_device import FakeInputDevice
 
 

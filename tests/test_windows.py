@@ -1,6 +1,6 @@
 """验证脚本窗口的坐标解析规则。"""
 
-from game_automation.core import AreaWindow, Point, Rect, ScreenWindow
+from game_automation.domain import AreaWindow, Point, Rect, ScreenWindow
 
 
 def test_screen_window_returns_point_unchanged() -> None:

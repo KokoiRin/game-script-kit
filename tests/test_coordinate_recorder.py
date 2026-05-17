@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import game_automation.core.actions as actions
-from game_automation.core import Point
+import game_automation.domain.actions as actions
+from game_automation.domain import Point
 from game_automation.tools.coordinate_recorder import CoordinateRecorder
 
 

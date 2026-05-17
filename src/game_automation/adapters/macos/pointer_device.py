@@ -6,7 +6,7 @@ import platform
 from types import ModuleType
 
 from game_automation.core.errors import AdapterSetupError, AdapterUnsupportedError
-from game_automation.core.geometry import Point
+from game_automation.domain import Point
 
 
 class MacOSPointerDevice:

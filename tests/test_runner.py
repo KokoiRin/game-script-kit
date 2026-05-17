@@ -1,6 +1,7 @@
 """验证脚本 runner 会把领域动作映射到输入设备端口。"""
 
-from game_automation.core import AreaWindow, Click, Drag, Point, Rect, Script, ScriptRunner, Wait
+from game_automation.core import ScriptRunner
+from game_automation.domain import AreaWindow, Click, Drag, Point, Rect, Script, Wait
 from tests.support.fake_device import FakeInputDevice
 
 

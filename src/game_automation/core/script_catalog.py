@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-from game_automation.core.script import Script
+from game_automation.domain import Script
 
 
 class ScriptNotFoundError(LookupError):

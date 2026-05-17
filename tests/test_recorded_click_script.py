@@ -1,6 +1,7 @@
 """验证基于已记录坐标的点击脚本。"""
 
-from game_automation.core import Point, build_recorded_click_script, run_recorded_click_script
+from game_automation.core import build_recorded_click_script, run_recorded_click_script
+from game_automation.domain import Point
 from tests.support.fake_device import FakeInputDevice
 
 

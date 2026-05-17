@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from types import ModuleType
 
-from game_automation.core import AdapterSetupError, Point
+from game_automation.core import AdapterSetupError
+from game_automation.domain import Point
 
 
 class PyAutoGuiPointerPositionReader:

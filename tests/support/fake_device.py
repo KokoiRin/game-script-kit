@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from game_automation.core import Point
+from game_automation.domain import Point
 
 
 @dataclass(frozen=True, slots=True)

@@ -6,7 +6,7 @@ import time
 
 from game_automation.core.ports import InputDevice
 from game_automation.core.runner import Sleeper, ScriptRunner
-from game_automation.core.script import Script
+from game_automation.domain import Script
 from game_automation.scripts.demo import build_demo_script as build_named_demo_script
 
 

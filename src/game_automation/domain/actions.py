@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TypeAlias
 
-from game_automation.core.geometry import Point
+from game_automation.domain.geometry import Point
 
 
 @dataclass(frozen=True, slots=True)
