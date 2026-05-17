@@ -14,6 +14,7 @@
   - `AreaWindow(Rect(...))`：点坐标按区域左上角偏移解析为屏幕坐标。
 - 通过 `InputDevice` 端口隔离平台输入实现。
 - 提供 macOS `pyautogui` adapter 和 dry-run demo。
+- 提供独立坐标记录工具，用于采集屏幕绝对坐标。
 
 ## 代码结构
 
@@ -25,10 +26,17 @@ src/game_automation/
 │   ├── windows.py        # ScreenWindow / AreaWindow
 │   ├── script.py         # Script
 │   ├── runner.py         # ScriptRunner
-│   └── ports.py          # InputDevice
+│   └── ports.py          # InputDevice / PointerPositionReader / KeyStateReader
 ├── adapters/
-│   └── macos.py          # macOS pyautogui adapter
-└── cli.py                # demo CLI
+│   ├── desktop/          # 桌面通用 adapter
+│   │   ├── pointer_position.py
+│   │   └── terminal_keyboard.py
+│   └── macos/            # macOS 专用 adapter
+│       └── pointer_device.py
+├── tools/
+│   └── coordinate_recorder.py # 坐标记录工具核心循环
+├── cli.py                # demo CLI
+└── coordinate_recorder_cli.py # 坐标记录工具 CLI
 ```
 
 OpenSpec 规格和已归档变更放在 `openspec/`。
@@ -71,6 +79,45 @@ macOS demo 会真的移动和点击鼠标。
 - 已安装依赖。
 - 终端或 Python 运行时已在 macOS 系统设置中获得“辅助功能”权限。
 - demo 坐标适合当前屏幕，避免点到危险位置。
+
+## 记录鼠标坐标
+
+坐标记录工具是独立工具，不走 `ScriptRunner`，也不会创建脚本动作。它记录的是屏幕绝对坐标。
+
+```bash
+.venv/bin/game-coordinate-recorder
+```
+
+交互方式：
+
+- 每 1 秒打印一次当前鼠标坐标。
+- 每 50ms 检查一次按键状态。
+- 按 `1` 时立即重新读取当前鼠标坐标并记录。
+- 按 `Q` 或 `q` 结束。
+- 结束后打印本次记录的所有坐标。
+
+运行前确认：
+
+- 已安装依赖。
+- 终端窗口保持焦点；默认按键 adapter 从当前终端读取 `1` 和 `Q/q`，不使用全局键盘监听。
+- 终端或 Python 运行时可能仍需要系统允许读取鼠标位置。
+- `1` 和 `Q/q` 需要正常按下，极短瞬时敲击可能被 50ms 轮询错过。
+
+## 运行已记录点击脚本
+
+这个脚本会按顺序执行：等待 3 秒，点击 `(242, 92)`，等待 3 秒，点击 `(736, 323)`，等待 10 秒，点击 `(741, 400)` 后结束。
+
+先用 dry-run 检查顺序：
+
+```bash
+.venv/bin/game-recorded-clicks --dry-run
+```
+
+确认无误后再真实执行：
+
+```bash
+.venv/bin/game-recorded-clicks --macos
+```
 
 ## 使用核心模型
 
