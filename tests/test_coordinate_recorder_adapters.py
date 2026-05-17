@@ -10,8 +10,7 @@ from game_automation.adapters.desktop import (
     PyAutoGuiPointerPositionReader,
     TerminalKeyStateReader,
 )
-from game_automation.coordinate_recorder_cli import main
-from game_automation.core import AdapterSetupError
+from game_automation.star_cli import main
 from game_automation.domain import Point
 
 
@@ -28,7 +27,7 @@ def test_pyautogui_pointer_reader_wraps_errors() -> None:
         position=lambda: (_ for _ in ()).throw(RuntimeError("blocked"))
     )
 
-    with pytest.raises(AdapterSetupError, match="pointer position"):
+    with pytest.raises(RuntimeError, match="pointer position"):
         PyAutoGuiPointerPositionReader(backend=backend).current_position()
 
 
@@ -36,14 +35,14 @@ def test_terminal_key_reader_requires_interactive_terminal() -> None:
     """验证终端按键 adapter 会报告非交互终端限制。"""
     stream = SimpleNamespace(isatty=lambda: False)
 
-    with pytest.raises(AdapterSetupError, match="interactive terminal"):
+    with pytest.raises(RuntimeError, match="interactive terminal"):
         TerminalKeyStateReader(stream=stream)
 
 
 def test_coordinate_recorder_cli_help_does_not_load_platform_dependencies(capsys) -> None:
     """验证 CLI help 不会加载真实鼠标或键盘依赖。"""
     with pytest.raises(SystemExit) as exc:
-        main(["--help"])
+        main(["recorder", "--help"])
 
     assert exc.value.code == 0
-    assert "Record screen coordinates" in capsys.readouterr().out
+    assert "Seconds between coordinate prints" in capsys.readouterr().out

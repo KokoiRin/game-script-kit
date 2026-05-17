@@ -1,16 +1,12 @@
-# game-script-core Specification
+## MODIFIED Requirements
 
-## Purpose
-定义平台无关的游戏自动化业务 workflow 如何通过 `engine.ports.InputDevice` 抽象组织和测试。
-
-## Requirements
 ### Requirement: 业务逻辑依赖输入设备抽象
 
 游戏自动化业务逻辑 SHALL 通过 `engine.ports.InputDevice` 抽象调用鼠标指针动作，而不是直接调用平台专用的鼠标或键盘 API。领域模型（`domain` 包）和脚本定义（`scripts_manager` 包）不依赖任何平台 adapter。
 
 #### Scenario: workflow 可以使用测试输入设备运行
 
-- **WHEN** demo workflow 使用 `DryRunInputDevice` 或 fake 输入设备实现执行
+- **WHEN** demo workflow 使用 DryRunInputDevice 或 fake 输入设备实现执行
 - **THEN** workflow 会记录预期的鼠标指针操作，并且不需要 macOS 自动化 API
 
 #### Scenario: workflow 不依赖 macOS
@@ -34,11 +30,11 @@
 
 ### Requirement: ScriptRunner 无需真实鼠标移动即可测试
 
-系统 SHALL 允许使用 `DryRunInputDevice` 或 fake 输入设备验证 `ScriptRunner` 行为，该设备会捕获 runner 请求的操作而不移动真实鼠标。
+系统 SHALL 允许使用 `DryRunInputDevice` 验证 `ScriptRunner` 行为，该设备会捕获 runner 请求的操作而不移动真实鼠标。
 
 #### Scenario: 测试验证操作顺序
 
-- **WHEN** ScriptRunner 使用 fake 输入设备进行测试
+- **WHEN** ScriptRunner 使用 DryRunInputDevice 进行测试
 - **THEN** 测试可以断言请求的鼠标指针操作顺序和参数
 
 ### Requirement: ScriptRunner 执行脚本动作模型
@@ -63,7 +59,7 @@
 #### Scenario: runner 执行等待动作
 
 - **WHEN** ScriptRunner 执行等待动作
-- **THEN** 它会调用 `InputDevice.wait()` 等待动作指定的持续时间，并继续执行后续动作
+- **THEN** 它会等待动作指定的持续时间，并继续执行后续动作
 
 #### Scenario: runner 不执行独立移动动作
 

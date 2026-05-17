@@ -1,14 +1,14 @@
-"""实现桌面鼠标坐标读取 adapter。"""
+"""实现 engine.ports.PointerPositionReader — 通过 pyautogui 读取鼠标屏幕坐标。"""
 
 from __future__ import annotations
 
 from types import ModuleType
 
-from game_automation.core import AdapterSetupError
 from game_automation.domain import Point
+from game_automation.engine.ports import PointerPositionReader
 
 
-class PyAutoGuiPointerPositionReader:
+class PyAutoGuiPointerPositionReader(PointerPositionReader):
     def __init__(self, backend: ModuleType | None = None) -> None:
         """初始化鼠标坐标读取 adapter，可注入 backend 便于测试。"""
         self._backend = backend if backend is not None else self._load_backend()
@@ -18,7 +18,7 @@ class PyAutoGuiPointerPositionReader:
         try:
             position = self._backend.position()
         except Exception as exc:
-            raise AdapterSetupError(
+            raise RuntimeError(
                 "failed to read pointer position. Check desktop automation permissions."
             ) from exc
 
@@ -36,7 +36,7 @@ class PyAutoGuiPointerPositionReader:
         try:
             import pyautogui
         except ModuleNotFoundError as exc:
-            raise AdapterSetupError(
+            raise RuntimeError(
                 "pyautogui is required for coordinate recording. "
                 "Install dependencies with: pip install -e \".[dev]\""
             ) from exc

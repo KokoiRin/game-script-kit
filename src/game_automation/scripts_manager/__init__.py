@@ -1,8 +1,8 @@
 """导出项目内置脚本定义和默认脚本注册表。"""
 
-from game_automation.scripts.catalog import DEFAULT_SCRIPT_CATALOG
-from game_automation.scripts.demo import DEMO_SCRIPT, build_demo_script
-from game_automation.scripts.recorded_clicks import (
+from game_automation.scripts_manager.catalog import DEFAULT_SCRIPT_CATALOG
+from game_automation.scripts_manager.demo import DEMO_SCRIPT, build_demo_script
+from game_automation.scripts_manager.recorded_clicks import (
     RECORDED_CLICKS_SCRIPT,
     build_recorded_clicks_script,
 )

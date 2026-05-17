@@ -26,23 +26,22 @@ src/game_automation/
 │   ├── geometry.py      # Point / Rect
 │   ├── windows.py       # ScreenWindow / AreaWindow
 │   └── script.py        # Script
-├── core/
-│   ├── script_catalog.py # ScriptCatalog / ScriptNotFoundError
-│   ├── runner.py         # ScriptRunner
-│   └── ports.py          # InputDevice / PointerPositionReader / KeyStateReader
-├── scripts/              # 可编辑的命名脚本定义
+├── engine/               # 脚本执行引擎
+│   ├── ports.py          # InputDevice / PointerPositionReader / KeyStateReader
+│   └── runner.py         # ScriptRunner
+├── scripts_manager/      # 脚本定义与注册管理
 │   ├── demo.py
 │   ├── recorded_clicks.py
-│   └── catalog.py        # DEFAULT_SCRIPT_CATALOG
-├── adapters/
-│   ├── desktop/          # 桌面通用 adapter
+│   └── catalog.py        # ScriptCatalog + DEFAULT_SCRIPT_CATALOG
+├── adapters/             # 平台适配与模拟设备（实现 engine.ports）
+│   ├── desktop/
 │   │   ├── pointer_position.py
 │   │   └── terminal_keyboard.py
-│   └── macos/            # macOS 专用 adapter
-│       └── pointer_device.py
+│   ├── macos/
+│   │   └── pointer_device.py
+│   └── dry_run.py        # DryRunInputDevice / RecordedOperation
 ├── tools/
 │   └── coordinate_recorder.py # 坐标记录工具核心循环
-├── cli.py                # demo CLI
 ├── script_cli.py         # 按名称列出和运行脚本
 └── coordinate_recorder_cli.py # 坐标记录工具 CLI
 ```
@@ -61,7 +60,7 @@ cd /path/to/game-script-kit
 
 ## 列出和运行命名脚本
 
-推荐使用 `game-scripts` 统一管理脚本。脚本定义放在 `src/game_automation/scripts/`，默认注册表在 `src/game_automation/scripts/catalog.py`。
+推荐使用 `game-scripts` 统一管理脚本。脚本定义放在 `src/game_automation/scripts_manager/`，默认注册表在 `src/game_automation/scripts_manager/catalog.py`。
 
 列出当前可用脚本：
 
@@ -94,41 +93,20 @@ cd /path/to/game-script-kit
 
 新增脚本的最小流程：
 
-1. 在 `src/game_automation/scripts/<script_name>.py` 新增一个 `Script(name="<script-name>", ...)`。
-2. 在 `src/game_automation/scripts/catalog.py` 把它加入 `DEFAULT_SCRIPT_CATALOG`。
+1. 在 `src/game_automation/scripts_manager/<script_name>.py` 新增一个 `Script(name="<script-name>", ...)`。
+2. 在 `src/game_automation/scripts_manager/catalog.py` 把它加入 `DEFAULT_SCRIPT_CATALOG`。
 3. 运行 `.venv/bin/game-scripts list` 确认脚本名称可见。
 4. 运行 `.venv/bin/game-scripts run <script-name> --dry-run` 检查动作顺序。
 
-编辑已有脚本时，直接修改 `src/game_automation/scripts/` 下对应文件里的动作序列，不需要修改 runner 或平台 adapter。
+编辑已有脚本时，直接修改 `src/game_automation/scripts_manager/` 下对应文件里的动作序列，不需要修改 runner 或平台 adapter。
 
 ## 运行 demo dry-run
 
-dry-run 只打印脚本动作，不会移动真实鼠标。
+通过统一入口 dry-run 检查 demo 脚本动作：
 
 ```bash
-.venv/bin/python -m game_automation.cli --dry-run
+.venv/bin/game-scripts run demo --dry-run
 ```
-
-示例输出：
-
-```text
-RecordedOperation(name='click', target=Point(x=300, y=300), start=None, end=None, duration_seconds=None)
-RecordedOperation(name='drag_to', target=None, start=Point(x=300, y=300), end=Point(x=460, y=360), duration_seconds=0.4)
-```
-
-## 运行 macOS demo
-
-macOS demo 会真的移动和点击鼠标。
-
-```bash
-.venv/bin/python -m game_automation.cli --macos
-```
-
-运行前确认：
-
-- 已安装依赖。
-- 终端或 Python 运行时已在 macOS 系统设置中获得“辅助功能”权限。
-- demo 坐标适合当前屏幕，避免点到危险位置。
 
 ## 记录鼠标坐标
 
@@ -157,38 +135,24 @@ macOS demo 会真的移动和点击鼠标。
 
 这个脚本会按顺序执行：等待 3 秒，点击 `(242, 92)`，等待 3 秒，点击 `(736, 323)`，等待 10 秒，点击 `(741, 400)` 后结束。
 
-推荐使用统一命名脚本入口：
-
 ```bash
 .venv/bin/game-scripts run recorded-clicks --dry-run
 .venv/bin/game-scripts run recorded-clicks
 ```
 
-兼容入口仍然保留。先用 dry-run 检查顺序：
-
-```bash
-.venv/bin/game-recorded-clicks --dry-run
-```
-
-确认无误后再真实执行：
-
-```bash
-.venv/bin/game-recorded-clicks --macos
-```
-
 ## 使用核心模型
 
 ```python
-from game_automation.core import (
+from game_automation.domain import (
     AreaWindow,
     Click,
     Drag,
     Point,
     Rect,
     Script,
-    ScriptRunner,
     Wait,
 )
+from game_automation.engine.runner import ScriptRunner
 
 script = Script(
     name="sample-clicks",

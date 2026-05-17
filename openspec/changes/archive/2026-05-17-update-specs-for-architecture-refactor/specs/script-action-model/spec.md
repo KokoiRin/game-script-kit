@@ -1,9 +1,5 @@
-# script-action-model Specification
+## MODIFIED Requirements
 
-## Purpose
-定义脚本、动作、窗口、点和矩形的核心领域模型（位于 `domain` 包内），以及脚本执行时的坐标解析规则。
-
-## Requirements
 ### Requirement: Script 由有序动作组成
 
 系统 SHALL 在 `domain.script` 中提供 `Script` 领域模型，用于保存一个稳定脚本名称、一个执行窗口和一组按顺序编排的动作。

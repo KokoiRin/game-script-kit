@@ -1,20 +1,21 @@
-"""实现 macOS 鼠标指针 adapter，将核心协议转换为 pyautogui 调用。"""
+"""实现 engine.ports.InputDevice — 通过 pyautogui 驱动 macOS 鼠标。"""
 
 from __future__ import annotations
 
 import platform
+import time
 from types import ModuleType
 
-from game_automation.core.errors import AdapterSetupError, AdapterUnsupportedError
 from game_automation.domain import Point
+from game_automation.engine.ports import InputDevice
 
 
-class MacOSPointerDevice:
+class MacOSPointerDevice(InputDevice):
     def __init__(self, backend: ModuleType | None = None) -> None:
         """初始化 macOS 鼠标指针 adapter，可注入 backend 以便测试。"""
         if platform.system() != "Darwin" and backend is None:
             # 没有注入测试 backend 时，真实 adapter 只能在 macOS 上运行。
-            raise AdapterUnsupportedError("macOS pointer adapter requires Darwin")
+            raise RuntimeError("macOS pointer adapter requires Darwin")
         self._backend = backend if backend is not None else self._load_backend()
         self._configure_backend()
 
@@ -39,6 +40,10 @@ class MacOSPointerDevice:
             button="left",
         )
 
+    def wait(self, duration_seconds: float) -> None:
+        """等待指定秒数。"""
+        time.sleep(duration_seconds)
+
     def _move_to(self, target: Point, duration_seconds: float = 0.0) -> None:
         """在 adapter 内部移动指针，用于支持拖拽起点定位。"""
         self._call_backend("moveTo", target.x, target.y, duration=duration_seconds)
@@ -48,7 +53,7 @@ class MacOSPointerDevice:
         try:
             import pyautogui
         except ModuleNotFoundError as exc:
-            raise AdapterSetupError(
+            raise RuntimeError(
                 "pyautogui is required for the macOS pointer adapter. "
                 "Install dependencies with: pip install -e \".[dev]\""
             ) from exc
@@ -60,7 +65,7 @@ class MacOSPointerDevice:
             self._backend.FAILSAFE = True
             self._backend.PAUSE = 0.05
         except Exception as exc:  # pragma: no cover - defensive for alternate backends.
-            raise AdapterSetupError("failed to configure macOS pointer backend") from exc
+            raise RuntimeError("failed to configure macOS pointer backend") from exc
 
     def _call_backend(self, method_name: str, *args: object, **kwargs: object) -> None:
         """调用底层 backend，并把底层异常包装成 adapter 级错误。"""
@@ -68,7 +73,7 @@ class MacOSPointerDevice:
         try:
             method(*args, **kwargs)
         except Exception as exc:
-            raise AdapterSetupError(
+            raise RuntimeError(
                 "macOS pointer operation failed. Check Accessibility permissions "
                 "for the terminal or Python runtime."
             ) from exc

@@ -6,7 +6,6 @@ from types import SimpleNamespace
 import pytest
 
 from game_automation.adapters.macos import MacOSPointerDevice
-from game_automation.core import AdapterSetupError, AdapterUnsupportedError
 from game_automation.domain import Point
 
 
@@ -51,7 +50,7 @@ def test_macos_adapter_rejects_non_darwin_without_injected_backend(monkeypatch: 
     """验证未注入 backend 时，非 macOS 环境会被拒绝。"""
     monkeypatch.setattr(platform, "system", lambda: "Linux")
 
-    with pytest.raises(AdapterUnsupportedError, match="requires Darwin"):
+    with pytest.raises(RuntimeError, match="requires Darwin"):
         MacOSPointerDevice()
 
 
@@ -64,5 +63,5 @@ def test_macos_adapter_wraps_backend_errors() -> None:
     )
     device = MacOSPointerDevice(backend=backend)  # type: ignore[arg-type]
 
-    with pytest.raises(AdapterSetupError, match="Accessibility permissions"):
+    with pytest.raises(RuntimeError, match="Accessibility permissions"):
         device.click(Point(1, 2))

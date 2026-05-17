@@ -1,9 +1,5 @@
-# script-management Specification
+## MODIFIED Requirements
 
-## Purpose
-定义脚本管理能力（`scripts_manager` 包），使具名脚本可被集中保存、查找和通过 `star` CLI 按名称启动。
-
-## Requirements
 ### Requirement: 命名脚本可被集中管理
 
 系统 SHALL 在 `scripts_manager.catalog` 中提供 `ScriptCatalog`，用于集中保存和通过名称查找多个具名 `Script` 定义。
@@ -40,23 +36,23 @@
 #### Scenario: 新增脚本不需要新增专用 CLI
 
 - **WHEN** 用户新增一个脚本定义并注册到 `ScriptCatalog` 中
-- **THEN** 用户可以通过 `star run <name>` 按名称启动该脚本
+- **THEN** 用户可以通过通用脚本运行入口按名称启动该脚本
 
 ### Requirement: CLI 支持按名称启动脚本
 
-系统 SHALL 提供 `star` 命令行入口，允许用户通过脚本名称选择并启动脚本。
+系统 SHALL 提供命令行入口（`script_cli.py`），允许用户通过脚本名称选择并启动脚本。
 
 #### Scenario: dry-run 指定脚本
 
-- **WHEN** 用户通过 `star run <name> --dry-run` 运行脚本
-- **THEN** 系统会使用 `DryRunInputDevice` 按该脚本的动作顺序即时打印计划执行的操作，而不移动真实鼠标
+- **WHEN** 用户通过 CLI 使用已存在的脚本名称和 dry-run 模式运行脚本
+- **THEN** 系统会使用 `DryRunInputDevice` 按该脚本的动作顺序打印计划执行的操作，而不移动真实鼠标
 
 #### Scenario: macOS 模式指定脚本
 
-- **WHEN** 用户通过 `star run <name>` 运行脚本（默认使用 macOS adapter）
+- **WHEN** 用户通过 CLI 使用已存在的脚本名称和 macOS 模式运行脚本
 - **THEN** 系统会加载 macOS `InputDevice` adapter 并执行该脚本
 
 #### Scenario: CLI 报告未知脚本
 
-- **WHEN** 用户通过 `star run <name>` 指定不存在的脚本名称
+- **WHEN** 用户通过 CLI 指定不存在的脚本名称
 - **THEN** 系统会返回非零退出码，并提示该脚本不存在
