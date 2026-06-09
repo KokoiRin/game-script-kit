@@ -59,6 +59,18 @@ def test_actions_do_not_expose_move_or_mouse_button() -> None:
     assert not hasattr(actions, "MouseButton")
 
 
+def test_wait_rejects_negative_duration() -> None:
+    """验证等待动作拒绝负数持续时间。"""
+    with pytest.raises(ValueError, match="wait duration_seconds"):
+        Wait(-0.1)
+
+
+def test_drag_rejects_negative_duration() -> None:
+    """验证拖拽动作拒绝负数持续时间。"""
+    with pytest.raises(ValueError, match="drag duration_seconds"):
+        Drag(Point(1, 2), Point(3, 4), duration_seconds=-0.1)
+
+
 def test_script_binds_window_at_script_level() -> None:
     """验证窗口属于脚本，而不是属于单个动作。"""
     window = AreaWindow(Rect(10, 20, 100, 200))
