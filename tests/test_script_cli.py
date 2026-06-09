@@ -69,3 +69,95 @@ def test_star_cli_reports_unknown_script(capsys) -> None:
     captured = capsys.readouterr()
     assert captured.out == ""
     assert "unknown script: missing" in captured.err
+
+
+def test_star_cli_recorder_injects_color_reader(monkeypatch) -> None:
+    """验证 recorder 子命令会组装坐标、按键和取色 adapter。"""
+    import game_automation.adapters.desktop as desktop
+    import game_automation.star_cli as star_cli
+    import game_automation.tools.coordinate_recorder as recorder_module
+
+    created = {}
+
+    class FakePointerReader:
+        def __init__(self) -> None:
+            """标记 fake 坐标 reader 已创建。"""
+            created["pointer"] = self
+
+    class FakeKeyReader:
+        def __init__(self) -> None:
+            """标记 fake 按键 reader 已创建。"""
+            created["key"] = self
+            self.closed = False
+
+        def close(self) -> None:
+            """记录 CLI finally 会关闭按键 reader。"""
+            self.closed = True
+
+    class FakeColorReader:
+        def __init__(self) -> None:
+            """标记 fake 取色 reader 已创建。"""
+            created["color"] = self
+
+    class FakeRecorder:
+        def __init__(self, *, pointer_reader, key_reader, color_reader, **kwargs) -> None:
+            """捕获 CLI 注入到 recorder 的依赖。"""
+            created["recorder_args"] = (pointer_reader, key_reader, color_reader, kwargs)
+
+        def run(self) -> None:
+            """让测试中的 recorder 立即结束。"""
+
+    monkeypatch.setattr(desktop, "PyAutoGuiPointerPositionReader", FakePointerReader)
+    monkeypatch.setattr(desktop, "TerminalKeyStateReader", FakeKeyReader)
+    monkeypatch.setattr(desktop, "PyAutoGuiPixelColorReader", FakeColorReader)
+    monkeypatch.setattr(recorder_module, "CoordinateRecorder", FakeRecorder)
+    monkeypatch.setitem(__import__("sys").modules, "game_automation.adapters.desktop", desktop)
+    monkeypatch.setitem(
+        __import__("sys").modules,
+        "game_automation.tools.coordinate_recorder",
+        recorder_module,
+    )
+
+    assert star_cli.main(["recorder"]) == 0
+
+    pointer_reader, key_reader, color_reader, kwargs = created["recorder_args"]
+    assert pointer_reader is created["pointer"]
+    assert key_reader is created["key"]
+    assert color_reader is created["color"]
+    assert kwargs["display_interval_seconds"] == 1.0
+    assert kwargs["poll_interval_seconds"] == 0.05
+    assert created["key"].closed is True
+
+
+def test_star_cli_recorder_reports_color_reader_setup_error(monkeypatch, capsys) -> None:
+    """验证取色 adapter 初始化失败时 CLI 返回 setup 错误。"""
+    import game_automation.adapters.desktop as desktop
+    import game_automation.star_cli as star_cli
+
+    class FakePointerReader:
+        def __init__(self) -> None:
+            """创建 fake 坐标 reader。"""
+
+    class FakeKeyReader:
+        def __init__(self) -> None:
+            """创建 fake 按键 reader。"""
+            self.closed = False
+
+        def close(self) -> None:
+            """记录按键 reader 被关闭。"""
+            self.closed = True
+
+    class FailingColorReader:
+        def __init__(self) -> None:
+            """模拟取色 adapter setup 失败。"""
+            raise RuntimeError("screen color unavailable")
+
+    monkeypatch.setattr(desktop, "PyAutoGuiPointerPositionReader", FakePointerReader)
+    monkeypatch.setattr(desktop, "TerminalKeyStateReader", FakeKeyReader)
+    monkeypatch.setattr(desktop, "PyAutoGuiPixelColorReader", FailingColorReader)
+    monkeypatch.setitem(__import__("sys").modules, "game_automation.adapters.desktop", desktop)
+
+    assert star_cli.main(["recorder"]) == 1
+
+    captured = capsys.readouterr()
+    assert "coordinate recorder setup failed: screen color unavailable" in captured.err

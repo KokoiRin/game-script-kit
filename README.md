@@ -108,27 +108,37 @@ cd /path/to/game-script-kit
 .venv/bin/game-scripts run demo --dry-run
 ```
 
-## 记录鼠标坐标
+## 记录鼠标坐标和颜色
 
-坐标记录工具是独立工具，不走 `ScriptRunner`，也不会创建脚本动作。它记录的是屏幕绝对坐标。
+坐标记录工具是独立工具，不走 `ScriptRunner`，也不会创建脚本动作。它读取的是屏幕绝对坐标，以及该坐标点当前的 RGB 颜色。
 
 ```bash
-.venv/bin/game-coordinate-recorder
+.venv/bin/star recorder
 ```
 
 交互方式：
 
-- 每 1 秒打印一次当前鼠标坐标。
+- 每 1 秒打印一次当前鼠标坐标和该点颜色。
 - 每 50ms 检查一次按键状态。
-- 按 `1` 时立即重新读取当前鼠标坐标并记录。
+- 按 `1` 时立即重新读取当前鼠标坐标和该点颜色并记录。
 - 按 `Q` 或 `q` 结束。
-- 结束后打印本次记录的所有坐标。
+- 结束后打印本次记录的所有坐标和对应颜色。
+
+输出示例：
+
+```text
+current: Point(x=242, y=92) #78828C
+recorded: Point(x=242, y=92) #78828C
+recorded points:
+1. Point(x=242, y=92) #78828C
+```
 
 运行前确认：
 
 - 已安装依赖。
 - 终端窗口保持焦点；默认按键 adapter 从当前终端读取 `1` 和 `Q/q`，不使用全局键盘监听。
 - 终端或 Python 运行时可能仍需要系统允许读取鼠标位置。
+- macOS 可能需要给终端或 Python 运行时授予“屏幕录制”权限，否则截图取色会失败。
 - `1` 和 `Q/q` 需要正常按下，极短瞬时敲击可能被 50ms 轮询错过。
 
 ## 运行已记录点击脚本
@@ -177,6 +187,7 @@ ScriptRunner(device).run(script)
 
 ```bash
 .venv/bin/python -m pytest
+.venv/bin/python -m pytest --cov=game_automation --cov-report=term-missing
 ```
 
 ## 项目状态

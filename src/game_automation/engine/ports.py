@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from game_automation.domain import Point
+from game_automation.domain import Color, Point
 
 
 class InputDevice(Protocol):
@@ -21,6 +21,12 @@ class InputDevice(Protocol):
 class PointerPositionReader(Protocol):
     def current_position(self) -> Point:
         """读取当前指针的屏幕坐标。"""
+
+
+class PixelColorReader(Protocol):
+    def read_color(self, point: Point) -> Color:
+        """读取指定屏幕坐标点的 RGB 颜色。"""
+        ...
 
 
 class KeyStateReader(Protocol):

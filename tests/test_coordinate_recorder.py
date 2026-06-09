@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import game_automation.domain.actions as actions
-from game_automation.domain import Point
-from game_automation.tools.coordinate_recorder import CoordinateRecorder
+import pytest
+from game_automation.domain import Color, Point
+from game_automation.tools.coordinate_recorder import CoordinateRecorder, RecordedPoint
 
 
 class FakePointerReader:
@@ -18,6 +19,19 @@ class FakePointerReader:
         point = self._points[min(self.calls, len(self._points) - 1)]
         self.calls += 1
         return point
+
+
+class FakeColorReader:
+    def __init__(self, colors: list[Color]) -> None:
+        """初始化按顺序返回颜色的 fake reader。"""
+        self._colors = colors
+        self.points: list[Point] = []
+
+    def read_color(self, point: Point) -> Color:
+        """返回下一条颜色，耗尽后重复最后一条。"""
+        self.points.append(point)
+        index = min(len(self.points) - 1, len(self._colors) - 1)
+        return self._colors[index]
 
 
 class FakeKeyReader:
@@ -57,11 +71,13 @@ def test_display_interval_does_not_block_key_polling() -> None:
     pointer = FakePointerReader([Point(1, 1), Point(2, 2)])
     keys = FakeKeyReader(states)
     clock = FakeClock()
+    color_reader = FakeColorReader([Color(10, 20, 30), Color(40, 50, 60)])
     outputs: list[str] = []
 
     recorder = CoordinateRecorder(
         pointer_reader=pointer,
         key_reader=keys,
+        color_reader=color_reader,
         sleeper=clock.sleep,
         clock=clock,
         output=outputs.append,
@@ -69,8 +85,9 @@ def test_display_interval_does_not_block_key_polling() -> None:
 
     recorder.run()
 
-    assert outputs.count("current: Point(x=1, y=1)") == 1
-    assert outputs.count("current: Point(x=2, y=2)") == 1
+    assert outputs.count("current: Point(x=1, y=1) #0A141E") == 1
+    assert outputs.count("current: Point(x=2, y=2) #28323C") == 1
+    assert color_reader.points[:2] == [Point(1, 1), Point(2, 2)]
     assert clock.sleeps == [0.05] * 20
 
 
@@ -79,18 +96,20 @@ def test_holding_one_records_only_once() -> None:
     pointer = FakePointerReader([Point(0, 0), Point(10, 10), Point(20, 20)])
     keys = FakeKeyReader([{"1"}, {"1"}, {"1"}, {"Q"}])
     clock = FakeClock()
+    color_reader = FakeColorReader([Color(1, 1, 1), Color(2, 2, 2), Color(3, 3, 3)])
     outputs: list[str] = []
 
     recorded = CoordinateRecorder(
         pointer_reader=pointer,
         key_reader=keys,
+        color_reader=color_reader,
         sleeper=clock.sleep,
         clock=clock,
         output=outputs.append,
     ).run()
 
-    assert recorded == (Point(10, 10),)
-    assert outputs.count("recorded: Point(x=10, y=10)") == 1
+    assert recorded == (RecordedPoint(Point(10, 10), Color(2, 2, 2)),)
+    assert outputs.count("recorded: Point(x=10, y=10) #020202") == 1
 
 
 def test_record_rereads_latest_position_and_q_exits_quickly() -> None:
@@ -98,17 +117,19 @@ def test_record_rereads_latest_position_and_q_exits_quickly() -> None:
     pointer = FakePointerReader([Point(1, 1), Point(9, 9)])
     keys = FakeKeyReader([{"1", "q"}])
     clock = FakeClock()
+    color_reader = FakeColorReader([Color(5, 5, 5), Color(9, 9, 9)])
     outputs: list[str] = []
 
     recorded = CoordinateRecorder(
         pointer_reader=pointer,
         key_reader=keys,
+        color_reader=color_reader,
         sleeper=clock.sleep,
         clock=clock,
         output=outputs.append,
     ).run()
 
-    assert recorded == (Point(9, 9),)
+    assert recorded == (RecordedPoint(Point(9, 9), Color(9, 9, 9)),)
     assert pointer.calls == 2
     assert clock.sleeps == []
 
@@ -117,3 +138,26 @@ def test_recorder_does_not_add_script_actions() -> None:
     """验证工具没有向脚本动作模型添加获取坐标动作。"""
     assert not hasattr(actions, "GetCoordinate")
     assert not hasattr(actions, "RecordCoordinate")
+
+
+@pytest.mark.parametrize(
+    ("display_interval_seconds", "poll_interval_seconds", "message"),
+    [
+        (0.0, 0.05, "display_interval_seconds"),
+        (1.0, 0.0, "poll_interval_seconds"),
+    ],
+)
+def test_recorder_rejects_non_positive_polling_intervals(
+    display_interval_seconds: float,
+    poll_interval_seconds: float,
+    message: str,
+) -> None:
+    """验证记录器拒绝非正数显示和轮询间隔。"""
+    with pytest.raises(ValueError, match=message):
+        CoordinateRecorder(
+            pointer_reader=FakePointerReader([Point(1, 1)]),
+            key_reader=FakeKeyReader([{"Q"}]),
+            color_reader=FakeColorReader([Color(1, 2, 3)]),
+            display_interval_seconds=display_interval_seconds,
+            poll_interval_seconds=poll_interval_seconds,
+        )

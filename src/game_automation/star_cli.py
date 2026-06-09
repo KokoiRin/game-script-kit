@@ -39,6 +39,7 @@ def _run_script(args: argparse.Namespace) -> int:
 def _run_recorder(args: argparse.Namespace) -> int:
     """启动坐标记录工具。"""
     from game_automation.adapters.desktop import (
+        PyAutoGuiPixelColorReader,
         PyAutoGuiPointerPositionReader,
         TerminalKeyStateReader,
     )
@@ -50,6 +51,7 @@ def _run_recorder(args: argparse.Namespace) -> int:
         recorder = CoordinateRecorder(
             pointer_reader=PyAutoGuiPointerPositionReader(),
             key_reader=key_reader,
+            color_reader=PyAutoGuiPixelColorReader(),
             display_interval_seconds=args.display_interval,
             poll_interval_seconds=args.poll_interval,
         )
