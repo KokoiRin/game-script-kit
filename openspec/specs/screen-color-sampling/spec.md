@@ -39,3 +39,14 @@ TBD - created by archiving change add-coordinate-recorder-color-sampling. Update
 #### Scenario: adapter 延迟加载平台依赖
 - **WHEN** 只导入业务层、领域层或测试模块
 - **THEN** 系统不会因为尚未初始化真实桌面取色 adapter 而立即导入或要求平台自动化依赖
+
+### Requirement: 脚本运行时复用颜色读取端口
+系统 SHALL 允许脚本运行时通过现有 `PixelColorReader` 端口读取屏幕颜色以评估条件。该能力 MUST 保持为独立屏幕读取端口，不得并入 `InputDevice`。
+
+#### Scenario: runner 通过取色端口读取条件点颜色
+- **WHEN** runner 需要评估单点颜色条件
+- **THEN** 它会调用 `PixelColorReader.read_color(point)` 获取该点颜色
+
+#### Scenario: 输入设备端口不承担取色职责
+- **WHEN** 系统新增条件分支脚本能力
+- **THEN** `InputDevice` 仍然只提供点击、拖拽和等待能力，不提供读取颜色方法

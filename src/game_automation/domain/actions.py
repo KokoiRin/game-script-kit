@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TypeAlias
 
+from game_automation.domain.conditions import Condition
 from game_automation.domain.geometry import Point
 
 
@@ -48,5 +49,17 @@ class Repeat:
             raise ValueError("repeat requires at least one step")
 
 
+@dataclass(frozen=True, slots=True)
+class If:
+    condition: Condition
+    then_steps: tuple["Step", ...]
+    else_steps: tuple["Step", ...] = ()
+
+    def __post_init__(self) -> None:
+        """校验条件分支至少包含一个 then 步骤。"""
+        if len(self.then_steps) == 0:
+            raise ValueError("if requires at least one then step")
+
+
 PrimitiveAction: TypeAlias = Click | Drag | Wait
-Step: TypeAlias = PrimitiveAction | Repeat
+Step: TypeAlias = PrimitiveAction | Repeat | If

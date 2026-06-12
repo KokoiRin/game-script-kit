@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from game_automation.adapters.dry_run import DryRunInputDevice
-from game_automation.domain import Point
+from game_automation.adapters.dry_run import DryRunInputDevice, DryRunPixelColorReader
+from game_automation.domain import Color, Point
 
 
 def test_dry_run_input_device_prints_click(capsys) -> None:
@@ -25,3 +25,10 @@ def test_dry_run_input_device_prints_wait(capsys) -> None:
     DryRunInputDevice().wait(0.25)
 
     assert capsys.readouterr().out == "wait 0.25s\n"
+
+
+def test_dry_run_pixel_color_reader_returns_fixed_color() -> None:
+    """验证 dry-run 取色 reader 始终返回固定颜色。"""
+    reader = DryRunPixelColorReader(Color(1, 2, 3))
+
+    assert reader.read_color(Point(10, 20)) == Color(1, 2, 3)

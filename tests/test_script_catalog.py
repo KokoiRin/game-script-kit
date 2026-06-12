@@ -2,7 +2,11 @@
 
 import pytest
 
-from game_automation.scripts_manager.catalog import ScriptCatalog, ScriptNotFoundError
+from game_automation.scripts_manager.catalog import (
+    DEFAULT_SCRIPT_CATALOG,
+    ScriptCatalog,
+    ScriptNotFoundError,
+)
 from game_automation.domain import Click, Point, ScreenWindow, Script
 
 
@@ -38,3 +42,8 @@ def test_script_catalog_rejects_duplicate_names() -> None:
     """验证重复脚本名称会在注册阶段被拒绝。"""
     with pytest.raises(ValueError, match="duplicate script name: same"):
         ScriptCatalog((build_script("same"), build_script("same")))
+
+
+def test_default_catalog_includes_conditional_color_demo() -> None:
+    """验证默认注册表包含颜色条件分支示例脚本。"""
+    assert "conditional-color-demo" in DEFAULT_SCRIPT_CATALOG.list_names()

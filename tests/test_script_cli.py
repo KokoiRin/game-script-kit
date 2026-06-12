@@ -2,7 +2,7 @@
 
 from types import ModuleType
 
-from game_automation.domain import Point
+from game_automation.domain import Color, Point
 from game_automation.engine.ports import InputDevice
 from game_automation.star_cli import main
 
@@ -12,7 +12,7 @@ def test_star_cli_lists_available_scripts(capsys) -> None:
     assert main(["list"]) == 0
 
     output = capsys.readouterr().out.splitlines()
-    assert output == ["demo", "recorded-clicks", "repeat-demo"]
+    assert output == ["demo", "recorded-clicks", "repeat-demo", "conditional-color-demo"]
 
 
 def test_star_cli_runs_named_script_with_dry_run(capsys) -> None:
@@ -45,6 +45,37 @@ def test_star_cli_runs_repeat_demo_with_dry_run(capsys) -> None:
         "click Point(x=120, y=180)",
         "wait 1s",
     ]
+
+
+def test_star_cli_runs_conditional_color_demo_with_default_dry_run_color(capsys) -> None:
+    """验证条件分支脚本 dry-run 默认固定颜色会走 else 分支。"""
+    assert main(["run", "conditional-color-demo", "--dry-run"]) == 0
+
+    output = capsys.readouterr().out.splitlines()
+    assert output == [
+        "click Point(x=300, y=400)",
+        "wait 0.5s",
+    ]
+
+
+def test_star_cli_runs_conditional_color_demo_with_custom_dry_run_color(capsys) -> None:
+    """验证条件分支脚本 dry-run 可用指定颜色走 then 分支。"""
+    assert main(["run", "conditional-color-demo", "--dry-run", "--dry-run-color", "#102030"]) == 0
+
+    output = capsys.readouterr().out.splitlines()
+    assert output == [
+        "click Point(x=100, y=200)",
+        "wait 0.25s",
+    ]
+
+
+def test_star_cli_reports_invalid_dry_run_color(capsys) -> None:
+    """验证非法 dry-run 颜色会作为运行配置错误报告。"""
+    assert main(["run", "conditional-color-demo", "--dry-run", "--dry-run-color", "bad"]) == 2
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "script run configuration failed: color must match" in captured.err
 
 
 def test_star_cli_run_defaults_to_macos(monkeypatch, capsys) -> None:
@@ -80,6 +111,70 @@ def test_star_cli_run_defaults_to_macos(monkeypatch, capsys) -> None:
         Point(741, 400),
     ]
     assert drags == []
+
+
+def test_star_cli_run_injects_color_reader_for_conditional_script(monkeypatch, capsys) -> None:
+    """验证真实运行条件分支脚本时 CLI 会注入取色 adapter。"""
+    import game_automation.adapters.desktop as desktop
+
+    clicks = []
+    read_points = []
+
+    class FakeMacOSPointerDevice(InputDevice):
+        def click(self, target) -> None:
+            """记录真实模式点击请求。"""
+            clicks.append(target)
+
+        def drag_to(self, start, end, duration_seconds: float = 0.0) -> None:
+            """条件示例脚本不会拖拽。"""
+
+        def wait(self, duration_seconds: float) -> None:
+            """测试中不真实等待。"""
+
+    class FakePixelColorReader:
+        def __init__(self) -> None:
+            """标记 fake 取色 reader 已创建。"""
+
+        def read_color(self, point) -> Color:
+            """记录读取点并返回 then 分支颜色。"""
+            read_points.append(point)
+            return Color.from_hex("#102030")
+
+    fake_macos_module = ModuleType("game_automation.adapters.macos")
+    fake_macos_module.MacOSPointerDevice = FakeMacOSPointerDevice
+    monkeypatch.setitem(
+        __import__("sys").modules,
+        "game_automation.adapters.macos",
+        fake_macos_module,
+    )
+    monkeypatch.setattr(desktop, "PyAutoGuiPixelColorReader", FakePixelColorReader)
+    monkeypatch.setitem(__import__("sys").modules, "game_automation.adapters.desktop", desktop)
+
+    assert main(["run", "conditional-color-demo"]) == 0
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert read_points == [Point(50, 60)]
+    assert clicks == [Point(100, 200)]
+
+
+def test_star_cli_run_reports_color_reader_setup_error(monkeypatch, capsys) -> None:
+    """验证真实运行条件分支脚本时取色 adapter setup 失败会被报告。"""
+    import game_automation.adapters.desktop as desktop
+
+    class FailingPixelColorReader:
+        def __init__(self) -> None:
+            """模拟取色 adapter 初始化失败。"""
+            raise RuntimeError("screen color unavailable")
+
+    monkeypatch.setattr(desktop, "PyAutoGuiPixelColorReader", FailingPixelColorReader)
+    monkeypatch.setitem(__import__("sys").modules, "game_automation.adapters.desktop", desktop)
+
+    assert main(["run", "conditional-color-demo"]) == 1
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "script run setup failed: screen color unavailable" in captured.err
 
 
 def test_star_cli_reports_unknown_script(capsys) -> None:
