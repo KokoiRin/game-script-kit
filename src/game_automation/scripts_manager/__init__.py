@@ -6,11 +6,17 @@ from game_automation.scripts_manager.recorded_clicks import (
     RECORDED_CLICKS_SCRIPT,
     build_recorded_clicks_script,
 )
+from game_automation.scripts_manager.repeat_demo import (
+    REPEAT_DEMO_SCRIPT,
+    build_repeat_demo_script,
+)
 
 __all__ = [
     "DEFAULT_SCRIPT_CATALOG",
     "DEMO_SCRIPT",
     "RECORDED_CLICKS_SCRIPT",
+    "REPEAT_DEMO_SCRIPT",
     "build_demo_script",
     "build_recorded_clicks_script",
+    "build_repeat_demo_script",
 ]

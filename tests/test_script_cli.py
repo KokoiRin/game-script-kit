@@ -12,7 +12,7 @@ def test_star_cli_lists_available_scripts(capsys) -> None:
     assert main(["list"]) == 0
 
     output = capsys.readouterr().out.splitlines()
-    assert output == ["demo", "recorded-clicks"]
+    assert output == ["demo", "recorded-clicks", "repeat-demo"]
 
 
 def test_star_cli_runs_named_script_with_dry_run(capsys) -> None:
@@ -25,6 +25,26 @@ def test_star_cli_runs_named_script_with_dry_run(capsys) -> None:
     assert "Point(x=736, y=323)" in output
     assert "Point(x=741, y=400)" in output
     assert "wait 10s" in output
+
+
+def test_star_cli_runs_repeat_demo_with_dry_run(capsys) -> None:
+    """验证 repeat-demo 的 dry-run 会展开 Repeat 内部步骤。"""
+    assert main(["run", "repeat-demo", "--dry-run"]) == 0
+
+    output = capsys.readouterr().out.splitlines()
+    assert output == [
+        "wait 2s",
+        "click Point(x=120, y=180)",
+        "wait 1s",
+        "click Point(x=120, y=180)",
+        "wait 1s",
+        "click Point(x=120, y=180)",
+        "wait 1s",
+        "click Point(x=120, y=180)",
+        "wait 1s",
+        "click Point(x=120, y=180)",
+        "wait 1s",
+    ]
 
 
 def test_star_cli_run_defaults_to_macos(monkeypatch, capsys) -> None:

@@ -10,5 +10,6 @@ env/
 .pytest_cache/
 .coverage
 htmlcov/
+.hermes/
 
 .DS_Store

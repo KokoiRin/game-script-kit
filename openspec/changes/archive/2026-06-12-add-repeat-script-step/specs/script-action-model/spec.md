@@ -1,8 +1,5 @@
-# script-action-model Specification
+## MODIFIED Requirements
 
-## Purpose
-定义脚本、动作、窗口、点和矩形的核心领域模型（位于 `domain` 包内），以及脚本执行时的坐标解析规则。
-## Requirements
 ### Requirement: Script 由有序动作组成
 
 系统 SHALL 在 `domain.script` 中提供 `Script` 领域模型，用于保存一个稳定脚本名称、一个执行窗口和一组按顺序编排的步骤。脚本步骤可以包含原子动作步骤，也可以包含控制流步骤。
@@ -56,57 +53,7 @@
 - **WHEN** 调用方创建点击或拖拽动作步骤
 - **THEN** 动作不要求也不记录左键、右键或中键参数
 
-### Requirement: Window 表达动作坐标所属范围
-
-系统 SHALL 在 `domain.windows` 中定义 `Window` 协议，以及 `ScreenWindow` 和 `AreaWindow` 实现，用于表示脚本内点击和拖拽动作中点坐标所属的坐标范围。
-
-#### Scenario: 屏幕窗口使用屏幕坐标
-
-- **WHEN** 脚本绑定 `ScreenWindow`
-- **THEN** 脚本内动作点会被解释为屏幕绝对坐标
-
-#### Scenario: 区域窗口使用区域内坐标
-
-- **WHEN** 脚本绑定 `AreaWindow`
-- **THEN** 脚本内动作点会被解释为该区域左上角原点下的区域内坐标
-
-### Requirement: Rect 表达区域窗口范围
-
-系统 SHALL 在 `domain.geometry` 中提供 `Rect` 领域模型，用于记录 `AreaWindow` 在屏幕上的整体范围。
-
-#### Scenario: 区域矩形记录位置和尺寸
-
-- **WHEN** 调用方创建 `AreaWindow`
-- **THEN** 区域窗口会通过 `Rect` 记录左上角坐标、宽度和高度
-
-#### Scenario: 非法矩形被拒绝
-
-- **WHEN** 调用方使用非正数宽度或高度创建矩形
-- **THEN** 系统会拒绝该矩形
-
-### Requirement: Point 表达点击和拖拽位置
-
-系统 SHALL 在 `domain.geometry` 中提供 `Point` 领域模型，用于表达点击位置以及拖拽起点和终点。
-
-#### Scenario: 点记录二维坐标
-
-- **WHEN** 调用方创建 `Point`
-- **THEN** 点会记录 x 和 y 两个坐标值
-
-#### Scenario: 区域窗口解析点为屏幕坐标
-
-- **WHEN** `AreaWindow` 解析一个区域内点
-- **THEN** 解析结果会等于区域左上角坐标加上该点坐标
-
-#### Scenario: 屏幕窗口解析点为屏幕坐标
-
-- **WHEN** `ScreenWindow` 解析一个点
-- **THEN** 解析结果会保留该点的 x 和 y 坐标
-
-#### Scenario: 坐标解析不做边界夹取
-
-- **WHEN** `AreaWindow` 解析一个位于矩形范围外的点
-- **THEN** 解析结果仍然会按区域左上角坐标加上该点坐标计算
+## ADDED Requirements
 
 ### Requirement: Step 支持固定次数重复
 
