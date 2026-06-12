@@ -4,13 +4,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from game_automation.domain import Click, Drag, Repeat, Script, Step, Wait
-from game_automation.engine.ports import InputDevice
+from game_automation.domain import Click, Drag, If, Repeat, Script, Step, Wait
+from game_automation.engine.condition_evaluator import evaluate_condition
+from game_automation.engine.ports import InputDevice, PixelColorReader
 
 
 @dataclass(frozen=True, slots=True)
 class ScriptRunner:
     device: InputDevice
+    color_reader: PixelColorReader | None = None
 
     def run(self, script: Script) -> None:
         """按脚本步骤树顺序执行所有步骤。"""
@@ -31,6 +33,8 @@ class ScriptRunner:
             self._run_wait(step)
         elif isinstance(step, Repeat):
             self._run_repeat(script, step)
+        elif isinstance(step, If):
+            self._run_if(script, step)
         else:  # pragma: no cover
             raise TypeError(f"unsupported script step: {type(step).__name__}")
 
@@ -52,3 +56,14 @@ class ScriptRunner:
         """按固定次数递归执行 Repeat 内部步骤。"""
         for _ in range(step.times):
             self._run_steps(script, step.steps)
+
+    def _run_if(self, script: Script, step: If) -> None:
+        """按条件结果递归执行 then 或 else 分支。"""
+        if evaluate_condition(
+            step.condition,
+            window=script.window,
+            color_reader=self.color_reader,
+        ):
+            self._run_steps(script, step.then_steps)
+        else:
+            self._run_steps(script, step.else_steps)

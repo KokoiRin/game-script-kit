@@ -5,7 +5,10 @@ import pytest
 from game_automation.domain import (
     AreaWindow,
     Click,
+    Color,
+    ColorIs,
     Drag,
+    If,
     Point,
     Rect,
     Repeat,
@@ -125,3 +128,73 @@ def test_repeat_allows_nested_steps() -> None:
     outer = Repeat(times=3, steps=(nested, Wait(0.1)))
 
     assert outer.steps == (nested, Wait(0.1))
+
+
+def test_color_condition_preserves_point_color_and_tolerance() -> None:
+    """验证颜色条件会保留点位、期望颜色和容差。"""
+    condition = ColorIs(
+        point=Point(10, 20),
+        expected=Color.from_hex("#112233"),
+        tolerance=7,
+    )
+
+    assert condition.point == Point(10, 20)
+    assert condition.expected == Color(17, 34, 51)
+    assert condition.tolerance == 7
+
+
+def test_color_condition_defaults_to_exact_match() -> None:
+    """验证颜色条件默认使用精确匹配。"""
+    condition = ColorIs(point=Point(1, 2), expected=Color(1, 2, 3))
+
+    assert condition.tolerance == 0
+
+
+def test_color_condition_rejects_invalid_tolerance() -> None:
+    """验证颜色条件拒绝非法容差。"""
+    with pytest.raises(ValueError, match="color tolerance"):
+        ColorIs(point=Point(1, 2), expected=Color(1, 2, 3), tolerance=-1)
+
+    with pytest.raises(ValueError, match="color tolerance"):
+        ColorIs(point=Point(1, 2), expected=Color(1, 2, 3), tolerance=256)
+
+
+def test_if_preserves_condition_and_branch_steps() -> None:
+    """验证 If 会保留条件和两个分支步骤序列。"""
+    condition = ColorIs(point=Point(1, 2), expected=Color(1, 2, 3))
+    then_steps = (Click(Point(3, 4)),)
+    else_steps = (Wait(0.5),)
+
+    branch = If(condition=condition, then_steps=then_steps, else_steps=else_steps)
+
+    assert branch.condition == condition
+    assert branch.then_steps == then_steps
+    assert branch.else_steps == else_steps
+
+
+def test_if_rejects_empty_then_steps() -> None:
+    """验证 If 拒绝空 then 分支。"""
+    condition = ColorIs(point=Point(1, 2), expected=Color(1, 2, 3))
+
+    with pytest.raises(ValueError, match="if requires at least one then step"):
+        If(condition=condition, then_steps=())
+
+
+def test_if_allows_empty_else_steps() -> None:
+    """验证 If 允许省略 else 分支。"""
+    condition = ColorIs(point=Point(1, 2), expected=Color(1, 2, 3))
+    branch = If(condition=condition, then_steps=(Click(Point(3, 4)),))
+
+    assert branch.else_steps == ()
+
+
+def test_if_allows_nested_control_flow_steps() -> None:
+    """验证 If 分支内允许嵌套控制流步骤。"""
+    condition = ColorIs(point=Point(1, 2), expected=Color(1, 2, 3))
+    nested = If(condition=condition, then_steps=(Wait(0.1),))
+    repeat = Repeat(times=2, steps=(nested,))
+
+    branch = If(condition=condition, then_steps=(repeat,), else_steps=(nested,))
+
+    assert branch.then_steps == (repeat,)
+    assert branch.else_steps == (nested,)
