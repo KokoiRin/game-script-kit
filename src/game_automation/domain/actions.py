@@ -1,4 +1,4 @@
-"""定义脚本可编排的第一版动作模型。"""
+"""定义脚本可编排的原子动作步骤和控制流步骤。"""
 
 from __future__ import annotations
 
@@ -35,4 +35,18 @@ class Wait:
             raise ValueError("wait duration_seconds must be greater than or equal to 0")
 
 
-Action: TypeAlias = Click | Drag | Wait
+@dataclass(frozen=True, slots=True)
+class Repeat:
+    times: int
+    steps: tuple["Step", ...]
+
+    def __post_init__(self) -> None:
+        """校验重复次数和内部步骤都可用于执行。"""
+        if self.times <= 0:
+            raise ValueError("repeat times must be greater than 0")
+        if len(self.steps) == 0:
+            raise ValueError("repeat requires at least one step")
+
+
+PrimitiveAction: TypeAlias = Click | Drag | Wait
+Step: TypeAlias = PrimitiveAction | Repeat

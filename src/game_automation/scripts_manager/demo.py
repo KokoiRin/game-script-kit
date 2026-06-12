@@ -8,7 +8,7 @@ from game_automation.domain import Click, Drag, Point, ScreenWindow, Script, Wai
 DEMO_SCRIPT = Script(
     name="demo",
     window=ScreenWindow(),
-    actions=(
+    steps=(
         Click(Point(300, 300)),
         Drag(Point(300, 300), Point(460, 360), duration_seconds=0.4),
         Wait(0.1),

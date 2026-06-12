@@ -2,12 +2,13 @@
 
 一个用于练习跨平台游戏脚本架构的 Python 项目。
 
-目标是把游戏脚本的核心业务逻辑和平台相关输入设备实现分开：脚本只描述要执行的动作，adapter 负责把动作落到 macOS、Windows、模拟器或其他平台。
+目标是把游戏脚本的核心业务逻辑和平台相关输入设备实现分开：脚本只描述要执行的步骤，adapter 负责把原子动作步骤落到 macOS、Windows、模拟器或其他平台。
 
 ## 当前能力
 
-- 使用带名称的 `Script` 表达一组按顺序执行的动作。
-- 支持第一版动作模型：`Click`、`Drag`、`Wait`。
+- 使用带名称的 `Script` 表达一组按顺序执行的步骤。
+- 支持原子动作步骤：`Click`、`Drag`、`Wait`。
+- 支持固定次数重复步骤：`Repeat(times, steps)`。
 - 脚本绑定单个窗口，脚本内点击和拖拽都在该窗口坐标系内执行。
 - 支持两类窗口：
   - `ScreenWindow`：点坐标直接视为屏幕坐标。
@@ -22,7 +23,7 @@
 ```text
 src/game_automation/
 ├── domain/              # 纯领域数据模型
-│   ├── actions.py       # Click / Drag / Wait
+│   ├── actions.py       # Click / Drag / Wait / Repeat
 │   ├── geometry.py      # Point / Rect
 │   ├── windows.py       # ScreenWindow / AreaWindow
 │   └── script.py        # Script
@@ -96,13 +97,13 @@ cd /path/to/game-script-kit
 1. 在 `src/game_automation/scripts_manager/<script_name>.py` 新增一个 `Script(name="<script-name>", ...)`。
 2. 在 `src/game_automation/scripts_manager/catalog.py` 把它加入 `DEFAULT_SCRIPT_CATALOG`。
 3. 运行 `.venv/bin/game-scripts list` 确认脚本名称可见。
-4. 运行 `.venv/bin/game-scripts run <script-name> --dry-run` 检查动作顺序。
+4. 运行 `.venv/bin/game-scripts run <script-name> --dry-run` 检查步骤执行顺序。
 
-编辑已有脚本时，直接修改 `src/game_automation/scripts_manager/` 下对应文件里的动作序列，不需要修改 runner 或平台 adapter。
+编辑已有脚本时，直接修改 `src/game_automation/scripts_manager/` 下对应文件里的步骤序列，不需要修改 runner 或平台 adapter。
 
 ## 运行 demo dry-run
 
-通过统一入口 dry-run 检查 demo 脚本动作：
+通过统一入口 dry-run 检查 demo 脚本步骤：
 
 ```bash
 .venv/bin/game-scripts run demo --dry-run
@@ -110,7 +111,7 @@ cd /path/to/game-script-kit
 
 ## 记录鼠标坐标和颜色
 
-坐标记录工具是独立工具，不走 `ScriptRunner`，也不会创建脚本动作。它读取的是屏幕绝对坐标，以及该坐标点当前的 RGB 颜色。
+坐标记录工具是独立工具，不走 `ScriptRunner`，也不会创建脚本步骤。它读取的是屏幕绝对坐标，以及该坐标点当前的 RGB 颜色。
 
 ```bash
 .venv/bin/star recorder
@@ -159,6 +160,7 @@ from game_automation.domain import (
     Drag,
     Point,
     Rect,
+    Repeat,
     Script,
     Wait,
 )
@@ -167,9 +169,15 @@ from game_automation.engine.runner import ScriptRunner
 script = Script(
     name="sample-clicks",
     window=AreaWindow(Rect(left=100, top=200, width=800, height=600)),
-    actions=(
+    steps=(
         Click(Point(10, 20)),
-        Drag(Point(30, 40), Point(50, 60), duration_seconds=0.4),
+        Repeat(
+            times=3,
+            steps=(
+                Drag(Point(30, 40), Point(50, 60), duration_seconds=0.4),
+                Wait(0.2),
+            ),
+        ),
         Wait(0.2),
     ),
 )
@@ -192,4 +200,4 @@ ScriptRunner(device).run(script)
 
 ## 项目状态
 
-这是一个早期实验项目，当前重点是领域模型和 port-and-adapter 边界。循环、条件判断、图像识别、OCR、脚本文件格式、多窗口编排和自动窗口查找都还没有实现。
+这是一个早期实验项目，当前重点是领域模型和 port-and-adapter 边界。条件判断、图像识别、OCR、脚本文件格式、多窗口编排和自动窗口查找都还没有实现。

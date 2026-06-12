@@ -8,7 +8,7 @@ from game_automation.domain import Click, Point, ScreenWindow, Script
 
 def build_script(name: str) -> Script:
     """构造一个用于注册表测试的最小脚本。"""
-    return Script(name=name, window=ScreenWindow(), actions=(Click(Point(1, 2)),))
+    return Script(name=name, window=ScreenWindow(), steps=(Click(Point(1, 2)),))
 
 
 def test_script_catalog_lists_names_in_registration_order() -> None:

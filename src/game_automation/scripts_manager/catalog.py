@@ -7,6 +7,7 @@ from collections.abc import Iterable
 from game_automation.domain import Script
 from game_automation.scripts_manager.demo import build_demo_script
 from game_automation.scripts_manager.recorded_clicks import build_recorded_clicks_script
+from game_automation.scripts_manager.repeat_demo import build_repeat_demo_script
 
 
 class ScriptNotFoundError(LookupError):
@@ -36,5 +37,6 @@ DEFAULT_SCRIPT_CATALOG = ScriptCatalog(
     (
         build_demo_script(),
         build_recorded_clicks_script(),
+        build_repeat_demo_script(),
     )
 )

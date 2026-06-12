@@ -8,7 +8,7 @@ from game_automation.domain import Click, Point, ScreenWindow, Script, Wait
 RECORDED_CLICKS_SCRIPT = Script(
     name="recorded-clicks",
     window=ScreenWindow(),
-    actions=(
+    steps=(
         Wait(3),
         Click(Point(242, 92)),
         Wait(3),

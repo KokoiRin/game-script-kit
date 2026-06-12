@@ -134,8 +134,8 @@ def test_record_rereads_latest_position_and_q_exits_quickly() -> None:
     assert clock.sleeps == []
 
 
-def test_recorder_does_not_add_script_actions() -> None:
-    """验证工具没有向脚本动作模型添加获取坐标动作。"""
+def test_recorder_does_not_add_script_steps() -> None:
+    """验证工具没有向脚本步骤模型添加获取坐标步骤。"""
     assert not hasattr(actions, "GetCoordinate")
     assert not hasattr(actions, "RecordCoordinate")
 
