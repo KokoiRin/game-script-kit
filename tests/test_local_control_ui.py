@@ -1,0 +1,165 @@
+"""验证本地控制 UI 的 HTTP entrypoint。
+
+这些测试通过真实本地 HTTP server 请求公开接口，确保 UI adapter 只负责 HTTP
+转换，并把行为委托给 application 层。
+"""
+
+from __future__ import annotations
+
+import http.client
+import json
+import threading
+
+from game_automation.portable.application.local_control import ControlResult
+from game_automation.platform.local_desktop.entrypoints.local_ui import create_local_control_server
+
+
+def test_local_ui_lists_scripts_over_http() -> None:
+    """验证 UI HTTP 接口可以返回脚本列表。"""
+    server = create_local_control_server(host="127.0.0.1", port=0)
+    thread = threading.Thread(target=server.serve_forever)
+    thread.start()
+    try:
+        payload = _request_json(server.server_address, "GET", "/api/scripts")
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+    assert "conditional-color-demo" in payload["scripts"]
+    assert "wait-until-color-demo" in payload["scripts"]
+
+
+def test_local_ui_serves_control_page() -> None:
+    """验证根路径返回可操作的控制页面。"""
+    server = create_local_control_server(host="127.0.0.1", port=0)
+    thread = threading.Thread(target=server.serve_forever)
+    thread.start()
+    try:
+        html = _request_text(server.server_address, "GET", "/")
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+    assert "<title>Star 控制台</title>" in html
+    assert 'id="script-select"' in html
+    assert 'id="dry-run-enabled" type="checkbox" checked' in html
+    assert 'id="run-script"' in html
+    assert 'id="run-tests"' in html
+    assert "运行测试" in html
+
+
+def test_local_ui_runs_script_over_http() -> None:
+    """验证 UI HTTP 接口把运行请求委托给 application。"""
+    app = FakeControlApplication()
+    server = create_local_control_server(host="127.0.0.1", port=0, app=app)
+    thread = threading.Thread(target=server.serve_forever)
+    thread.start()
+    try:
+        payload = _request_json(
+            server.server_address,
+            "POST",
+            "/api/run-script",
+            {
+                "name": "conditional-color-demo",
+                "dry_run": True,
+                "dry_run_color": "#102030",
+            },
+        )
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+    assert app.run_requests == [
+        {
+            "name": "conditional-color-demo",
+            "dry_run": True,
+            "dry_run_color": "#102030",
+        }
+    ]
+    assert payload == {
+        "exit_code": 0,
+        "stdout": "click Point(x=100, y=200)\n",
+        "stderr": "",
+    }
+
+
+def test_local_ui_runs_tests_over_http() -> None:
+    """验证 UI HTTP 接口可以触发固定测试任务。"""
+    app = FakeControlApplication()
+    server = create_local_control_server(host="127.0.0.1", port=0, app=app)
+    thread = threading.Thread(target=server.serve_forever)
+    thread.start()
+    try:
+        payload = _request_json(
+            server.server_address,
+            "POST",
+            "/api/run-tests",
+            {"task": "all"},
+        )
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+    assert app.test_requests == ["all"]
+    assert payload == {
+        "exit_code": 0,
+        "stdout": "109 passed\n",
+        "stderr": "",
+    }
+
+
+class FakeControlApplication:
+    def __init__(self) -> None:
+        self.run_requests: list[dict[str, object]] = []
+        self.test_requests: list[str] = []
+
+    def list_scripts(self) -> tuple[str, ...]:
+        return ("conditional-color-demo",)
+
+    def run_named_script(self, name: str, *, dry_run: bool, dry_run_color: str) -> ControlResult:
+        self.run_requests.append(
+            {
+                "name": name,
+                "dry_run": dry_run,
+                "dry_run_color": dry_run_color,
+            }
+        )
+        return ControlResult(
+            exit_code=0,
+            stdout="click Point(x=100, y=200)\n",
+            stderr="",
+        )
+
+    def run_tests(self, task_name: str = "all") -> ControlResult:
+        self.test_requests.append(task_name)
+        return ControlResult(exit_code=0, stdout="109 passed\n", stderr="")
+
+
+def _request_json(address, method: str, path: str, body: dict[str, object] | None = None) -> dict[str, object]:
+    connection = http.client.HTTPConnection(address[0], address[1], timeout=5)
+    try:
+        payload = json.dumps(body).encode("utf-8") if body is not None else None
+        headers = {"Content-Type": "application/json"} if body is not None else {}
+        connection.request(method, path, body=payload, headers=headers)
+        response = connection.getresponse()
+        data = response.read().decode("utf-8")
+    finally:
+        connection.close()
+    assert response.status == 200
+    return json.loads(data)
+
+
+def _request_text(address, method: str, path: str) -> str:
+    connection = http.client.HTTPConnection(address[0], address[1], timeout=5)
+    try:
+        connection.request(method, path)
+        response = connection.getresponse()
+        data = response.read().decode("utf-8")
+    finally:
+        connection.close()
+    assert response.status == 200
+    return data

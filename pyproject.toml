@@ -19,7 +19,7 @@ dev = [
 ]
 
 [project.scripts]
-star = "game_automation.star_cli:main"
+star = "game_automation.platform.local_desktop.entrypoints.cli:main"
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

@@ -1,14 +1,12 @@
-"""验证应用层脚本运行 module 会组装 adapter、调用 runner 并归一化错误。
+"""验证应用层脚本运行 module 会组装 runner、调用 runner 并归一化错误。
 
-这些测试直接覆盖 run_script 的 interface，防止 CLI 再承担运行配置和 setup 细节。
+这些测试直接覆盖 portable run_script 的 interface，真实平台 adapter 通过工厂注入。
 """
 
-from types import ModuleType
-
-from game_automation.application.script_run import run_script
-from game_automation.domain import Color, Point
-from game_automation.engine.ports import InputDevice
-from game_automation.scripts_manager import (
+from game_automation.portable.application.script_run import run_script
+from game_automation.portable.domain import Color, Point
+from game_automation.portable.engine.ports import InputDevice
+from game_automation.portable.scripts_manager import (
     CONDITIONAL_COLOR_DEMO_SCRIPT,
     RECORDED_CLICKS_SCRIPT,
     WAIT_UNTIL_COLOR_DEMO_SCRIPT,
@@ -55,8 +53,8 @@ def test_run_script_reports_wait_until_timeout(capsys) -> None:
     assert result.error_message == "script run timed out: wait until condition timed out"
 
 
-def test_run_script_real_mode_uses_macos_device_without_color_reader(monkeypatch, capsys) -> None:
-    """验证无颜色需求脚本真实运行时只组装输入 adapter。"""
+def test_run_script_real_mode_uses_injected_device_without_color_reader(capsys) -> None:
+    """验证无颜色需求脚本真实运行时只使用注入的输入 adapter。"""
     clicks = []
 
     class FakeMacOSPointerDevice(InputDevice):
@@ -69,15 +67,11 @@ def test_run_script_real_mode_uses_macos_device_without_color_reader(monkeypatch
         def wait(self, duration_seconds: float) -> None:
             """测试中不真实等待。"""
 
-    fake_macos_module = ModuleType("game_automation.adapters.macos")
-    fake_macos_module.MacOSPointerDevice = FakeMacOSPointerDevice
-    monkeypatch.setitem(
-        __import__("sys").modules,
-        "game_automation.adapters.macos",
-        fake_macos_module,
+    result = run_script(
+        RECORDED_CLICKS_SCRIPT,
+        dry_run=False,
+        real_device_factory=FakeMacOSPointerDevice,
     )
-
-    result = run_script(RECORDED_CLICKS_SCRIPT, dry_run=False)
 
     captured = capsys.readouterr()
     assert captured.out == ""
@@ -90,10 +84,8 @@ def test_run_script_real_mode_uses_macos_device_without_color_reader(monkeypatch
     ]
 
 
-def test_run_script_real_mode_injects_color_reader_for_color_script(monkeypatch) -> None:
-    """验证有颜色需求脚本真实运行时会组装取色 adapter。"""
-    import game_automation.adapters.desktop as desktop
-
+def test_run_script_real_mode_injects_color_reader_for_color_script() -> None:
+    """验证有颜色需求脚本真实运行时会使用注入的取色 adapter。"""
     clicks = []
     read_points = []
 
@@ -112,17 +104,12 @@ def test_run_script_real_mode_injects_color_reader_for_color_script(monkeypatch)
             read_points.append(point)
             return Color.from_hex("#102030")
 
-    fake_macos_module = ModuleType("game_automation.adapters.macos")
-    fake_macos_module.MacOSPointerDevice = FakeMacOSPointerDevice
-    monkeypatch.setitem(
-        __import__("sys").modules,
-        "game_automation.adapters.macos",
-        fake_macos_module,
+    result = run_script(
+        CONDITIONAL_COLOR_DEMO_SCRIPT,
+        dry_run=False,
+        real_device_factory=FakeMacOSPointerDevice,
+        real_color_reader_factory=FakePixelColorReader,
     )
-    monkeypatch.setattr(desktop, "PyAutoGuiPixelColorReader", FakePixelColorReader)
-    monkeypatch.setitem(__import__("sys").modules, "game_automation.adapters.desktop", desktop)
-
-    result = run_script(CONDITIONAL_COLOR_DEMO_SCRIPT, dry_run=False)
 
     assert result.exit_code == 0
     assert result.error_message is None
@@ -130,18 +117,18 @@ def test_run_script_real_mode_injects_color_reader_for_color_script(monkeypatch)
     assert clicks == [Point(100, 200)]
 
 
-def test_run_script_real_mode_reports_color_reader_setup_error(monkeypatch) -> None:
+def test_run_script_real_mode_reports_color_reader_setup_error() -> None:
     """验证真实取色 adapter setup 失败时应用层返回 setup 错误。"""
-    import game_automation.adapters.desktop as desktop
-
     class FailingPixelColorReader:
         def __init__(self) -> None:
             raise RuntimeError("screen color unavailable")
 
-    monkeypatch.setattr(desktop, "PyAutoGuiPixelColorReader", FailingPixelColorReader)
-    monkeypatch.setitem(__import__("sys").modules, "game_automation.adapters.desktop", desktop)
-
-    result = run_script(CONDITIONAL_COLOR_DEMO_SCRIPT, dry_run=False)
+    result = run_script(
+        CONDITIONAL_COLOR_DEMO_SCRIPT,
+        dry_run=False,
+        real_device_factory=lambda: object(),
+        real_color_reader_factory=FailingPixelColorReader,
+    )
 
     assert result.exit_code == 1
     assert result.error_message == "script run setup failed: screen color unavailable"

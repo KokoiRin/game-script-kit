@@ -2,8 +2,8 @@
 
 import pytest
 
-from game_automation.engine.runner import ScriptRunner
-from game_automation.domain import (
+from game_automation.portable.engine.runner import ScriptRunner
+from game_automation.portable.domain import (
     AreaWindow,
     Click,
     Color,
@@ -424,8 +424,8 @@ def test_engine_import_does_not_import_macos_adapter() -> None:
     """验证导入 engine 不会顺带导入 macOS adapter。"""
     import sys
 
-    sys.modules.pop("game_automation.adapters.macos", None)
+    sys.modules.pop("game_automation.platform.macos.adapters", None)
 
-    import game_automation.engine  # noqa: F401
+    import game_automation.portable.engine  # noqa: F401
 
-    assert "game_automation.adapters.macos" not in sys.modules
+    assert "game_automation.platform.macos.adapters" not in sys.modules

@@ -2,12 +2,12 @@
 
 import pytest
 
-from game_automation.scripts_manager.catalog import (
+from game_automation.portable.scripts_manager.catalog import (
     DEFAULT_SCRIPT_CATALOG,
     ScriptCatalog,
     ScriptNotFoundError,
 )
-from game_automation.domain import Click, Point, ScreenWindow, Script
+from game_automation.portable.domain import Click, Point, ScreenWindow, Script
 
 
 def build_script(name: str) -> Script:

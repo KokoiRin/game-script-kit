@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-import game_automation.domain.actions as actions
+import game_automation.portable.domain.actions as actions
 import pytest
-from game_automation.domain import Color, Point
-from game_automation.tools.coordinate_recorder import CoordinateRecorder, RecordedPoint
+from game_automation.portable.domain import Color, Point
+from game_automation.portable.tools.coordinate_recorder import CoordinateRecorder, RecordedPoint
 
 
 class FakePointerReader:

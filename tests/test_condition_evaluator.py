@@ -2,8 +2,8 @@
 
 import pytest
 
-from game_automation.domain import AreaWindow, Color, ColorIs, Point, Rect
-from game_automation.engine.condition_evaluator import evaluate_condition
+from game_automation.portable.domain import AreaWindow, Color, ColorIs, Point, Rect
+from game_automation.portable.engine.condition_evaluator import evaluate_condition
 
 
 class FakeColorReader:

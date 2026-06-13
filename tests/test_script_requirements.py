@@ -1,7 +1,7 @@
 """验证脚本运行前端口需求分析。"""
 
-from game_automation.domain import Click, Color, ColorIs, If, Point, Repeat, ScreenWindow, Script, Wait, WaitUntil
-from game_automation.engine.script_requirements import inspect_script_requirements
+from game_automation.portable.domain import Click, Color, ColorIs, If, Point, Repeat, ScreenWindow, Script, Wait, WaitUntil
+from game_automation.portable.engine.script_requirements import inspect_script_requirements
 
 
 def test_script_requirements_do_not_need_color_reader_for_plain_steps() -> None:

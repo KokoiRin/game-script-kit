@@ -6,8 +6,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from game_automation.adapters.desktop import PyAutoGuiPixelColorReader
-from game_automation.domain import Color, Point
+from game_automation.platform.desktop.adapters import PyAutoGuiPixelColorReader
+from game_automation.portable.domain import Color, Point
 
 
 class FakeImage:

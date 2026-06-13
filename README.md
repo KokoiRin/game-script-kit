@@ -19,37 +19,27 @@
 - 提供 macOS `pyautogui` adapter 和 dry-run demo。
 - 提供独立坐标记录工具，用于采集屏幕绝对坐标。
 - 提供命名脚本管理入口，可列出脚本并通过脚本名称启动。
+- 提供本地控制 UI，可在浏览器窗口中选择脚本、运行 dry-run 和触发固定测试任务。
 
 ## 代码结构
 
 ```text
 src/game_automation/
-├── domain/              # 纯领域数据模型
-│   ├── actions.py       # Click / Drag / Wait / Repeat / If / WaitUntil
-│   ├── conditions.py    # ColorIs / Condition
-│   ├── geometry.py      # Point / Rect
-│   ├── windows.py       # ScreenWindow / AreaWindow
-│   └── script.py        # Script
-├── engine/               # 脚本执行引擎
-│   ├── ports.py          # InputDevice / PixelColorReader / PointerPositionReader / KeyStateReader
-│   ├── condition_evaluator.py # 条件评估
-│   ├── script_requirements.py # 脚本运行端口需求分析
-│   └── runner.py         # ScriptRunner
-├── scripts_manager/      # 脚本定义与注册管理
-│   ├── demo.py
-│   ├── recorded_clicks.py
-│   └── catalog.py        # ScriptCatalog + DEFAULT_SCRIPT_CATALOG
-├── adapters/             # 平台适配与模拟设备（实现 engine.ports）
-│   ├── desktop/
-│   │   ├── pointer_position.py
-│   │   └── terminal_keyboard.py
-│   ├── macos/
-│   │   └── pointer_device.py
-│   └── dry_run.py        # DryRunInputDevice / DryRunPixelColorReader
-├── tools/
-│   └── coordinate_recorder.py # 坐标记录工具核心循环
-└── star_cli.py           # star CLI：按名称运行脚本和启动坐标记录工具
+├── portable/             # 跨平台可复用核心
+│   ├── domain/           # 纯领域数据模型：Click / Wait / If / WaitUntil / ColorIs
+│   ├── engine/           # 脚本执行引擎和运行能力 ports
+│   ├── scripts_manager/  # 脚本定义与注册管理
+│   ├── application/      # 用例编排：脚本运行、本地 UI 控制
+│   ├── adapters/         # 不绑定具体平台的 adapter，例如 dry-run
+│   └── tools/            # 可复用工具核心，例如坐标记录循环
+├── platform/             # 平台相关实现，迁移平台时优先替换这里
+│   ├── desktop/          # 桌面通用 adapter：取色、鼠标位置、终端按键
+│   ├── macos/            # macOS 专用输入 adapter
+│   └── local_desktop/    # 本机 CLI/UI 入口和 adapter composition
+└── __init__.py           # 顶层包元信息
 ```
+
+迁移到新平台时，优先保留 `portable/`，替换或重接 `platform/`。旧的 `game_automation.domain`、`game_automation.engine`、`game_automation.adapters` 等导入路径已经移除，新代码统一使用 `game_automation.portable.*` 或 `game_automation.platform.*`。
 
 OpenSpec 规格和已归档变更放在 `openspec/`。
 
@@ -65,7 +55,7 @@ cd /path/to/game-script-kit
 
 ## 列出和运行命名脚本
 
-推荐使用 `star` 统一管理脚本。脚本定义放在 `src/game_automation/scripts_manager/`，默认注册表在 `src/game_automation/scripts_manager/catalog.py`。
+推荐使用 `star` 统一管理脚本。脚本定义放在 `src/game_automation/portable/scripts_manager/`，默认注册表在 `src/game_automation/portable/scripts_manager/catalog.py`。
 
 列出当前可用脚本：
 
@@ -92,18 +82,50 @@ cd /path/to/game-script-kit
 - 终端或 Python 运行时已在 macOS 系统设置中获得“辅助功能”权限。
 - 脚本坐标适合当前屏幕，避免点到危险位置。
 
+## 本地控制 UI
+
+启动本地 UI，默认打开浏览器窗口：
+
+```bash
+.venv/bin/star ui
+```
+
+测试或手动指定地址时，可以只启动服务不自动打开窗口：
+
+```bash
+.venv/bin/star ui --host 127.0.0.1 --port 8765 --no-open
+```
+
+打开 `http://127.0.0.1:8765/` 后，可以选择脚本、勾选或取消“模拟运行”、输入模拟颜色并查看输出。“运行测试”按钮只运行项目内置的固定测试任务，不接受任意 shell 命令。
+
+端到端 smoke 方法：
+
+```bash
+.venv/bin/star ui --host 127.0.0.1 --port 8765 --no-open
+curl http://127.0.0.1:8765/api/scripts
+curl -X POST http://127.0.0.1:8765/api/run-script \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"conditional-color-demo","dry_run":true,"dry_run_color":"#102030"}'
+```
+
+自动化测试：
+
+```bash
+.venv/bin/python -m pytest tests/test_local_control.py tests/test_local_control_ui.py tests/test_script_cli.py
+```
+
 ## 新增或编辑脚本
 
 第一版脚本定义使用 Python 文件，方便直接复用 `Click`、`Drag`、`Wait`、`ScreenWindow` 和 `AreaWindow`。
 
 新增脚本的最小流程：
 
-1. 在 `src/game_automation/scripts_manager/<script_name>.py` 新增一个 `Script(name="<script-name>", ...)`。
-2. 在 `src/game_automation/scripts_manager/catalog.py` 把它加入 `DEFAULT_SCRIPT_CATALOG`。
+1. 在 `src/game_automation/portable/scripts_manager/<script_name>.py` 新增一个 `Script(name="<script-name>", ...)`。
+2. 在 `src/game_automation/portable/scripts_manager/catalog.py` 把它加入 `DEFAULT_SCRIPT_CATALOG`。
 3. 运行 `.venv/bin/star list` 确认脚本名称可见。
 4. 运行 `.venv/bin/star run <script-name> --dry-run` 检查步骤执行顺序。
 
-编辑已有脚本时，直接修改 `src/game_automation/scripts_manager/` 下对应文件里的步骤序列，不需要修改 runner 或平台 adapter。
+编辑已有脚本时，直接修改 `src/game_automation/portable/scripts_manager/` 下对应文件里的步骤序列，不需要修改 runner 或平台 adapter。
 
 ## 运行 demo dry-run
 
@@ -174,7 +196,7 @@ recorded points:
 ## 使用核心模型
 
 ```python
-from game_automation.domain import (
+from game_automation.portable.domain import (
     AreaWindow,
     Click,
     Color,
@@ -188,7 +210,7 @@ from game_automation.domain import (
     Wait,
     WaitUntil,
 )
-from game_automation.engine.runner import ScriptRunner
+from game_automation.portable.engine.runner import ScriptRunner
 
 script = Script(
     name="sample-clicks",

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from game_automation.domain import Color
+from game_automation.portable.domain import Color
 
 
 def test_color_keeps_rgb_channels() -> None:
