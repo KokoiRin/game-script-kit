@@ -1,4 +1,8 @@
-"""定义执行引擎的跨平台端口。"""
+"""定义执行引擎需要的跨平台端口。
+
+本 module 只声明 engine 可调用的 Protocol seam；它不包含任何平台实现，
+也不决定 adapter 如何创建。
+"""
 
 from __future__ import annotations
 

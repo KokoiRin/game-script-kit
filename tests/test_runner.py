@@ -16,6 +16,7 @@ from game_automation.domain import (
     ScreenWindow,
     Script,
     Wait,
+    WaitUntil,
 )
 from tests.support.fake_device import FakeInputDevice
 
@@ -32,6 +33,21 @@ class FakeColorReader:
         """记录读取点并返回固定颜色。"""
         self.points.append(point)
         return self.color
+
+
+class SequenceColorReader:
+    """按序返回颜色，序列耗尽后保持最后一个颜色。"""
+
+    def __init__(self, colors: list[Color]) -> None:
+        """保存颜色序列并记录读取点。"""
+        self.colors = colors
+        self.points: list[Point] = []
+
+    def read_color(self, point: Point) -> Color:
+        """返回下一个颜色并记录读取点。"""
+        self.points.append(point)
+        index = min(len(self.points) - 1, len(self.colors) - 1)
+        return self.colors[index]
 
 
 def test_runner_maps_steps_to_device_with_script_window() -> None:
@@ -274,6 +290,134 @@ def test_runner_executes_nested_if_and_repeat_steps() -> None:
     ScriptRunner(device=device, color_reader=FakeColorReader(Color(10, 20, 30))).run(script)
 
     assert [action.name for action in device.actions] == ["click", "click"]
+
+
+def test_runner_wait_until_continues_immediately_when_condition_matches() -> None:
+    """验证 WaitUntil 初始条件满足时不等待并继续后续步骤。"""
+    device = FakeInputDevice()
+    script = Script(
+        name="wait-until-immediate",
+        window=ScreenWindow(),
+        steps=(
+            WaitUntil(
+                condition=ColorIs(Point(1, 2), Color(10, 20, 30)),
+                timeout_seconds=5,
+                interval_seconds=0.5,
+            ),
+            Click(Point(3, 4)),
+        ),
+    )
+
+    ScriptRunner(device=device, color_reader=FakeColorReader(Color(10, 20, 30))).run(script)
+
+    assert [action.name for action in device.actions] == ["click"]
+    assert device.actions[0].target == Point(3, 4)
+
+
+def test_runner_wait_until_waits_until_condition_matches() -> None:
+    """验证 WaitUntil 会按间隔等待直到条件满足。"""
+    device = FakeInputDevice()
+    color_reader = SequenceColorReader(
+        [
+            Color(0, 0, 0),
+            Color(0, 0, 0),
+            Color(10, 20, 30),
+        ]
+    )
+    script = Script(
+        name="wait-until-eventual",
+        window=AreaWindow(Rect(100, 200, 800, 600)),
+        steps=(
+            WaitUntil(
+                condition=ColorIs(Point(1, 2), Color(10, 20, 30)),
+                timeout_seconds=5,
+                interval_seconds=0.5,
+            ),
+            Click(Point(3, 4)),
+        ),
+    )
+
+    ScriptRunner(device=device, color_reader=color_reader).run(script)
+
+    assert [action.name for action in device.actions] == ["wait", "wait", "click"]
+    assert [action.duration_seconds for action in device.actions if action.name == "wait"] == [0.5, 0.5]
+    assert device.actions[-1].target == Point(103, 204)
+    assert color_reader.points == [Point(101, 202), Point(101, 202), Point(101, 202)]
+
+
+def test_runner_wait_until_times_out_and_stops_following_steps() -> None:
+    """验证 WaitUntil 超时后抛错且不执行后续步骤。"""
+    device = FakeInputDevice()
+    script = Script(
+        name="wait-until-timeout",
+        window=ScreenWindow(),
+        steps=(
+            WaitUntil(
+                condition=ColorIs(Point(1, 2), Color(10, 20, 30)),
+                timeout_seconds=1,
+                interval_seconds=0.5,
+            ),
+            Click(Point(3, 4)),
+        ),
+    )
+
+    with pytest.raises(TimeoutError, match="wait until condition timed out"):
+        ScriptRunner(device=device, color_reader=FakeColorReader(Color(0, 0, 0))).run(script)
+
+    assert [action.name for action in device.actions] == ["wait", "wait"]
+    assert [action.duration_seconds for action in device.actions] == [0.5, 0.5]
+
+
+def test_runner_wait_until_caps_wait_to_remaining_timeout() -> None:
+    """验证 WaitUntil 最后一轮等待不会超过剩余超时预算。"""
+    device = FakeInputDevice()
+    script = Script(
+        name="wait-until-remaining-budget",
+        window=ScreenWindow(),
+        steps=(
+            WaitUntil(
+                condition=ColorIs(Point(1, 2), Color(10, 20, 30)),
+                timeout_seconds=1,
+                interval_seconds=0.6,
+            ),
+        ),
+    )
+
+    with pytest.raises(TimeoutError):
+        ScriptRunner(device=device, color_reader=FakeColorReader(Color(0, 0, 0))).run(script)
+
+    assert [action.duration_seconds for action in device.actions] == [0.6, 0.4]
+
+
+def test_runner_wait_until_executes_inside_nested_control_flow() -> None:
+    """验证 WaitUntil 可在嵌套控制流中执行。"""
+    device = FakeInputDevice()
+    condition = ColorIs(Point(1, 2), Color(10, 20, 30))
+    script = Script(
+        name="wait-until-nested",
+        window=ScreenWindow(),
+        steps=(
+            If(
+                condition=condition,
+                then_steps=(
+                    Repeat(
+                        times=2,
+                        steps=(
+                            WaitUntil(
+                                condition=condition,
+                                timeout_seconds=1,
+                                interval_seconds=0.5,
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        ),
+    )
+
+    ScriptRunner(device=device, color_reader=FakeColorReader(Color(10, 20, 30))).run(script)
+
+    assert device.actions == []
 
 
 def test_engine_import_does_not_import_macos_adapter() -> None:

@@ -47,3 +47,8 @@ def test_script_catalog_rejects_duplicate_names() -> None:
 def test_default_catalog_includes_conditional_color_demo() -> None:
     """验证默认注册表包含颜色条件分支示例脚本。"""
     assert "conditional-color-demo" in DEFAULT_SCRIPT_CATALOG.list_names()
+
+
+def test_default_catalog_includes_wait_until_color_demo() -> None:
+    """验证默认注册表包含条件等待示例脚本。"""
+    assert "wait-until-color-demo" in DEFAULT_SCRIPT_CATALOG.list_names()

@@ -1,4 +1,7 @@
-"""保存可编辑的 demo 命名脚本定义。"""
+"""保存可编辑的 demo 命名脚本定义。
+
+本 module 只声明一份内置脚本数据；它不执行脚本，也不包含运行模式判断。
+"""
 
 from __future__ import annotations
 

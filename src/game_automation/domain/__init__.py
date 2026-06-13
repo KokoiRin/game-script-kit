@@ -1,6 +1,10 @@
-"""聚合导出纯领域数据模型。"""
+"""聚合导出纯领域数据模型。
 
-from game_automation.domain.actions import Click, Drag, If, PrimitiveAction, Repeat, Step, Wait
+本 module 只提供领域类型的便捷 import surface；它不执行脚本、不访问平台 adapter，
+也不承载应用编排逻辑。
+"""
+
+from game_automation.domain.actions import Click, Drag, If, PrimitiveAction, Repeat, Step, Wait, WaitUntil
 from game_automation.domain.color import Color
 from game_automation.domain.conditions import ColorIs, Condition
 from game_automation.domain.geometry import Point, Rect
@@ -23,5 +27,6 @@ __all__ = [
     "Script",
     "Step",
     "Wait",
+    "WaitUntil",
     "Window",
 ]

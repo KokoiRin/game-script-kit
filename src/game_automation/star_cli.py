@@ -1,14 +1,15 @@
-"""star — 游戏脚本自动化统一命令行入口。"""
+"""star 命令行入口。
+
+本 module 负责解析命令行参数、查找内置脚本并打印用户可见结果；命名脚本运行
+委托应用编排层，recorder 子命令只保留入口级 adapter 组装，它不解释脚本步骤。
+"""
 
 from __future__ import annotations
 
 import argparse
 import sys
 
-from game_automation.adapters.dry_run import DryRunInputDevice, DryRunPixelColorReader
-from game_automation.domain import Color
-from game_automation.engine.script_requirements import inspect_script_requirements
-from game_automation.engine.runner import ScriptRunner
+from game_automation.application.script_run import run_script
 from game_automation.scripts_manager import DEFAULT_SCRIPT_CATALOG
 from game_automation.scripts_manager.catalog import ScriptNotFoundError
 
@@ -28,32 +29,10 @@ def _run_script(args: argparse.Namespace) -> int:
         print(exc, file=sys.stderr)
         return 1
 
-    requirements = inspect_script_requirements(script)
-    if args.dry_run:
-        color_reader = None
-        if requirements.needs_color_reader:
-            try:
-                color_reader = DryRunPixelColorReader(Color.from_hex(args.dry_run_color))
-            except ValueError as exc:
-                print(f"script run configuration failed: {exc}", file=sys.stderr)
-                return 2
-        ScriptRunner(device=DryRunInputDevice(), color_reader=color_reader).run(script)
-        return 0
-
-    from game_automation.adapters.macos import MacOSPointerDevice
-
-    color_reader = None
-    if requirements.needs_color_reader:
-        try:
-            from game_automation.adapters.desktop import PyAutoGuiPixelColorReader
-
-            color_reader = PyAutoGuiPixelColorReader()
-        except RuntimeError as exc:
-            print(f"script run setup failed: {exc}", file=sys.stderr)
-            return 1
-
-    ScriptRunner(device=MacOSPointerDevice(), color_reader=color_reader).run(script)
-    return 0
+    result = run_script(script, dry_run=args.dry_run, dry_run_color=args.dry_run_color)
+    if result.error_message is not None:
+        print(result.error_message, file=sys.stderr)
+    return result.exit_code
 
 
 def _run_recorder(args: argparse.Namespace) -> int:

@@ -1,4 +1,8 @@
-"""实现 engine.ports.InputDevice — 通过 pyautogui 驱动 macOS 鼠标。"""
+"""实现 engine.ports.InputDevice，通过 pyautogui 驱动 macOS 鼠标。
+
+本 module 只封装真实鼠标点击、拖拽和等待；它不解释脚本步骤，
+也不处理脚本运行的错误展示。
+"""
 
 from __future__ import annotations
 
