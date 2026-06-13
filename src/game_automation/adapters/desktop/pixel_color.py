@@ -1,4 +1,8 @@
-"""实现 engine.ports.PixelColorReader — 通过 pyautogui 读取屏幕点颜色。"""
+"""实现 engine.ports.PixelColorReader，通过 pyautogui 读取屏幕点颜色。
+
+本 module 只封装屏幕截图和像素读取的桌面 I/O；它不判断颜色条件是否成立，
+也不决定何时需要取色。
+"""
 
 from __future__ import annotations
 

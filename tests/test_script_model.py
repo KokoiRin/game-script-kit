@@ -15,6 +15,7 @@ from game_automation.domain import (
     ScreenWindow,
     Script,
     Wait,
+    WaitUntil,
 )
 
 
@@ -198,3 +199,52 @@ def test_if_allows_nested_control_flow_steps() -> None:
 
     assert branch.then_steps == (repeat,)
     assert branch.else_steps == (nested,)
+
+
+def test_wait_until_preserves_condition_timeout_and_interval() -> None:
+    """验证 WaitUntil 会保留条件、超时和轮询间隔。"""
+    condition = ColorIs(point=Point(1, 2), expected=Color(1, 2, 3))
+
+    wait_until = WaitUntil(
+        condition=condition,
+        timeout_seconds=5,
+        interval_seconds=0.5,
+    )
+
+    assert wait_until.condition == condition
+    assert wait_until.timeout_seconds == 5
+    assert wait_until.interval_seconds == 0.5
+
+
+def test_wait_until_rejects_non_positive_timeout() -> None:
+    """验证 WaitUntil 拒绝非正数超时时间。"""
+    condition = ColorIs(point=Point(1, 2), expected=Color(1, 2, 3))
+
+    with pytest.raises(ValueError, match="wait until timeout_seconds"):
+        WaitUntil(condition=condition, timeout_seconds=0, interval_seconds=0.5)
+
+    with pytest.raises(ValueError, match="wait until timeout_seconds"):
+        WaitUntil(condition=condition, timeout_seconds=-1, interval_seconds=0.5)
+
+
+def test_wait_until_rejects_non_positive_interval() -> None:
+    """验证 WaitUntil 拒绝非正数轮询间隔。"""
+    condition = ColorIs(point=Point(1, 2), expected=Color(1, 2, 3))
+
+    with pytest.raises(ValueError, match="wait until interval_seconds"):
+        WaitUntil(condition=condition, timeout_seconds=5, interval_seconds=0)
+
+    with pytest.raises(ValueError, match="wait until interval_seconds"):
+        WaitUntil(condition=condition, timeout_seconds=5, interval_seconds=-0.1)
+
+
+def test_wait_until_allows_nested_control_flow_steps() -> None:
+    """验证 WaitUntil 可以嵌套在 Repeat 或 If 的内部步骤中。"""
+    condition = ColorIs(point=Point(1, 2), expected=Color(1, 2, 3))
+    wait_until = WaitUntil(condition=condition, timeout_seconds=5, interval_seconds=0.5)
+
+    repeat = Repeat(times=2, steps=(wait_until,))
+    branch = If(condition=condition, then_steps=(wait_until,))
+
+    assert repeat.steps == (wait_until,)
+    assert branch.then_steps == (wait_until,)

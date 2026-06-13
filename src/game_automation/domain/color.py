@@ -1,4 +1,8 @@
-"""定义平台无关的 RGB 颜色值对象。"""
+"""定义平台无关的 RGB 颜色值对象。
+
+本 module 只负责颜色值、格式解析和通道不变量；它不读取屏幕像素，
+也不处理运行时取色 adapter。
+"""
 
 from __future__ import annotations
 

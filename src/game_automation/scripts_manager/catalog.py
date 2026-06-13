@@ -1,4 +1,8 @@
-"""管理可通过名称查找和启动的脚本集合，以及默认注册表组装。"""
+"""管理可通过名称查找的脚本集合，以及默认注册表组装。
+
+本 module 只负责脚本注册、去重和按名称查找；它不运行脚本，
+也不承担 CLI 参数解析或 adapter 选择。
+"""
 
 from __future__ import annotations
 
@@ -9,6 +13,7 @@ from game_automation.scripts_manager.conditional_color_demo import build_conditi
 from game_automation.scripts_manager.demo import build_demo_script
 from game_automation.scripts_manager.recorded_clicks import build_recorded_clicks_script
 from game_automation.scripts_manager.repeat_demo import build_repeat_demo_script
+from game_automation.scripts_manager.wait_until_color_demo import build_wait_until_color_demo_script
 
 
 class ScriptNotFoundError(LookupError):
@@ -40,5 +45,6 @@ DEFAULT_SCRIPT_CATALOG = ScriptCatalog(
         build_recorded_clicks_script(),
         build_repeat_demo_script(),
         build_conditional_color_demo_script(),
+        build_wait_until_color_demo_script(),
     )
 )

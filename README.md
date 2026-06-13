@@ -9,6 +9,8 @@
 - 使用带名称的 `Script` 表达一组按顺序执行的步骤。
 - 支持原子动作步骤：`Click`、`Drag`、`Wait`。
 - 支持固定次数重复步骤：`Repeat(times, steps)`。
+- 支持颜色条件分支：`If(ColorIs(...), then_steps, else_steps)`。
+- 支持颜色条件等待：`WaitUntil(ColorIs(...), timeout_seconds, interval_seconds)`。
 - 脚本绑定单个窗口，脚本内点击和拖拽都在该窗口坐标系内执行。
 - 支持两类窗口：
   - `ScreenWindow`：点坐标直接视为屏幕坐标。
@@ -23,12 +25,15 @@
 ```text
 src/game_automation/
 ├── domain/              # 纯领域数据模型
-│   ├── actions.py       # Click / Drag / Wait / Repeat
+│   ├── actions.py       # Click / Drag / Wait / Repeat / If / WaitUntil
+│   ├── conditions.py    # ColorIs / Condition
 │   ├── geometry.py      # Point / Rect
 │   ├── windows.py       # ScreenWindow / AreaWindow
 │   └── script.py        # Script
 ├── engine/               # 脚本执行引擎
-│   ├── ports.py          # InputDevice / PointerPositionReader / KeyStateReader
+│   ├── ports.py          # InputDevice / PixelColorReader / PointerPositionReader / KeyStateReader
+│   ├── condition_evaluator.py # 条件评估
+│   ├── script_requirements.py # 脚本运行端口需求分析
 │   └── runner.py         # ScriptRunner
 ├── scripts_manager/      # 脚本定义与注册管理
 │   ├── demo.py
@@ -40,11 +45,10 @@ src/game_automation/
 │   │   └── terminal_keyboard.py
 │   ├── macos/
 │   │   └── pointer_device.py
-│   └── dry_run.py        # DryRunInputDevice / RecordedOperation
+│   └── dry_run.py        # DryRunInputDevice / DryRunPixelColorReader
 ├── tools/
 │   └── coordinate_recorder.py # 坐标记录工具核心循环
-├── script_cli.py         # 按名称列出和运行脚本
-└── coordinate_recorder_cli.py # 坐标记录工具 CLI
+└── star_cli.py           # star CLI：按名称运行脚本和启动坐标记录工具
 ```
 
 OpenSpec 规格和已归档变更放在 `openspec/`。
@@ -61,25 +65,25 @@ cd /path/to/game-script-kit
 
 ## 列出和运行命名脚本
 
-推荐使用 `game-scripts` 统一管理脚本。脚本定义放在 `src/game_automation/scripts_manager/`，默认注册表在 `src/game_automation/scripts_manager/catalog.py`。
+推荐使用 `star` 统一管理脚本。脚本定义放在 `src/game_automation/scripts_manager/`，默认注册表在 `src/game_automation/scripts_manager/catalog.py`。
 
 列出当前可用脚本：
 
 ```bash
-.venv/bin/game-scripts list
+.venv/bin/star list
 ```
 
 按名称 dry-run，先检查顺序：
 
 ```bash
-.venv/bin/game-scripts run demo --dry-run
-.venv/bin/game-scripts run recorded-clicks --dry-run
+.venv/bin/star run demo --dry-run
+.venv/bin/star run recorded-clicks --dry-run
 ```
 
 确认无误后直接运行。`run` 默认使用 macOS adapter，所以不需要输入 `--macos`：
 
 ```bash
-.venv/bin/game-scripts run recorded-clicks
+.venv/bin/star run recorded-clicks
 ```
 
 运行前确认：
@@ -96,8 +100,8 @@ cd /path/to/game-script-kit
 
 1. 在 `src/game_automation/scripts_manager/<script_name>.py` 新增一个 `Script(name="<script-name>", ...)`。
 2. 在 `src/game_automation/scripts_manager/catalog.py` 把它加入 `DEFAULT_SCRIPT_CATALOG`。
-3. 运行 `.venv/bin/game-scripts list` 确认脚本名称可见。
-4. 运行 `.venv/bin/game-scripts run <script-name> --dry-run` 检查步骤执行顺序。
+3. 运行 `.venv/bin/star list` 确认脚本名称可见。
+4. 运行 `.venv/bin/star run <script-name> --dry-run` 检查步骤执行顺序。
 
 编辑已有脚本时，直接修改 `src/game_automation/scripts_manager/` 下对应文件里的步骤序列，不需要修改 runner 或平台 adapter。
 
@@ -106,7 +110,23 @@ cd /path/to/game-script-kit
 通过统一入口 dry-run 检查 demo 脚本步骤：
 
 ```bash
-.venv/bin/game-scripts run demo --dry-run
+.venv/bin/star run demo --dry-run
+```
+
+## 验证颜色条件分支和条件等待
+
+`conditional-color-demo` 使用 `If(ColorIs(...))`。默认 dry-run 颜色为 `#000000`，会走 else 分支；指定匹配颜色 `#102030` 会走 then 分支：
+
+```bash
+.venv/bin/star run conditional-color-demo --dry-run
+.venv/bin/star run conditional-color-demo --dry-run --dry-run-color '#102030'
+```
+
+`wait-until-color-demo` 使用 `WaitUntil(ColorIs(...), timeout_seconds=1, interval_seconds=0.5)`。指定匹配颜色会立即通过并点击；默认颜色不匹配，会打印两次等待并以非零退出码报告超时：
+
+```bash
+.venv/bin/star run wait-until-color-demo --dry-run --dry-run-color '#102030'
+.venv/bin/star run wait-until-color-demo --dry-run
 ```
 
 ## 记录鼠标坐标和颜色
@@ -147,8 +167,8 @@ recorded points:
 这个脚本会按顺序执行：等待 3 秒，点击 `(242, 92)`，等待 3 秒，点击 `(736, 323)`，等待 10 秒，点击 `(741, 400)` 后结束。
 
 ```bash
-.venv/bin/game-scripts run recorded-clicks --dry-run
-.venv/bin/game-scripts run recorded-clicks
+.venv/bin/star run recorded-clicks --dry-run
+.venv/bin/star run recorded-clicks
 ```
 
 ## 使用核心模型
@@ -157,12 +177,16 @@ recorded points:
 from game_automation.domain import (
     AreaWindow,
     Click,
+    Color,
+    ColorIs,
     Drag,
+    If,
     Point,
     Rect,
     Repeat,
     Script,
     Wait,
+    WaitUntil,
 )
 from game_automation.engine.runner import ScriptRunner
 
@@ -177,6 +201,16 @@ script = Script(
                 Drag(Point(30, 40), Point(50, 60), duration_seconds=0.4),
                 Wait(0.2),
             ),
+        ),
+        WaitUntil(
+            condition=ColorIs(Point(60, 70), Color.from_hex("#102030")),
+            timeout_seconds=5,
+            interval_seconds=0.5,
+        ),
+        If(
+            condition=ColorIs(Point(60, 70), Color.from_hex("#102030")),
+            then_steps=(Click(Point(100, 120)),),
+            else_steps=(Wait(0.2),),
         ),
         Wait(0.2),
     ),
@@ -200,4 +234,4 @@ ScriptRunner(device).run(script)
 
 ## 项目状态
 
-这是一个早期实验项目，当前重点是领域模型和 port-and-adapter 边界。条件判断、图像识别、OCR、脚本文件格式、多窗口编排和自动窗口查找都还没有实现。
+这是一个早期实验项目，当前重点是领域模型和 port-and-adapter 边界。图像识别、OCR、脚本文件格式、多窗口编排和自动窗口查找都还没有实现。

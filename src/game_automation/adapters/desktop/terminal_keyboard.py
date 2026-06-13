@@ -1,4 +1,8 @@
-"""实现 engine.ports.KeyStateReader — 从终端读取按键状态。"""
+"""实现 engine.ports.KeyStateReader，从终端读取按键状态。
+
+本 module 只封装交互式终端按键读取和终端模式恢复；它不解释按键语义，
+也不管理坐标记录流程。
+"""
 
 from __future__ import annotations
 
@@ -8,7 +12,6 @@ from collections import deque
 from typing import TextIO
 
 from game_automation.engine.ports import KeyStateReader
-
 
 
 class TerminalKeyStateReader(KeyStateReader):

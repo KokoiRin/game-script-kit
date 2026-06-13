@@ -1,4 +1,8 @@
-"""实现坐标和颜色记录工具的核心循环。"""
+"""实现坐标和颜色记录工具的核心循环。
+
+本 module 只编排 pointer/key/color readers 来辅助人工记录坐标；它不执行命名脚本，
+也不负责 CLI adapter 的创建。
+"""
 
 from __future__ import annotations
 

@@ -1,4 +1,8 @@
-"""实现 dry-run adapter，打印输入操作并提供固定取色结果。"""
+"""实现 dry-run adapter。
+
+本 module 只把输入动作打印到 stdout，并为条件脚本提供固定取色结果；
+它不执行真实鼠标动作，也不决定 dry-run 模式何时启用。
+"""
 
 from __future__ import annotations
 

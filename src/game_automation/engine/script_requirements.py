@@ -1,10 +1,14 @@
-"""分析脚本执行前需要组装的运行时端口。"""
+"""静态分析脚本执行前需要组装的运行时端口。
+
+本 module 只从脚本步骤树推导端口需求；它不创建端口、不执行脚本，
+也不决定 dry-run 或真实 adapter 的选择。
+"""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
-from game_automation.domain import ColorIs, If, Repeat, Script, Step
+from game_automation.domain import ColorIs, If, Repeat, Script, Step, WaitUntil
 
 
 @dataclass(frozen=True, slots=True)
@@ -23,6 +27,8 @@ def _steps_need_color_reader(steps: tuple[Step, ...]) -> bool:
         if isinstance(step, Repeat) and _steps_need_color_reader(step.steps):
             return True
         if isinstance(step, If) and _if_needs_color_reader(step):
+            return True
+        if isinstance(step, WaitUntil) and isinstance(step.condition, ColorIs):
             return True
     return False
 

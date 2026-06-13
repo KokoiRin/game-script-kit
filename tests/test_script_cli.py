@@ -12,7 +12,13 @@ def test_star_cli_lists_available_scripts(capsys) -> None:
     assert main(["list"]) == 0
 
     output = capsys.readouterr().out.splitlines()
-    assert output == ["demo", "recorded-clicks", "repeat-demo", "conditional-color-demo"]
+    assert output == [
+        "demo",
+        "recorded-clicks",
+        "repeat-demo",
+        "conditional-color-demo",
+        "wait-until-color-demo",
+    ]
 
 
 def test_star_cli_runs_named_script_with_dry_run(capsys) -> None:
@@ -76,6 +82,28 @@ def test_star_cli_reports_invalid_dry_run_color(capsys) -> None:
     captured = capsys.readouterr()
     assert captured.out == ""
     assert "script run configuration failed: color must match" in captured.err
+
+
+def test_star_cli_runs_wait_until_color_demo_with_custom_dry_run_color(capsys) -> None:
+    """验证条件等待脚本 dry-run 可用指定颜色立即成功。"""
+    assert main(["run", "wait-until-color-demo", "--dry-run", "--dry-run-color", "#102030"]) == 0
+
+    output = capsys.readouterr().out.splitlines()
+    assert output == [
+        "click Point(x=100, y=200)",
+    ]
+
+
+def test_star_cli_reports_wait_until_color_demo_timeout(capsys) -> None:
+    """验证条件等待脚本 dry-run 默认颜色会超时并返回非零。"""
+    assert main(["run", "wait-until-color-demo", "--dry-run"]) == 1
+
+    captured = capsys.readouterr()
+    assert captured.out.splitlines() == [
+        "wait 0.5s",
+        "wait 0.5s",
+    ]
+    assert "script run timed out: wait until condition timed out" in captured.err
 
 
 def test_star_cli_run_defaults_to_macos(monkeypatch, capsys) -> None:

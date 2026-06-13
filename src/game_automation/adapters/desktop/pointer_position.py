@@ -1,4 +1,8 @@
-"""实现 engine.ports.PointerPositionReader — 通过 pyautogui 读取鼠标屏幕坐标。"""
+"""实现 engine.ports.PointerPositionReader，通过 pyautogui 读取鼠标屏幕坐标。
+
+本 module 只封装当前指针位置读取；它不记录点、不读取颜色，
+也不参与脚本运行。
+"""
 
 from __future__ import annotations
 

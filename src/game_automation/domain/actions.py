@@ -1,4 +1,8 @@
-"""定义脚本可编排的原子动作步骤和控制流步骤。"""
+"""定义脚本可编排的动作和控制流步骤。
+
+本 module 只描述脚本步骤的不可变数据和字段级不变量；它不解释步骤、不读取屏幕，
+也不触发输入设备。
+"""
 
 from __future__ import annotations
 
@@ -61,5 +65,19 @@ class If:
             raise ValueError("if requires at least one then step")
 
 
+@dataclass(frozen=True, slots=True)
+class WaitUntil:
+    condition: Condition
+    timeout_seconds: float
+    interval_seconds: float
+
+    def __post_init__(self) -> None:
+        """校验条件等待的超时和轮询间隔都必须为正数。"""
+        if self.timeout_seconds <= 0:
+            raise ValueError("wait until timeout_seconds must be greater than 0")
+        if self.interval_seconds <= 0:
+            raise ValueError("wait until interval_seconds must be greater than 0")
+
+
 PrimitiveAction: TypeAlias = Click | Drag | Wait
-Step: TypeAlias = PrimitiveAction | Repeat | If
+Step: TypeAlias = PrimitiveAction | Repeat | If | WaitUntil

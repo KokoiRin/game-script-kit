@@ -1,4 +1,7 @@
-"""保存用于验证 Repeat 步骤展开行为的命名脚本。"""
+"""保存用于验证 Repeat 步骤展开行为的命名脚本。
+
+本 module 只声明一份内置脚本数据；它不展开 Repeat，也不调用运行端口。
+"""
 
 from __future__ import annotations
 

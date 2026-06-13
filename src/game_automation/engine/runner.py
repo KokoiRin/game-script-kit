@@ -1,10 +1,14 @@
-"""实现脚本 runner，将领域步骤转换为输入设备端口调用。"""
+"""解释脚本步骤树并调用已注入的运行端口。
+
+本 module 只负责按领域步骤顺序驱动 InputDevice 和条件评估；它不创建 adapter、
+不解析 CLI 参数，也不做脚本注册表查找。
+"""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
-from game_automation.domain import Click, Drag, If, Repeat, Script, Step, Wait
+from game_automation.domain import Click, Drag, If, Repeat, Script, Step, Wait, WaitUntil
 from game_automation.engine.condition_evaluator import evaluate_condition
 from game_automation.engine.ports import InputDevice, PixelColorReader
 
@@ -35,6 +39,8 @@ class ScriptRunner:
             self._run_repeat(script, step)
         elif isinstance(step, If):
             self._run_if(script, step)
+        elif isinstance(step, WaitUntil):
+            self._run_wait_until(script, step)
         else:  # pragma: no cover
             raise TypeError(f"unsupported script step: {type(step).__name__}")
 
@@ -67,3 +73,21 @@ class ScriptRunner:
             self._run_steps(script, step.then_steps)
         else:
             self._run_steps(script, step.else_steps)
+
+    def _run_wait_until(self, script: Script, step: WaitUntil) -> None:
+        """轮询条件直到满足或超时。"""
+        elapsed_seconds = 0.0
+        while True:
+            if evaluate_condition(
+                step.condition,
+                window=script.window,
+                color_reader=self.color_reader,
+            ):
+                return
+            if elapsed_seconds >= step.timeout_seconds:
+                raise TimeoutError("wait until condition timed out")
+
+            remaining_seconds = step.timeout_seconds - elapsed_seconds
+            wait_seconds = min(step.interval_seconds, remaining_seconds)
+            self.device.wait(wait_seconds)
+            elapsed_seconds += wait_seconds
