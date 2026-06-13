@@ -2,7 +2,7 @@
 
 import pytest
 
-from game_automation.domain import (
+from game_automation.portable.domain import (
     AreaWindow,
     Click,
     Color,
@@ -68,7 +68,7 @@ def test_actions_do_not_expose_move_or_mouse_button() -> None:
     assert not hasattr(click, "button")
     assert not hasattr(drag, "button")
 
-    import game_automation.domain.actions as actions
+    import game_automation.portable.domain.actions as actions
 
     assert not hasattr(actions, "Move")
     assert not hasattr(actions, "MouseButton")

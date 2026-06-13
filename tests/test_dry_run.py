@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from game_automation.adapters.dry_run import DryRunInputDevice, DryRunPixelColorReader
-from game_automation.domain import Color, Point
+from game_automation.portable.adapters.dry_run import DryRunInputDevice, DryRunPixelColorReader
+from game_automation.portable.domain import Color, Point
 
 
 def test_dry_run_input_device_prints_click(capsys) -> None:

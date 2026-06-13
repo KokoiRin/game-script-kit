@@ -5,8 +5,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from game_automation.adapters.macos import MacOSPointerDevice
-from game_automation.domain import Point
+from game_automation.platform.macos.adapters import MacOSPointerDevice
+from game_automation.portable.domain import Point
 
 
 class Backend:

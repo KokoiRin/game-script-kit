@@ -2,9 +2,9 @@
 
 from types import ModuleType
 
-from game_automation.domain import Color, Point
-from game_automation.engine.ports import InputDevice
-from game_automation.star_cli import main
+from game_automation.portable.domain import Color, Point
+from game_automation.portable.engine.ports import InputDevice
+from game_automation.platform.local_desktop.entrypoints.cli import main
 
 
 def test_star_cli_lists_available_scripts(capsys) -> None:
@@ -121,11 +121,11 @@ def test_star_cli_run_defaults_to_macos(monkeypatch, capsys) -> None:
         def wait(self, duration_seconds: float) -> None:
             """dry-run 分支不等待。"""
 
-    fake_macos_module = ModuleType("game_automation.adapters.macos")
+    fake_macos_module = ModuleType("game_automation.platform.macos.adapters")
     fake_macos_module.MacOSPointerDevice = FakeMacOSPointerDevice
     monkeypatch.setitem(
         __import__("sys").modules,
-        "game_automation.adapters.macos",
+        "game_automation.platform.macos.adapters",
         fake_macos_module,
     )
 
@@ -143,7 +143,7 @@ def test_star_cli_run_defaults_to_macos(monkeypatch, capsys) -> None:
 
 def test_star_cli_run_injects_color_reader_for_conditional_script(monkeypatch, capsys) -> None:
     """验证真实运行条件分支脚本时 CLI 会注入取色 adapter。"""
-    import game_automation.adapters.desktop as desktop
+    import game_automation.platform.desktop.adapters as desktop
 
     clicks = []
     read_points = []
@@ -168,15 +168,15 @@ def test_star_cli_run_injects_color_reader_for_conditional_script(monkeypatch, c
             read_points.append(point)
             return Color.from_hex("#102030")
 
-    fake_macos_module = ModuleType("game_automation.adapters.macos")
+    fake_macos_module = ModuleType("game_automation.platform.macos.adapters")
     fake_macos_module.MacOSPointerDevice = FakeMacOSPointerDevice
     monkeypatch.setitem(
         __import__("sys").modules,
-        "game_automation.adapters.macos",
+        "game_automation.platform.macos.adapters",
         fake_macos_module,
     )
     monkeypatch.setattr(desktop, "PyAutoGuiPixelColorReader", FakePixelColorReader)
-    monkeypatch.setitem(__import__("sys").modules, "game_automation.adapters.desktop", desktop)
+    monkeypatch.setitem(__import__("sys").modules, "game_automation.platform.desktop.adapters", desktop)
 
     assert main(["run", "conditional-color-demo"]) == 0
 
@@ -188,7 +188,7 @@ def test_star_cli_run_injects_color_reader_for_conditional_script(monkeypatch, c
 
 def test_star_cli_run_reports_color_reader_setup_error(monkeypatch, capsys) -> None:
     """验证真实运行条件分支脚本时取色 adapter setup 失败会被报告。"""
-    import game_automation.adapters.desktop as desktop
+    import game_automation.platform.desktop.adapters as desktop
 
     class FailingPixelColorReader:
         def __init__(self) -> None:
@@ -196,7 +196,7 @@ def test_star_cli_run_reports_color_reader_setup_error(monkeypatch, capsys) -> N
             raise RuntimeError("screen color unavailable")
 
     monkeypatch.setattr(desktop, "PyAutoGuiPixelColorReader", FailingPixelColorReader)
-    monkeypatch.setitem(__import__("sys").modules, "game_automation.adapters.desktop", desktop)
+    monkeypatch.setitem(__import__("sys").modules, "game_automation.platform.desktop.adapters", desktop)
 
     assert main(["run", "conditional-color-demo"]) == 1
 
@@ -214,11 +214,53 @@ def test_star_cli_reports_unknown_script(capsys) -> None:
     assert "unknown script: missing" in captured.err
 
 
+def test_star_cli_ui_starts_local_control_without_opening_browser(monkeypatch, capsys) -> None:
+    """验证 ui 子命令会把 host/port/no-open 参数传给本地 UI 入口。"""
+    import game_automation.platform.local_desktop.entrypoints.local_ui as local_ui
+
+    calls = []
+
+    def fake_serve_local_control_ui(*, host, port, open_browser):
+        calls.append(
+            {
+                "host": host,
+                "port": port,
+                "open_browser": open_browser,
+            }
+        )
+        return 0
+
+    monkeypatch.setattr(local_ui, "serve_local_control_ui", fake_serve_local_control_ui)
+
+    assert main(["ui", "--host", "127.0.0.1", "--port", "8765", "--no-open"]) == 0
+
+    captured = capsys.readouterr()
+    assert captured.err == ""
+    assert calls == [
+        {
+            "host": "127.0.0.1",
+            "port": 8765,
+            "open_browser": False,
+        }
+    ]
+
+
+def test_star_cli_ui_help_does_not_start_local_control(capsys) -> None:
+    """验证 ui help 只展示参数，不启动本地服务。"""
+    try:
+        main(["ui", "--help"])
+    except SystemExit as exc:
+        assert exc.code == 0
+
+    captured = capsys.readouterr()
+    assert "--no-open" in captured.out
+    assert "Star control UI:" not in captured.out
+
+
 def test_star_cli_recorder_injects_color_reader(monkeypatch) -> None:
     """验证 recorder 子命令会组装坐标、按键和取色 adapter。"""
-    import game_automation.adapters.desktop as desktop
-    import game_automation.star_cli as star_cli
-    import game_automation.tools.coordinate_recorder as recorder_module
+    import game_automation.platform.desktop.adapters as desktop
+    import game_automation.portable.tools.coordinate_recorder as recorder_module
 
     created = {}
 
@@ -254,14 +296,14 @@ def test_star_cli_recorder_injects_color_reader(monkeypatch) -> None:
     monkeypatch.setattr(desktop, "TerminalKeyStateReader", FakeKeyReader)
     monkeypatch.setattr(desktop, "PyAutoGuiPixelColorReader", FakeColorReader)
     monkeypatch.setattr(recorder_module, "CoordinateRecorder", FakeRecorder)
-    monkeypatch.setitem(__import__("sys").modules, "game_automation.adapters.desktop", desktop)
+    monkeypatch.setitem(__import__("sys").modules, "game_automation.platform.desktop.adapters", desktop)
     monkeypatch.setitem(
         __import__("sys").modules,
-        "game_automation.tools.coordinate_recorder",
+        "game_automation.portable.tools.coordinate_recorder",
         recorder_module,
     )
 
-    assert star_cli.main(["recorder"]) == 0
+    assert main(["recorder"]) == 0
 
     pointer_reader, key_reader, color_reader, kwargs = created["recorder_args"]
     assert pointer_reader is created["pointer"]
@@ -274,9 +316,7 @@ def test_star_cli_recorder_injects_color_reader(monkeypatch) -> None:
 
 def test_star_cli_recorder_reports_color_reader_setup_error(monkeypatch, capsys) -> None:
     """验证取色 adapter 初始化失败时 CLI 返回 setup 错误。"""
-    import game_automation.adapters.desktop as desktop
-    import game_automation.star_cli as star_cli
-
+    import game_automation.platform.desktop.adapters as desktop
     class FakePointerReader:
         def __init__(self) -> None:
             """创建 fake 坐标 reader。"""
@@ -298,9 +338,9 @@ def test_star_cli_recorder_reports_color_reader_setup_error(monkeypatch, capsys)
     monkeypatch.setattr(desktop, "PyAutoGuiPointerPositionReader", FakePointerReader)
     monkeypatch.setattr(desktop, "TerminalKeyStateReader", FakeKeyReader)
     monkeypatch.setattr(desktop, "PyAutoGuiPixelColorReader", FailingColorReader)
-    monkeypatch.setitem(__import__("sys").modules, "game_automation.adapters.desktop", desktop)
+    monkeypatch.setitem(__import__("sys").modules, "game_automation.platform.desktop.adapters", desktop)
 
-    assert star_cli.main(["recorder"]) == 1
+    assert main(["recorder"]) == 1
 
     captured = capsys.readouterr()
     assert "coordinate recorder setup failed: screen color unavailable" in captured.err

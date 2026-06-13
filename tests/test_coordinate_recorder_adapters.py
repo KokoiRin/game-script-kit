@@ -6,12 +6,12 @@ from types import SimpleNamespace
 
 import pytest
 
-from game_automation.adapters.desktop import (
+from game_automation.platform.desktop.adapters import (
     PyAutoGuiPointerPositionReader,
     TerminalKeyStateReader,
 )
-from game_automation.star_cli import main
-from game_automation.domain import Point
+from game_automation.platform.local_desktop.entrypoints.cli import main
+from game_automation.portable.domain import Point
 
 
 def test_pyautogui_pointer_reader_returns_point_from_tuple() -> None:

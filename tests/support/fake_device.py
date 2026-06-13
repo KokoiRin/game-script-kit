@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from game_automation.domain import Point
-from game_automation.engine.ports import InputDevice
+from game_automation.portable.domain import Point
+from game_automation.portable.engine.ports import InputDevice
 
 
 @dataclass(frozen=True, slots=True)
