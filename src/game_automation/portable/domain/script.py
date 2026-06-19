@@ -6,9 +6,10 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from game_automation.portable.domain.actions import Step
+from game_automation.portable.domain.point_aliases import TargetCatalog
 from game_automation.portable.domain.windows import Window
 
 
@@ -17,6 +18,7 @@ class Script:
     name: str
     window: Window
     steps: tuple[Step, ...]
+    resources: TargetCatalog = field(default_factory=TargetCatalog)
 
     def __post_init__(self) -> None:
         """校验脚本名称和步骤序列都可用于执行。"""

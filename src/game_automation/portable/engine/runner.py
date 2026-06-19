@@ -15,6 +15,7 @@ from game_automation.portable.domain import (
     If,
     ImageTarget,
     Point,
+    PointRef,
     Rect,
     Repeat,
     Script,
@@ -112,6 +113,8 @@ class ScriptRunner:
         """把静态或图片点击目标解析成最终屏幕坐标。"""
         if isinstance(target, Point):
             return script.window.resolve(target)
+        if isinstance(target, PointRef):
+            return script.window.resolve(script.resources.resolve_point(target))
         if isinstance(target, ImageTarget):
             return self._resolve_image_target(script, target)
         raise TypeError(f"unsupported click target: {type(target).__name__}")
