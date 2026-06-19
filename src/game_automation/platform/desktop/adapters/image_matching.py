@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from time import perf_counter
@@ -41,7 +42,7 @@ class PyAutoGuiScreenImageLocator(ScreenImageLocator):
             screenshot = _capture_screen(self._backend, region=region)
             screenshot_ms = _elapsed_ms(screenshot_started_at)
             template_started_at = perf_counter()
-            template_image = _load_template_image(template)
+            template_image = self._load_template_image(template, numpy)
             template_load_ms = _elapsed_ms(template_started_at)
             match_started_at = perf_counter()
             match = _locate_template(
@@ -57,7 +58,7 @@ class PyAutoGuiScreenImageLocator(ScreenImageLocator):
                 template=template,
                 region=region,
                 screenshot=screenshot,
-                template_image=template_image,
+                template_image=template_image.image,
                 cv_load_ms=cv_load_ms,
                 screenshot_ms=screenshot_ms,
                 template_load_ms=template_load_ms,
@@ -96,15 +97,19 @@ class PyAutoGuiScreenImageLocator(ScreenImageLocator):
             results: list[ImageBatchMatchResult] = []
             template_load_ms = 0.0
             match_ms = 0.0
+            screenshot_array_started_at = perf_counter()
+            screenshot_array = numpy.array(screenshot.image)
+            match_ms += _elapsed_ms(screenshot_array_started_at)
             for template in templates:
                 template_started_at = perf_counter()
-                template_image = _load_template_image(template)
+                template_image = self._load_template_image(template, numpy)
                 template_load_ms += _elapsed_ms(template_started_at)
                 match_started_at = perf_counter()
                 match = _locate_template(
                     cv2=cv2,
                     numpy=numpy,
                     screenshot=screenshot,
+                    screenshot_array=screenshot_array,
                     template=template_image,
                     min_confidence=min_confidence,
                 )
@@ -156,6 +161,26 @@ class PyAutoGuiScreenImageLocator(ScreenImageLocator):
             ) from exc
         return pyautogui
 
+    def _load_template_image(self, template: ImageTemplate, numpy: ModuleType) -> LoadedTemplateImage:
+        """读取并缓存模板图片和 OpenCV 数组。"""
+        template_path = Path(template.path)
+        with _TEMPLATE_CACHE_LOCK:
+            stat = template_path.stat()
+            cached = _TEMPLATE_CACHE.get(template_path)
+            if (
+                cached is not None
+                and cached.mtime_ns == stat.st_mtime_ns
+                and cached.size_bytes == stat.st_size
+            ):
+                return cached.image
+            image = _load_template_image(template, numpy)
+            _TEMPLATE_CACHE[template_path] = TemplateCacheEntry(
+                mtime_ns=stat.st_mtime_ns,
+                size_bytes=stat.st_size,
+                image=image,
+            )
+            return image
+
 
 @dataclass(frozen=True, slots=True)
 class CapturedScreen:
@@ -164,6 +189,23 @@ class CapturedScreen:
     origin_top_pixels: int
     pixels_per_point_x: float
     pixels_per_point_y: float
+
+
+@dataclass(frozen=True, slots=True)
+class LoadedTemplateImage:
+    image: Image.Image
+    array: object
+
+
+@dataclass(frozen=True, slots=True)
+class TemplateCacheEntry:
+    mtime_ns: int
+    size_bytes: int
+    image: LoadedTemplateImage
+
+
+_TEMPLATE_CACHE: dict[Path, TemplateCacheEntry] = {}
+_TEMPLATE_CACHE_LOCK = threading.Lock()
 
 
 def _elapsed_ms(started_at: float) -> float:
@@ -231,10 +273,11 @@ def _read_pointer_size(backend: object) -> tuple[int, int]:
         return int(width), int(height)
 
 
-def _load_template_image(template: ImageTemplate) -> Image.Image:
+def _load_template_image(template: ImageTemplate, numpy: ModuleType) -> LoadedTemplateImage:
     """读取模板图片并转换为 OpenCV 可匹配的 RGB 图。"""
     with Image.open(Path(template.path)) as image:
-        return image.convert("RGB")
+        template_image = image.convert("RGB")
+    return LoadedTemplateImage(image=template_image, array=numpy.array(template_image))
 
 
 def _locate_template(
@@ -242,16 +285,17 @@ def _locate_template(
     cv2: ModuleType,
     numpy: ModuleType,
     screenshot: CapturedScreen,
-    template: Image.Image,
+    template: LoadedTemplateImage,
     min_confidence: float,
+    screenshot_array: object | None = None,
 ) -> ImageMatch | None:
     """用 OpenCV 模板匹配返回满足阈值的最佳匹配。"""
-    if template.width > screenshot.image.width or template.height > screenshot.image.height:
+    if template.image.width > screenshot.image.width or template.image.height > screenshot.image.height:
         return None
 
-    screenshot_array = numpy.array(screenshot.image)
-    template_array = numpy.array(template)
-    result = cv2.matchTemplate(screenshot_array, template_array, cv2.TM_CCOEFF_NORMED)
+    if screenshot_array is None:
+        screenshot_array = numpy.array(screenshot.image)
+    result = cv2.matchTemplate(screenshot_array, template.array, cv2.TM_CCOEFF_NORMED)
     _, max_score, _, max_location = cv2.minMaxLoc(result)
     confidence = float(max_score)
     if confidence < min_confidence:
@@ -263,8 +307,8 @@ def _locate_template(
         rect=Rect(
             left=round(left_pixels / screenshot.pixels_per_point_x),
             top=round(top_pixels / screenshot.pixels_per_point_y),
-            width=round(template.width / screenshot.pixels_per_point_x),
-            height=round(template.height / screenshot.pixels_per_point_y),
+            width=round(template.image.width / screenshot.pixels_per_point_x),
+            height=round(template.image.height / screenshot.pixels_per_point_y),
         ),
         confidence=confidence,
     )

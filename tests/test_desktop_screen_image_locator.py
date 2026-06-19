@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from PIL import Image
 import pytest
 
+from game_automation.platform.desktop.adapters import image_matching as image_matching_adapter
 from game_automation.platform.desktop.adapters import PyAutoGuiScreenImageLocator
 from game_automation.portable.domain import ImageTemplate, Rect
 
@@ -40,6 +43,19 @@ class FakeLogger:
     def log(self, message: str) -> None:
         """记录一条日志消息。"""
         self.messages.append(message)
+
+
+class CountingNumpy:
+    def __init__(self, numpy_module) -> None:
+        """包装 numpy 模块并记录 array 输入图像尺寸。"""
+        self._numpy = numpy_module
+        self.array_sizes: list[tuple[int, int]] = []
+
+    def array(self, value):
+        """记录 PIL 图像尺寸后委托真实 numpy.array。"""
+        if isinstance(value, Image.Image):
+            self.array_sizes.append(value.size)
+        return self._numpy.array(value)
 
 
 def test_screen_image_locator_matches_template_with_opencv_confidence(tmp_path) -> None:
@@ -121,6 +137,61 @@ def test_screen_image_locator_batch_matches_many_templates_with_one_screenshot(t
     assert results[1].match.rect == Rect(left=44, top=31, width=8, height=6)
     assert any("image batch match stages " in message for message in logger.messages)
     assert any("template_count=2" in message for message in logger.messages)
+
+
+def test_screen_image_locator_batch_converts_screenshot_to_array_once(tmp_path, monkeypatch) -> None:
+    """验证批量定位只把同一张截图转换为一次 OpenCV 数组。"""
+    cv2, numpy = image_matching_adapter._load_cv_modules()
+    counting_numpy = CountingNumpy(numpy)
+    monkeypatch.setattr(
+        image_matching_adapter,
+        "_load_cv_modules",
+        lambda: (cv2, counting_numpy),
+    )
+    first_template = _build_template_image()
+    second_template = _build_second_template_image()
+    first_path = tmp_path / "first.png"
+    second_path = tmp_path / "second.png"
+    first_template.save(first_path)
+    second_template.save(second_path)
+    screenshot = Image.new("RGB", (80, 50), "white")
+    screenshot.paste(first_template, (12, 9))
+    screenshot.paste(second_template, (44, 31))
+
+    PyAutoGuiScreenImageLocator(backend=ScreenshotBackend(screenshot)).locate_many(
+        (ImageTemplate(str(first_path)), ImageTemplate(str(second_path))),
+        min_confidence=0.8,
+    )
+
+    assert counting_numpy.array_sizes.count((80, 50)) == 1
+
+
+def test_screen_image_locator_reuses_cached_template_image(tmp_path, monkeypatch) -> None:
+    """验证重复使用同一模板时不重复读取模板文件。"""
+    template = _build_template_image()
+    template_path = tmp_path / "button.png"
+    template.save(template_path)
+    screenshot = Image.new("RGB", (40, 30), "white")
+    screenshot.paste(template, (12, 9))
+    open_calls = []
+    real_open = image_matching_adapter.Image.open
+
+    def counting_open(path):
+        """记录模板文件读取次数，并委托给真实 PIL open。"""
+        open_calls.append(Path(path))
+        return real_open(path)
+
+    monkeypatch.setattr(image_matching_adapter.Image, "open", counting_open)
+    PyAutoGuiScreenImageLocator(backend=ScreenshotBackend(screenshot)).locate(
+        ImageTemplate(str(template_path)),
+        min_confidence=0.8,
+    )
+    PyAutoGuiScreenImageLocator(backend=ScreenshotBackend(screenshot)).locate(
+        ImageTemplate(str(template_path)),
+        min_confidence=0.8,
+    )
+
+    assert open_calls == [template_path]
 
 
 def test_screen_image_locator_batch_stops_after_first_match(tmp_path) -> None:
