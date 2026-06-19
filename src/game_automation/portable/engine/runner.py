@@ -85,6 +85,7 @@ class ScriptRunner:
             window=script.window,
             color_reader=self.color_reader,
             image_locator=self.image_locator,
+            resources=script.resources,
         ):
             self._run_steps(script, step.then_steps)
         else:
@@ -99,6 +100,7 @@ class ScriptRunner:
                 window=script.window,
                 color_reader=self.color_reader,
                 image_locator=self.image_locator,
+                resources=script.resources,
             ):
                 return
             if elapsed_seconds >= step.timeout_seconds:
@@ -123,13 +125,14 @@ class ScriptRunner:
         """通过图像定位端口把图片目标解析成屏幕坐标。"""
         if self.image_locator is None:
             raise RuntimeError("image locator is required for image targets")
+        template = script.resources.resolve_image(target.template)
         match = self.image_locator.locate(
-            target.template,
+            template,
             region=self._resolve_image_target_region(script, target.region),
             min_confidence=target.min_confidence,
         )
         if match is None:
-            raise RuntimeError(f"image target not found: {target.template.path}")
+            raise RuntimeError(f"image target not found: {template.path}")
         return Point(
             match.center.x + target.offset.x,
             match.center.y + target.offset.y,

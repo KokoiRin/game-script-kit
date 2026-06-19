@@ -10,11 +10,12 @@ from dataclasses import dataclass, field
 
 from game_automation.portable.domain.geometry import Point, Rect
 from game_automation.portable.domain.image_matching import ImageTemplate
+from game_automation.portable.domain.point_aliases import ImageRef
 
 
 @dataclass(frozen=True, slots=True)
 class ImageTarget:
-    template: ImageTemplate
+    template: ImageTemplate | ImageRef
     region: Rect | None = None
     min_confidence: float = 1.0
     offset: Point = field(default_factory=lambda: Point(0, 0))

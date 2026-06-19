@@ -12,6 +12,7 @@ from typing import TypeAlias
 from game_automation.portable.domain.color import Color
 from game_automation.portable.domain.geometry import Point, Rect
 from game_automation.portable.domain.image_matching import ImageTemplate
+from game_automation.portable.domain.point_aliases import ImageRef
 
 
 @dataclass(frozen=True, slots=True)
@@ -28,7 +29,7 @@ class ColorIs:
 
 @dataclass(frozen=True, slots=True)
 class ImageExists:
-    template: ImageTemplate
+    template: ImageTemplate | ImageRef
     region: Rect | None = None
     min_confidence: float = 1.0
 
