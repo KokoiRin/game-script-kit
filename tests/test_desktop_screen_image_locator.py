@@ -30,6 +30,16 @@ class FailingScreenshotBackend:
         raise RuntimeError("screen blocked")
 
 
+class FakeLogger:
+    def __init__(self) -> None:
+        """初始化日志列表。"""
+        self.messages: list[str] = []
+
+    def log(self, message: str) -> None:
+        """记录一条日志消息。"""
+        self.messages.append(message)
+
+
 def test_screen_image_locator_matches_template_with_opencv_confidence(tmp_path) -> None:
     """验证 adapter 用 OpenCV 返回实际匹配分数和区域。"""
     template = _build_template_image()
@@ -46,6 +56,36 @@ def test_screen_image_locator_matches_template_with_opencv_confidence(tmp_path) 
     assert match is not None
     assert match.rect == Rect(left=12, top=9, width=8, height=6)
     assert match.confidence >= 0.99
+
+
+def test_screen_image_locator_logs_stage_durations(tmp_path) -> None:
+    """验证 adapter 会记录截图、模板加载和匹配阶段耗时。"""
+    template = _build_template_image()
+    template_path = tmp_path / "button.png"
+    template.save(template_path)
+    screenshot = Image.new("RGB", (40, 30), "white")
+    screenshot.paste(template, (12, 9))
+    logger = FakeLogger()
+
+    PyAutoGuiScreenImageLocator(backend=ScreenshotBackend(screenshot)).locate(
+        ImageTemplate(str(template_path)),
+        min_confidence=0.8,
+        logger=logger,
+    )
+
+    assert len(logger.messages) == 1
+    message = logger.messages[0]
+    assert message.startswith("image match stages ")
+    assert f"template={template_path}" in message
+    assert "screenshot_size=40x30" in message
+    assert "template_size=8x6" in message
+    assert "cv_load_ms=" in message
+    assert "screenshot_ms=" in message
+    assert "template_load_ms=" in message
+    assert "match_ms=" in message
+    assert "total_ms=" in message
+    assert "found=True" in message
+    assert "confidence=" in message
 
 
 def test_screen_image_locator_matches_template_inside_region(tmp_path) -> None:

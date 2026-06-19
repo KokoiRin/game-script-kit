@@ -132,7 +132,7 @@ def test_local_control_background_status_includes_image_match_logs() -> None:
             """本测试中的条件会立即满足，不需要等待。"""
 
     class FakeImageLocator:
-        def locate(self, template, *, region=None, min_confidence=1.0):
+        def locate(self, template, *, region=None, min_confidence=1.0, logger=None):
             """返回固定图片匹配。"""
             return ImageMatch(Rect(10, 20, 30, 40), confidence=0.91)
 
@@ -202,7 +202,7 @@ def test_local_control_passes_min_confidence_to_image_click(tmp_path) -> None:
             """图片点击用例不会等待。"""
 
     class FakeImageLocator:
-        def locate(self, template, *, region=None, min_confidence=1.0):
+        def locate(self, template, *, region=None, min_confidence=1.0, logger=None):
             """记录最低置信度并返回固定匹配。"""
             confidences.append(min_confidence)
             return ImageMatch(Rect(10, 20, 8, 6), confidence=0.91)

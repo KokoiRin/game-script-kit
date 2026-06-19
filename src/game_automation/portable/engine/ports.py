@@ -33,6 +33,12 @@ class PixelColorReader(Protocol):
         ...
 
 
+class RunLogger(Protocol):
+    def log(self, message: str) -> None:
+        """记录一条脚本运行诊断日志。"""
+        ...
+
+
 class ScreenImageLocator(Protocol):
     def locate(
         self,
@@ -40,6 +46,7 @@ class ScreenImageLocator(Protocol):
         *,
         region: Rect | None = None,
         min_confidence: float = 1.0,
+        logger: RunLogger | None = None,
     ) -> ImageMatch | None:
         """在当前屏幕或指定区域内查找模板图片。"""
         ...
@@ -48,12 +55,6 @@ class ScreenImageLocator(Protocol):
 class CancellationToken(Protocol):
     def is_cancelled(self) -> bool:
         """返回当前脚本运行是否已被请求取消。"""
-        ...
-
-
-class RunLogger(Protocol):
-    def log(self, message: str) -> None:
-        """记录一条脚本运行诊断日志。"""
         ...
 
 

@@ -76,6 +76,7 @@ class SequenceImageLocator:
         *,
         region: Rect | None = None,
         min_confidence: float = 1.0,
+        logger=None,
     ) -> ImageMatch | None:
         """返回下一个匹配结果并记录定位参数。"""
         self.calls.append((template, region, min_confidence))
