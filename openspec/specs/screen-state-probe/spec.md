@@ -47,3 +47,16 @@ TBD - created by archiving change add-screen-state-probe-ui. Update Purpose afte
 - **WHEN** 界面状态探测未装配批量图片定位 adapter 但已装配单图定位 adapter
 - **THEN** 系统继续逐个匹配候选图片并返回同样形状的探测结果
 
+### Requirement: 界面状态探测按候选优先级早停
+系统 SHALL 在界面状态探测中默认按候选顺序早停。候选顺序 MUST 表示探测优先级；找到第一个命中候选后，本轮不再匹配后续候选，当前状态为该命中候选。
+
+#### Scenario: 按候选顺序早停
+- **WHEN** 一轮界面状态探测候选顺序为 `主页`、`人物`、`技能`
+- **AND** `主页` 匹配成功
+- **THEN** 当前状态为 `主页`
+- **AND** `人物` 与 `技能` 在本轮结果中标记为 skipped
+
+#### Scenario: 未命中候选不会提前停止
+- **WHEN** 一轮界面状态探测中前两个候选未命中
+- **THEN** 系统继续匹配后续候选直到命中或耗尽全部候选
+

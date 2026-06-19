@@ -60,6 +60,7 @@ class ScreenImageBatchLocator(Protocol):
         region: Rect | None = None,
         min_confidence: float = 1.0,
         logger: RunLogger | None = None,
+        stop_on_first_match: bool = False,
     ) -> tuple[ImageBatchMatchResult, ...]:
         """在同一张屏幕截图内查找多张模板图片。"""
         ...

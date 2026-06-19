@@ -89,11 +89,19 @@ class ImageBatchMatchResult:
     template: ImageTemplate
     match: ImageMatch | None
     elapsed_ms: float
+    skipped: bool = False
 
     def __post_init__(self) -> None:
         """校验批量匹配中单个模板耗时必须非负。"""
         if self.elapsed_ms < 0:
             raise ValueError("image batch match elapsed_ms cannot be negative")
+        if self.skipped and self.match is not None:
+            raise ValueError("skipped image batch result cannot contain a match")
+
+    @classmethod
+    def skipped_result(cls, template: ImageTemplate) -> "ImageBatchMatchResult":
+        """构造批量匹配中未执行的模板结果。"""
+        return cls(template=template, match=None, elapsed_ms=0, skipped=True)
 
     @property
     def found(self) -> bool:

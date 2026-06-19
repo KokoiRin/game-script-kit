@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from game_automation.portable.domain import ImageLookupResult, ImageMatch, ImageTemplate, Point, Rect
+from game_automation.portable.domain import ImageBatchMatchResult, ImageLookupResult, ImageMatch, ImageTemplate, Point, Rect
 
 
 def test_image_template_preserves_path() -> None:
@@ -97,3 +97,17 @@ def test_image_lookup_result_returns_none_anchor_when_missing() -> None:
     result = ImageLookupResult(None)
 
     assert result.point_at("center") is None
+
+
+def test_image_batch_match_result_distinguishes_skipped_from_missing() -> None:
+    """验证批量匹配结果能区分未命中和未执行。"""
+    template = ImageTemplate("assets/start.png")
+    missing = ImageBatchMatchResult(template, None, elapsed_ms=3.0)
+    skipped = ImageBatchMatchResult.skipped_result(template)
+
+    assert missing.found is False
+    assert missing.skipped is False
+    assert missing.elapsed_ms == 3.0
+    assert skipped.found is False
+    assert skipped.skipped is True
+    assert skipped.elapsed_ms == 0
