@@ -10,6 +10,7 @@ import io
 import subprocess
 import sys
 import threading
+import time
 from contextlib import redirect_stderr, redirect_stdout
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
@@ -22,6 +23,9 @@ from game_automation.portable.application.script_run import (
     run_script,
 )
 from game_automation.portable.domain import Click, ImageTarget, ImageTemplate, ScreenWindow, Script
+from game_automation.portable.domain import ScreenStateCandidate, ScreenStateProbeResult
+from game_automation.portable.engine.ports import RunLogger, ScreenImageLocator
+from game_automation.portable.engine.screen_state_probe import probe_screen_state
 from game_automation.portable.scripts_manager import DEFAULT_SCRIPT_CATALOG
 from game_automation.portable.scripts_manager.catalog import ScriptCatalog, ScriptNotFoundError
 
@@ -46,6 +50,15 @@ class ControlResult:
 @dataclass(frozen=True, slots=True)
 class ScriptRunStatus:
     running: bool
+    exit_code: int | None = None
+    stdout: str = ""
+    stderr: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class ScreenStateProbeStatus:
+    running: bool
+    current_state: str = "未知"
     exit_code: int | None = None
     stdout: str = ""
     stderr: str = ""
@@ -151,6 +164,40 @@ class _BackgroundScriptRun:
             )
 
 
+class _BackgroundScreenStateProbe:
+    def __init__(self) -> None:
+        """初始化后台界面状态探测会话。"""
+        self.cancellation = _CancellationFlag()
+        self.log = _ThreadSafeRunLog()
+        self._lock = threading.Lock()
+        self._running = True
+        self._current_state = "未知"
+        self._exit_code: int | None = None
+
+    def record_result(self, result: ScreenStateProbeResult) -> None:
+        """记录最近一轮界面状态探测结果。"""
+        with self._lock:
+            self._current_state = result.current_state
+
+    def finish(self, exit_code: int) -> None:
+        """记录后台界面状态探测结束状态。"""
+        with self._lock:
+            self._running = False
+            self._exit_code = exit_code
+
+    def snapshot(self) -> ScreenStateProbeStatus:
+        """返回后台界面状态探测当前状态快照。"""
+        stdout, stderr = self.log.snapshot()
+        with self._lock:
+            return ScreenStateProbeStatus(
+                running=self._running,
+                current_state=self._current_state,
+                exit_code=self._exit_code,
+                stdout=stdout,
+                stderr=stderr,
+            )
+
+
 class LocalControlApplication:
     def __init__(
         self,
@@ -173,6 +220,8 @@ class LocalControlApplication:
         self._screen_capture_factory = screen_capture_factory
         self._run_lock = threading.Lock()
         self._current_run: _BackgroundScriptRun | None = None
+        self._probe_lock = threading.Lock()
+        self._current_probe: _BackgroundScreenStateProbe | None = None
         self._test_tasks: dict[str, tuple[str, ...]] = {
             "all": (sys.executable, "-m", "pytest"),
         }
@@ -326,6 +375,67 @@ class LocalControlApplication:
             stderr=stderr.getvalue(),
         )
 
+    def probe_screen_state_once(
+        self,
+        *,
+        min_confidence: float = 0.8,
+        logger: RunLogger | None = None,
+    ) -> ScreenStateProbeResult:
+        """使用项目图片资源执行一轮界面状态探测。"""
+        return probe_screen_state(
+            self._screen_state_candidates(),
+            image_locator=self._build_screen_image_locator(),
+            min_confidence=min_confidence,
+            logger=logger,
+        )
+
+    def start_screen_state_probe(
+        self,
+        *,
+        min_confidence: float = 0.8,
+        interval_seconds: float = 1.0,
+    ) -> ScreenStateProbeStatus:
+        """启动后台界面状态循环探测会话。"""
+        with self._probe_lock:
+            if self._current_probe is not None and self._current_probe.snapshot().running:
+                current = self._current_probe.snapshot()
+                return ScreenStateProbeStatus(
+                    running=current.running,
+                    current_state=current.current_state,
+                    exit_code=current.exit_code,
+                    stdout=current.stdout,
+                    stderr=current.stderr + "screen state probe is already running\n",
+                )
+
+            session = _BackgroundScreenStateProbe()
+            self._current_probe = session
+            thread = threading.Thread(
+                target=self._run_screen_state_probe_session,
+                args=(min_confidence, interval_seconds, session),
+                daemon=True,
+            )
+            thread.start()
+            return session.snapshot()
+
+    def current_screen_state_probe(self) -> ScreenStateProbeStatus:
+        """返回当前后台界面状态探测状态。"""
+        with self._probe_lock:
+            if self._current_probe is None:
+                return ScreenStateProbeStatus(running=False)
+            return self._current_probe.snapshot()
+
+    def stop_screen_state_probe(self) -> ScreenStateProbeStatus:
+        """请求停止当前后台界面状态探测。"""
+        with self._probe_lock:
+            if self._current_probe is None:
+                return ScreenStateProbeStatus(
+                    running=False,
+                    exit_code=0,
+                    stderr="no screen state probe is running\n",
+                )
+            self._current_probe.cancellation.cancel()
+            return self._current_probe.snapshot()
+
     def _run_script_session(
         self,
         script: Script,
@@ -348,6 +458,27 @@ class LocalControlApplication:
         if result.error_message is not None:
             session.log.write_stderr(f"{result.error_message}\n")
         session.finish(result.exit_code)
+
+    def _run_screen_state_probe_session(
+        self,
+        min_confidence: float,
+        interval_seconds: float,
+        session: _BackgroundScreenStateProbe,
+    ) -> None:
+        """在后台线程中循环探测界面状态并写入会话日志。"""
+        try:
+            while not session.cancellation.is_cancelled():
+                result = self.probe_screen_state_once(
+                    min_confidence=min_confidence,
+                    logger=session.log,
+                )
+                session.record_result(result)
+                _log_screen_state_probe_result(session.log, result)
+                _wait_for_next_probe_round(session.cancellation, interval_seconds)
+            session.finish(0)
+        except Exception as exc:
+            session.log.write_stderr(f"{exc}\n")
+            session.finish(1)
 
     def capture_screen_screenshot(self) -> ControlResult:
         """保存一张真实屏幕截图，供 UI 诊断截图权限和画面内容。"""
@@ -401,6 +532,44 @@ class LocalControlApplication:
         if not candidate.is_file() or candidate.suffix.lower() not in IMAGE_ASSET_SUFFIXES:
             raise ValueError("image asset does not exist or has unsupported suffix")
         return candidate
+
+    def _screen_state_candidates(self) -> tuple[ScreenStateCandidate, ...]:
+        """把 assets 目录中的图片资源转换为界面状态候选。"""
+        return tuple(
+            ScreenStateCandidate(
+                name=Path(asset_name).stem,
+                template=ImageTemplate(str(self._resolve_image_asset(asset_name))),
+            )
+            for asset_name in self.list_image_assets()
+        )
+
+    def _build_screen_image_locator(self) -> ScreenImageLocator | None:
+        """创建真实图像定位 adapter，未装配时返回 None。"""
+        return None if self._real_image_locator_factory is None else self._real_image_locator_factory()
+
+
+def _log_screen_state_probe_result(logger: RunLogger, result: ScreenStateProbeResult) -> None:
+    """记录一轮界面状态探测摘要，供 UI 日志展示。"""
+    logger.log(
+        "screen state probe round "
+        f"current_state={result.current_state} "
+        f"elapsed_ms={result.elapsed_ms:.2f}"
+    )
+    for candidate in result.candidates:
+        logger.log(
+            "screen state candidate "
+            f"candidate={candidate.candidate.name} "
+            f"found={candidate.found} "
+            f"confidence={candidate.confidence} "
+            f"elapsed_ms={candidate.elapsed_ms:.2f}"
+        )
+
+
+def _wait_for_next_probe_round(cancellation: _CancellationFlag, interval_seconds: float) -> None:
+    """等待下一轮探测间隔，同时允许停止请求尽快生效。"""
+    deadline = time.monotonic() + max(0, interval_seconds)
+    while time.monotonic() < deadline and not cancellation.is_cancelled():
+        time.sleep(min(0.05, deadline - time.monotonic()))
 
 
 def _run_command(command: Sequence[str], cwd: Path) -> subprocess.CompletedProcess[str]:

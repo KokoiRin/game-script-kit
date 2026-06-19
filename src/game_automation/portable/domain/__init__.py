@@ -19,6 +19,12 @@ from game_automation.portable.domain.point_aliases import (
     UnknownPointNameError,
 )
 from game_automation.portable.domain.script import Script
+from game_automation.portable.domain.screen_state import (
+    UNKNOWN_SCREEN_STATE,
+    ScreenStateCandidate,
+    ScreenStateCandidateResult,
+    ScreenStateProbeResult,
+)
 from game_automation.portable.domain.target_offsets import OffsetTarget
 from game_automation.portable.domain.targets import ImageTarget
 from game_automation.portable.domain.windows import AreaWindow, ScreenWindow, Window
@@ -47,9 +53,13 @@ __all__ = [
     "Rect",
     "Repeat",
     "ScreenWindow",
+    "ScreenStateCandidate",
+    "ScreenStateCandidateResult",
+    "ScreenStateProbeResult",
     "Script",
     "Step",
     "TargetCatalog",
+    "UNKNOWN_SCREEN_STATE",
     "UnknownImageNameError",
     "UnknownPointNameError",
     "Wait",

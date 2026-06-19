@@ -65,6 +65,9 @@ def create_local_control_server(
             if path == "/api/script-run":
                 self._send_json(_status_to_payload(control_app.current_script_run()))
                 return
+            if path == "/api/screen-state-probe":
+                self._send_json(_probe_status_to_payload(control_app.current_screen_state_probe()))
+                return
             if path == "/api/debug-screenshot":
                 self._send_png_file(Path(latest_screenshot_path))
                 return
@@ -85,6 +88,31 @@ def create_local_control_server(
             if self.path == "/api/stop-script":
                 status = control_app.stop_running_script()
                 self._send_json(_status_to_payload(status))
+                return
+            if self.path == "/api/start-screen-state-probe":
+                payload = self._read_json()
+                min_confidence = _parse_min_confidence(payload)
+                interval_seconds = _parse_interval_seconds(payload)
+                if min_confidence is None or interval_seconds is None:
+                    self._send_json(
+                        {
+                            "running": False,
+                            "current_state": "未知",
+                            "exit_code": 2,
+                            "stdout": "",
+                            "stderr": "invalid screen state probe request: min_confidence and interval_seconds must be numbers\n",
+                        }
+                    )
+                    return
+                status = control_app.start_screen_state_probe(
+                    min_confidence=min_confidence,
+                    interval_seconds=interval_seconds,
+                )
+                self._send_json(_probe_status_to_payload(status))
+                return
+            if self.path == "/api/stop-screen-state-probe":
+                status = control_app.stop_screen_state_probe()
+                self._send_json(_probe_status_to_payload(status))
                 return
             if self.path == "/api/click-image":
                 payload = self._read_json()
@@ -188,10 +216,29 @@ def _status_to_payload(status) -> dict[str, object]:
     }
 
 
+def _probe_status_to_payload(status) -> dict[str, object]:
+    """把后台界面探测状态转换成 HTTP JSON payload。"""
+    return {
+        "running": status.running,
+        "current_state": status.current_state,
+        "exit_code": status.exit_code,
+        "stdout": status.stdout,
+        "stderr": status.stderr,
+    }
+
+
 def _parse_min_confidence(payload: dict[str, object]) -> float | None:
     """把 HTTP payload 中的图片匹配置信度解析为数字。"""
     try:
         return float(payload.get("min_confidence", 0.8))
+    except (TypeError, ValueError):
+        return None
+
+
+def _parse_interval_seconds(payload: dict[str, object]) -> float | None:
+    """把 HTTP payload 中的界面探测间隔解析为数字。"""
+    try:
+        return float(payload.get("interval_seconds", 1.0))
     except (TypeError, ValueError):
         return None
 
@@ -240,6 +287,37 @@ CONTROL_PAGE_HTML = """<!doctype html>
       border: 1px solid #d8dde5;
       border-radius: 8px;
       padding: 14px;
+    }
+    .screen-state-toolbar {
+      display: grid;
+      grid-template-columns: 140px 140px auto auto;
+      gap: 10px;
+      align-items: end;
+      background: #ffffff;
+      border: 1px solid #d8dde5;
+      border-radius: 8px;
+      padding: 14px;
+    }
+    .tabs {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 12px;
+      border-bottom: 1px solid #d8dde5;
+    }
+    .tab-button {
+      border: 0;
+      border-bottom: 2px solid transparent;
+      border-radius: 0;
+      background: transparent;
+      color: #4e5661;
+      padding: 0 12px;
+    }
+    .tab-button.active {
+      border-bottom-color: #2563eb;
+      color: #15171a;
+    }
+    .tab-panel[hidden] {
+      display: none;
     }
     .image-toolbar {
       margin-top: 12px;
@@ -339,7 +417,7 @@ CONTROL_PAGE_HTML = """<!doctype html>
       height: auto;
     }
     @media (max-width: 760px) {
-      header, .toolbar, .image-toolbar {
+      header, .toolbar, .image-toolbar, .screen-state-toolbar {
         display: grid;
         grid-template-columns: 1fr;
       }
@@ -352,44 +430,70 @@ CONTROL_PAGE_HTML = """<!doctype html>
       <h1>Star 控制台</h1>
       <button class="secondary" id="run-tests" type="button">运行测试</button>
     </header>
-    <section class="toolbar">
-      <label>
-        脚本
-        <select id="script-select"></select>
-      </label>
-      <label class="checkbox-label">
-        <input id="dry-run-enabled" type="checkbox" checked>
-        模拟运行
-      </label>
-      <label>
-        模拟颜色
-        <input id="dry-run-color" value="#000000" pattern="#[0-9A-Fa-f]{6}">
-      </label>
-      <button id="run-script" type="button">运行脚本</button>
-      <button class="secondary" id="stop-script" type="button" disabled>停止</button>
+    <nav class="tabs" aria-label="控制台功能">
+      <button class="tab-button active" id="script-control-tab" type="button" data-tab-target="script-control-panel">脚本控制</button>
+      <button class="tab-button" id="screen-state-tab" type="button" data-tab-target="screen-state-panel">界面探测</button>
+    </nav>
+    <section class="tab-panel" id="script-control-panel">
+      <section class="toolbar">
+        <label>
+          脚本
+          <select id="script-select"></select>
+        </label>
+        <label class="checkbox-label">
+          <input id="dry-run-enabled" type="checkbox" checked>
+          模拟运行
+        </label>
+        <label>
+          模拟颜色
+          <input id="dry-run-color" value="#000000" pattern="#[0-9A-Fa-f]{6}">
+        </label>
+        <button id="run-script" type="button">运行脚本</button>
+        <button class="secondary" id="stop-script" type="button" disabled>停止</button>
+      </section>
+      <section class="image-toolbar">
+        <label>
+          目标图片 <span id="image-asset-folder">assets</span>/
+          <select id="image-asset-select"></select>
+        </label>
+        <label>
+          最低置信度
+          <input id="image-confidence" type="number" min="0.01" max="1" step="0.01" value="0.8">
+        </label>
+        <button class="secondary" id="refresh-images" type="button">刷新图片</button>
+        <button class="secondary" id="capture-screen" type="button">截屏诊断</button>
+        <button id="click-image" type="button">查找并点击图片</button>
+      </section>
+      <section class="output">
+        <div class="status" id="status"></div>
+        <pre id="output"></pre>
+        <div class="debug-preview" id="debug-preview">
+          <img id="debug-screenshot" alt="最新截屏诊断图">
+        </div>
+      </section>
     </section>
-    <section class="image-toolbar">
-      <label>
-        目标图片 <span id="image-asset-folder">assets</span>/
-        <select id="image-asset-select"></select>
-      </label>
-      <label>
-        最低置信度
-        <input id="image-confidence" type="number" min="0.01" max="1" step="0.01" value="0.8">
-      </label>
-      <button class="secondary" id="refresh-images" type="button">刷新图片</button>
-      <button class="secondary" id="capture-screen" type="button">截屏诊断</button>
-      <button id="click-image" type="button">查找并点击图片</button>
-    </section>
-    <section class="output">
-      <div class="status" id="status"></div>
-      <pre id="output"></pre>
-      <div class="debug-preview" id="debug-preview">
-        <img id="debug-screenshot" alt="最新截屏诊断图">
-      </div>
+    <section class="tab-panel" id="screen-state-panel" hidden>
+      <section class="screen-state-toolbar">
+        <label>
+          最低置信度
+          <input id="screen-state-confidence" type="number" min="0.01" max="1" step="0.01" value="0.8">
+        </label>
+        <label>
+          间隔秒数
+          <input id="screen-state-interval" type="number" min="0" step="0.1" value="1">
+        </label>
+        <button id="start-screen-state-probe" type="button">启动探测</button>
+        <button class="secondary" id="stop-screen-state-probe" type="button" disabled>停止探测</button>
+      </section>
+      <section class="output">
+        <div class="status" id="screen-state-current">当前状态：未知</div>
+        <pre id="screen-state-log"></pre>
+      </section>
     </section>
   </main>
   <script>
+    const tabButtons = document.querySelectorAll(".tab-button");
+    const tabPanels = document.querySelectorAll(".tab-panel");
     const scriptSelect = document.querySelector("#script-select");
     const dryRunCheckbox = document.querySelector("#dry-run-enabled");
     const colorInput = document.querySelector("#dry-run-color");
@@ -406,8 +510,16 @@ CONTROL_PAGE_HTML = """<!doctype html>
     const imageConfidenceInput = document.querySelector("#image-confidence");
     const debugPreview = document.querySelector("#debug-preview");
     const debugScreenshot = document.querySelector("#debug-screenshot");
+    const screenStateConfidenceInput = document.querySelector("#screen-state-confidence");
+    const screenStateIntervalInput = document.querySelector("#screen-state-interval");
+    const screenStateCurrent = document.querySelector("#screen-state-current");
+    const screenStateLog = document.querySelector("#screen-state-log");
+    const startScreenStateProbeButton = document.querySelector("#start-screen-state-probe");
+    const stopScreenStateProbeButton = document.querySelector("#stop-screen-state-probe");
     let scriptRunPollTimer = null;
     let activeScriptRun = false;
+    let screenStateProbePollTimer = null;
+    let activeScreenStateProbe = false;
 
     function setBusy(isBusy) {
       runScriptButton.disabled = isBusy;
@@ -416,6 +528,25 @@ CONTROL_PAGE_HTML = """<!doctype html>
       captureScreenButton.disabled = isBusy;
       clickImageButton.disabled = isBusy || !imageAssetSelect.value;
       stopScriptButton.disabled = !activeScriptRun;
+    }
+
+    function setScreenStateBusy(isBusy) {
+      startScreenStateProbeButton.disabled = isBusy;
+      stopScreenStateProbeButton.disabled = !isBusy;
+    }
+
+    function setupTabs() {
+      for (const button of tabButtons) {
+        button.addEventListener("click", () => {
+          const targetId = button.dataset.tabTarget;
+          for (const candidate of tabButtons) {
+            candidate.classList.toggle("active", candidate === button);
+          }
+          for (const panel of tabPanels) {
+            panel.hidden = panel.id !== targetId;
+          }
+        });
+      }
     }
 
     function renderResult(prefix, result) {
@@ -438,6 +569,18 @@ CONTROL_PAGE_HTML = """<!doctype html>
       outputEl.textContent = `${result.stdout || ""}${result.stderr || ""}`;
     }
 
+    function renderScreenStateStatus(result) {
+      const state = result.current_state || "未知";
+      if (result.running) {
+        screenStateCurrent.textContent = `当前状态：${state}（探测中）`;
+      } else if (result.exit_code === null || result.exit_code === undefined) {
+        screenStateCurrent.textContent = `当前状态：${state}`;
+      } else {
+        screenStateCurrent.textContent = `当前状态：${state}，退出码：${result.exit_code}`;
+      }
+      screenStateLog.textContent = `${result.stdout || ""}${result.stderr || ""}`;
+    }
+
     function scheduleScriptRunPoll() {
       if (scriptRunPollTimer) {
         window.clearTimeout(scriptRunPollTimer);
@@ -453,6 +596,24 @@ CONTROL_PAGE_HTML = """<!doctype html>
       setBusy(activeScriptRun);
       if (activeScriptRun) {
         scheduleScriptRunPoll();
+      }
+    }
+
+    function scheduleScreenStateProbePoll() {
+      if (screenStateProbePollTimer) {
+        window.clearTimeout(screenStateProbePollTimer);
+      }
+      screenStateProbePollTimer = window.setTimeout(pollScreenStateProbe, 500);
+    }
+
+    async function pollScreenStateProbe() {
+      const response = await fetch("/api/screen-state-probe");
+      const result = await response.json();
+      renderScreenStateStatus(result);
+      activeScreenStateProbe = Boolean(result.running);
+      setScreenStateBusy(activeScreenStateProbe);
+      if (activeScreenStateProbe) {
+        scheduleScreenStateProbePoll();
       }
     }
 
@@ -581,12 +742,61 @@ CONTROL_PAGE_HTML = """<!doctype html>
       }
     }
 
+    async function startScreenStateProbe() {
+      activeScreenStateProbe = true;
+      setScreenStateBusy(true);
+      screenStateCurrent.textContent = "当前状态：启动中";
+      screenStateLog.textContent = "";
+      try {
+        const response = await fetch("/api/start-screen-state-probe", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({
+            min_confidence: Number.parseFloat(screenStateConfidenceInput.value),
+            interval_seconds: Number.parseFloat(screenStateIntervalInput.value)
+          })
+        });
+        const result = await response.json();
+        renderScreenStateStatus(result);
+        activeScreenStateProbe = Boolean(result.running);
+        setScreenStateBusy(activeScreenStateProbe);
+        if (activeScreenStateProbe) {
+          scheduleScreenStateProbePoll();
+        }
+      } finally {
+        setScreenStateBusy(activeScreenStateProbe);
+      }
+    }
+
+    async function stopScreenStateProbe() {
+      screenStateCurrent.textContent = "当前状态：正在停止";
+      try {
+        const response = await fetch("/api/stop-screen-state-probe", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({})
+        });
+        const result = await response.json();
+        renderScreenStateStatus(result);
+        activeScreenStateProbe = Boolean(result.running);
+        setScreenStateBusy(activeScreenStateProbe);
+        if (activeScreenStateProbe) {
+          scheduleScreenStateProbePoll();
+        }
+      } finally {
+        stopScreenStateProbeButton.disabled = !activeScreenStateProbe;
+      }
+    }
+
+    setupTabs();
     runScriptButton.addEventListener("click", runScript);
     stopScriptButton.addEventListener("click", stopScript);
     runTestsButton.addEventListener("click", runTests);
     refreshImagesButton.addEventListener("click", loadImageAssets);
     captureScreenButton.addEventListener("click", captureScreen);
     clickImageButton.addEventListener("click", clickImage);
+    startScreenStateProbeButton.addEventListener("click", startScreenStateProbe);
+    stopScreenStateProbeButton.addEventListener("click", stopScreenStateProbe);
     loadScripts();
     loadImageAssets();
   </script>

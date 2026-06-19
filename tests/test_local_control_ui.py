@@ -10,7 +10,7 @@ import http.client
 import json
 import threading
 
-from game_automation.portable.application.local_control import ControlResult, ScriptRunStatus
+from game_automation.portable.application.local_control import ControlResult, ScreenStateProbeStatus, ScriptRunStatus
 from game_automation.platform.local_desktop.entrypoints.local_ui import create_local_control_server
 
 
@@ -53,9 +53,16 @@ def test_local_ui_serves_control_page() -> None:
     assert 'id="capture-screen"' in html
     assert 'id="debug-screenshot"' in html
     assert 'id="run-tests"' in html
+    assert 'id="screen-state-tab"' in html
+    assert 'id="start-screen-state-probe"' in html
+    assert 'id="stop-screen-state-probe"' in html
+    assert 'id="screen-state-interval"' in html
+    assert 'id="screen-state-current"' in html
+    assert 'id="screen-state-log"' in html
     assert "运行测试" in html
     assert "查找并点击图片" in html
     assert "截屏诊断" in html
+    assert "界面探测" in html
 
 
 def test_local_ui_lists_image_assets_over_http() -> None:
@@ -154,6 +161,88 @@ def test_local_ui_stops_script_run_over_http() -> None:
         "running": True,
         "exit_code": None,
         "stdout": "stopping\n",
+        "stderr": "",
+    }
+
+
+def test_local_ui_starts_screen_state_probe_over_http() -> None:
+    """验证 UI HTTP 接口把界面探测启动请求委托给 application。"""
+    app = FakeControlApplication()
+    server = create_local_control_server(host="127.0.0.1", port=0, app=app)
+    thread = threading.Thread(target=server.serve_forever)
+    thread.start()
+    try:
+        payload = _request_json(
+            server.server_address,
+            "POST",
+            "/api/start-screen-state-probe",
+            {
+                "min_confidence": 0.75,
+                "interval_seconds": 0.5,
+            },
+        )
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+    assert app.probe_start_requests == [
+        {
+            "min_confidence": 0.75,
+            "interval_seconds": 0.5,
+        }
+    ]
+    assert payload == {
+        "running": True,
+        "current_state": "装备",
+        "exit_code": None,
+        "stdout": "probe started\n",
+        "stderr": "",
+    }
+
+
+def test_local_ui_gets_screen_state_probe_status_over_http() -> None:
+    """验证 UI HTTP 接口可以查询界面探测状态。"""
+    app = FakeControlApplication()
+    server = create_local_control_server(host="127.0.0.1", port=0, app=app)
+    thread = threading.Thread(target=server.serve_forever)
+    thread.start()
+    try:
+        payload = _request_json(server.server_address, "GET", "/api/screen-state-probe")
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+    assert app.probe_status_requests == 1
+    assert payload == {
+        "running": False,
+        "current_state": "人物",
+        "exit_code": 0,
+        "stdout": "probe done\n",
+        "stderr": "",
+    }
+
+
+def test_local_ui_stops_screen_state_probe_over_http() -> None:
+    """验证 UI HTTP 接口可以请求停止界面探测。"""
+    app = FakeControlApplication()
+    server = create_local_control_server(host="127.0.0.1", port=0, app=app)
+    thread = threading.Thread(target=server.serve_forever)
+    thread.start()
+    try:
+        payload = _request_json(server.server_address, "POST", "/api/stop-screen-state-probe", {})
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+    assert app.probe_stop_requests == 1
+    assert payload == {
+        "running": True,
+        "current_state": "装备",
+        "exit_code": None,
+        "stdout": "probe stopping\n",
         "stderr": "",
     }
 
@@ -287,6 +376,9 @@ class FakeControlApplication:
         self.test_requests: list[str] = []
         self.image_click_requests: list[dict[str, object]] = []
         self.capture_requests = 0
+        self.probe_start_requests: list[dict[str, object]] = []
+        self.probe_status_requests = 0
+        self.probe_stop_requests = 0
 
     def list_scripts(self) -> tuple[str, ...]:
         return ("conditional-color-demo",)
@@ -319,6 +411,36 @@ class FakeControlApplication:
         """记录 fake 后台脚本停止请求。"""
         self.stop_requests += 1
         return ScriptRunStatus(running=True, stdout="stopping\n")
+
+    def start_screen_state_probe(
+        self,
+        *,
+        min_confidence: float = 0.8,
+        interval_seconds: float = 1.0,
+    ) -> ScreenStateProbeStatus:
+        """记录 fake 界面探测启动请求。"""
+        self.probe_start_requests.append(
+            {
+                "min_confidence": min_confidence,
+                "interval_seconds": interval_seconds,
+            }
+        )
+        return ScreenStateProbeStatus(running=True, current_state="装备", stdout="probe started\n")
+
+    def current_screen_state_probe(self) -> ScreenStateProbeStatus:
+        """记录 fake 界面探测状态查询。"""
+        self.probe_status_requests += 1
+        return ScreenStateProbeStatus(
+            running=False,
+            current_state="人物",
+            exit_code=0,
+            stdout="probe done\n",
+        )
+
+    def stop_screen_state_probe(self) -> ScreenStateProbeStatus:
+        """记录 fake 界面探测停止请求。"""
+        self.probe_stop_requests += 1
+        return ScreenStateProbeStatus(running=True, current_state="装备", stdout="probe stopping\n")
 
     def run_tests(self, task_name: str = "all") -> ControlResult:
         self.test_requests.append(task_name)
