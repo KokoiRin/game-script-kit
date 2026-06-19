@@ -20,6 +20,7 @@ def test_star_cli_lists_available_scripts(capsys) -> None:
         "wait-until-color-demo",
         "wait-until-image-demo",
         "click-image-demo",
+        "click-leave-or-retry-loop",
     ]
 
 
