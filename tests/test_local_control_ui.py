@@ -43,6 +43,8 @@ def test_local_ui_serves_control_page() -> None:
         server.server_close()
 
     assert "<title>Star 控制台</title>" in html
+    assert 'href="/static/control.css"' in html
+    assert 'src="/static/control.js"' in html
     assert 'id="script-select"' in html
     assert 'id="dry-run-enabled" type="checkbox" checked' in html
     assert 'id="run-script"' in html
@@ -63,6 +65,24 @@ def test_local_ui_serves_control_page() -> None:
     assert "查找并点击图片" in html
     assert "截屏诊断" in html
     assert "界面探测" in html
+
+
+def test_local_ui_serves_static_assets() -> None:
+    """验证控制页面的 CSS 和 JS 会通过静态资源 endpoint 返回。"""
+    server = create_local_control_server(host="127.0.0.1", port=0)
+    thread = threading.Thread(target=server.serve_forever)
+    thread.start()
+    try:
+        css = _request_text(server.server_address, "GET", "/static/control.css")
+        script = _request_text(server.server_address, "GET", "/static/control.js")
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+    assert ".screen-state-toolbar" in css
+    assert 'document.querySelector("#screen-state-confidence")' in script
+    assert 'fetch("/api/start-screen-state-probe"' in script
 
 
 def test_local_ui_lists_image_assets_over_http() -> None:
