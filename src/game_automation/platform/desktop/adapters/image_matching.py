@@ -81,6 +81,7 @@ class PyAutoGuiScreenImageLocator(ScreenImageLocator):
         region: Rect | None = None,
         min_confidence: float = 1.0,
         logger: RunLogger | None = None,
+        stop_on_first_match: bool = False,
     ) -> tuple[ImageBatchMatchResult, ...]:
         """在一次截图中查找多张模板图片。"""
         _validate_min_confidence(min_confidence)
@@ -116,6 +117,12 @@ class PyAutoGuiScreenImageLocator(ScreenImageLocator):
                         elapsed_ms=one_match_ms,
                     )
                 )
+                if stop_on_first_match and match is not None:
+                    results.extend(
+                        ImageBatchMatchResult.skipped_result(skipped_template)
+                        for skipped_template in templates[len(results) :]
+                    )
+                    break
             batch_results = tuple(results)
             _log_batch_match_stages(
                 logger,
@@ -322,6 +329,8 @@ def _log_batch_match_stages(
         f"template_load_ms={template_load_ms:.2f} "
         f"match_ms={match_ms:.2f} "
         f"total_ms={total_ms:.2f} "
+        f"checked_count={sum(1 for result in results if result.found or not result.skipped)} "
+        f"skipped_count={sum(1 for result in results if result.skipped)} "
         f"found_count={sum(1 for result in results if result.found)}"
     )
 

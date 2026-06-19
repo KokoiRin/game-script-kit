@@ -124,9 +124,17 @@ def test_local_control_screen_state_probe_uses_batch_locator_when_configured(tmp
             raise AssertionError("single image locator should not be called")
 
     class FakeBatchLocator:
-        def locate_many(self, templates, *, region=None, min_confidence=1.0, logger=None):
+        def locate_many(
+            self,
+            templates,
+            *,
+            region=None,
+            min_confidence=1.0,
+            logger=None,
+            stop_on_first_match=False,
+        ):
             """记录批量请求并返回装备命中。"""
-            batch_requests.append((templates, min_confidence))
+            batch_requests.append((templates, min_confidence, stop_on_first_match))
             return (
                 ImageBatchMatchResult(templates[0], None, elapsed_ms=3.0),
                 ImageBatchMatchResult(
@@ -146,6 +154,7 @@ def test_local_control_screen_state_probe_uses_batch_locator_when_configured(tmp
 
     assert result.current_state == "装备"
     assert len(batch_requests) == 1
+    assert batch_requests[0][2] is True
 
 
 def test_probe_screen_state_prefers_batch_locator_and_preserves_candidate_order() -> None:
@@ -165,10 +174,25 @@ def test_probe_screen_state_prefers_batch_locator_and_preserves_candidate_order(
             """初始化 fake batch 请求记录。"""
             self.requests = []
 
-        def locate_many(self, templates, *, region=None, min_confidence=1.0, logger=None):
+        def locate_many(
+            self,
+            templates,
+            *,
+            region=None,
+            min_confidence=1.0,
+            logger=None,
+            stop_on_first_match=False,
+        ):
             """记录批量模板请求并返回同序结果。"""
-            self.requests.append((templates, min_confidence))
+            self.requests.append((templates, min_confidence, stop_on_first_match))
             return (
+                ImageBatchMatchResult(
+                    templates[0],
+                    ImageMatch(Rect(1, 2, 3, 4), confidence=0.9),
+                    elapsed_ms=3.0,
+                ),
+                ImageBatchMatchResult.skipped_result(templates[1]),
+            ) if stop_on_first_match else (
                 ImageBatchMatchResult(templates[0], None, elapsed_ms=3.0),
                 ImageBatchMatchResult(
                     templates[1],
@@ -186,11 +210,11 @@ def test_probe_screen_state_prefers_batch_locator_and_preserves_candidate_order(
         min_confidence=0.8,
     )
 
-    assert result.current_state == "装备"
+    assert result.current_state == "人物"
     assert [candidate.candidate.name for candidate in result.candidates] == ["人物", "装备"]
-    assert [candidate.elapsed_ms for candidate in result.candidates] == [3.0, 4.0]
+    assert [candidate.skipped for candidate in result.candidates] == [False, True]
     assert batch_locator.requests == [
-        ((ImageTemplate("assets/character.png"), ImageTemplate("assets/equipment.png")), 0.8)
+        ((ImageTemplate("assets/character.png"), ImageTemplate("assets/equipment.png")), 0.8, True)
     ]
 
 

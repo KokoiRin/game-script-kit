@@ -29,11 +29,14 @@ class ScreenStateCandidateResult:
     candidate: ScreenStateCandidate
     match: ImageMatch | None
     elapsed_ms: float
+    skipped: bool = False
 
     def __post_init__(self) -> None:
-        """校验单个候选探测耗时必须非负。"""
+        """校验单个候选探测耗时和跳过状态必须自洽。"""
         if self.elapsed_ms < 0:
             raise ValueError("screen state candidate elapsed_ms cannot be negative")
+        if self.skipped and self.match is not None:
+            raise ValueError("skipped screen state candidate cannot contain a match")
 
     @property
     def found(self) -> bool:

@@ -123,6 +123,34 @@ def test_screen_image_locator_batch_matches_many_templates_with_one_screenshot(t
     assert any("template_count=2" in message for message in logger.messages)
 
 
+def test_screen_image_locator_batch_stops_after_first_match(tmp_path) -> None:
+    """验证批量定位早停后把后续模板标记为 skipped。"""
+    first_template = _build_template_image()
+    second_template = _build_second_template_image()
+    first_path = tmp_path / "first.png"
+    second_path = tmp_path / "second.png"
+    first_template.save(first_path)
+    second_template.save(second_path)
+    screenshot = Image.new("RGB", (80, 50), "white")
+    screenshot.paste(first_template, (12, 9))
+    screenshot.paste(second_template, (44, 31))
+    logger = FakeLogger()
+
+    results = PyAutoGuiScreenImageLocator(backend=ScreenshotBackend(screenshot)).locate_many(
+        (ImageTemplate(str(first_path)), ImageTemplate(str(second_path))),
+        min_confidence=0.8,
+        logger=logger,
+        stop_on_first_match=True,
+    )
+
+    assert results[0].found is True
+    assert results[0].skipped is False
+    assert results[1].found is False
+    assert results[1].skipped is True
+    assert any("checked_count=1" in message for message in logger.messages)
+    assert any("skipped_count=1" in message for message in logger.messages)
+
+
 def test_screen_image_locator_matches_template_inside_region(tmp_path) -> None:
     """验证指定搜索区域会裁剪截图并返回屏幕绝对坐标。"""
     template = _build_template_image()

@@ -36,6 +36,7 @@ def probe_screen_state(
             tuple(candidate.template for candidate in candidates),
             min_confidence=min_confidence,
             logger=logger,
+            stop_on_first_match=True,
         )
         return ScreenStateProbeResult(
             candidates=_screen_state_results_from_batch(candidates, batch_results),
@@ -57,6 +58,18 @@ def probe_screen_state(
                 elapsed_ms=(clock() - candidate_started_at) * 1000,
             )
         )
+        if match is not None:
+            # 当前界面候选按优先级排序；命中后剩余候选不再继续截图匹配。
+            results.extend(
+                ScreenStateCandidateResult(
+                    candidate=remaining_candidate,
+                    match=None,
+                    elapsed_ms=0,
+                    skipped=True,
+                )
+                for remaining_candidate in candidates[len(results) :]
+            )
+            break
     return ScreenStateProbeResult(
         candidates=tuple(results),
         elapsed_ms=(clock() - total_started_at) * 1000,
@@ -75,6 +88,7 @@ def _screen_state_results_from_batch(
             candidate=candidate,
             match=batch_result.match,
             elapsed_ms=batch_result.elapsed_ms,
+            skipped=batch_result.skipped,
         )
         for candidate, batch_result in zip(candidates, batch_results, strict=True)
     )
