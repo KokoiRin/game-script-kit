@@ -10,7 +10,10 @@ env/
 .pytest_cache/
 .coverage
 htmlcov/
+.claude/
+.codex/
 .hermes/
 .star/
+assets/
 
 .DS_Store
