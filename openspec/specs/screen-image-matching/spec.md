@@ -110,3 +110,18 @@ matching.
 #### Scenario: 查询层收到 None
 - **WHEN** `ScreenImageLocator` 返回 `None`
 - **THEN** 查询层会返回 found 为假的结果
+
+### Requirement: 图片匹配查询记录耗时日志
+图片匹配查询层 SHALL 在调用 `ScreenImageLocator` 时可选记录诊断日志，日志包含模板路径、最低置信度、搜索区域、耗时毫秒、是否命中以及命中置信度。日志能力 MUST 通过可注入端口表达，不得由平台 adapter 直接打印。
+
+#### Scenario: 记录命中耗时
+- **WHEN** 图片匹配查询返回命中结果
+- **THEN** 日志记录模板路径、耗时毫秒、命中状态和命中置信度
+
+#### Scenario: 记录未命中耗时
+- **WHEN** 图片匹配查询返回未命中结果
+- **THEN** 日志记录模板路径、耗时毫秒和未命中状态
+
+#### Scenario: 未注入日志端口时行为不变
+- **WHEN** 图片匹配查询未注入日志端口
+- **THEN** 查询结果和错误语义保持不变

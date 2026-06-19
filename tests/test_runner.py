@@ -2,7 +2,7 @@
 
 import pytest
 
-from game_automation.portable.engine.runner import ScriptRunner
+from game_automation.portable.engine.runner import ScriptCancelledError, ScriptRunner
 from game_automation.portable.domain import (
     AreaWindow,
     Click,
@@ -210,6 +210,34 @@ def test_runner_expands_repeat_steps() -> None:
         Point(110, 220),
         Point(110, 220),
     ]
+
+
+def test_runner_stops_repeat_when_cancellation_is_requested() -> None:
+    """验证 runner 在循环运行中收到取消信号后停止后续步骤。"""
+    device = FakeInputDevice()
+    script = Script(
+        name="cancel-repeat-runner",
+        window=ScreenWindow(),
+        steps=(
+            Repeat(
+                times=3,
+                steps=(
+                    Click(Point(1, 2)),
+                    Wait(0.5),
+                ),
+            ),
+        ),
+    )
+
+    class CancelAfterFirstWait:
+        def is_cancelled(self) -> bool:
+            """第一轮等待结束后报告取消。"""
+            return len(device.actions) >= 2
+
+    with pytest.raises(ScriptCancelledError, match="script run cancelled"):
+        ScriptRunner(device=device, cancellation_token=CancelAfterFirstWait()).run(script)
+
+    assert [action.name for action in device.actions] == ["click", "wait"]
 
 
 def test_runner_expands_nested_repeat_steps_with_script_window() -> None:

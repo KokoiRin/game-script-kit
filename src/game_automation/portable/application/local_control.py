@@ -9,6 +9,7 @@ from __future__ import annotations
 import io
 import subprocess
 import sys
+import threading
 from contextlib import redirect_stderr, redirect_stdout
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
@@ -42,6 +43,114 @@ class ControlResult:
     screenshot_path: str = ""
 
 
+@dataclass(frozen=True, slots=True)
+class ScriptRunStatus:
+    running: bool
+    exit_code: int | None = None
+    stdout: str = ""
+    stderr: str = ""
+
+
+class _CancellationFlag:
+    def __init__(self) -> None:
+        """初始化线程安全取消标记。"""
+        self._event = threading.Event()
+
+    def cancel(self) -> None:
+        """请求后台脚本取消运行。"""
+        self._event.set()
+
+    def is_cancelled(self) -> bool:
+        """返回后台脚本是否已收到取消请求。"""
+        return self._event.is_set()
+
+
+class _ThreadSafeRunLog:
+    def __init__(self) -> None:
+        """初始化线程安全 stdout/stderr 缓冲。"""
+        self._lock = threading.Lock()
+        self._stdout = io.StringIO()
+        self._stderr = io.StringIO()
+
+    def stdout_writer(self):
+        """返回用于重定向 stdout 的 writer。"""
+        return _RunLogWriter(self.write_stdout)
+
+    def stderr_writer(self):
+        """返回用于重定向 stderr 的 writer。"""
+        return _RunLogWriter(self.write_stderr)
+
+    def log(self, message: str) -> None:
+        """把运行诊断日志追加到 stdout。"""
+        self.write_stdout(f"{message}\n")
+
+    def write_stdout(self, text: str) -> None:
+        """追加一段 stdout 文本。"""
+        with self._lock:
+            self._stdout.write(text)
+
+    def write_stderr(self, text: str) -> None:
+        """追加一段 stderr 文本。"""
+        with self._lock:
+            self._stderr.write(text)
+
+    def snapshot(self) -> tuple[str, str]:
+        """返回当前 stdout/stderr 文本快照。"""
+        with self._lock:
+            return self._stdout.getvalue(), self._stderr.getvalue()
+
+
+class _RunLogWriter:
+    def __init__(self, write_text: Callable[[str], None]) -> None:
+        """保存日志写入函数。"""
+        self._write_text = write_text
+
+    def write(self, text: str) -> int:
+        """兼容 redirect_stdout 所需的 writer interface。"""
+        self._write_text(text)
+        return len(text)
+
+    def flush(self) -> None:
+        """兼容 writer interface，线程安全缓冲无需额外 flush。"""
+
+
+class _StringRunLogger:
+    def __init__(self, stream: io.StringIO) -> None:
+        """保存同步运行时要写入的文本流。"""
+        self._stream = stream
+
+    def log(self, message: str) -> None:
+        """把运行诊断日志写入同步 stdout 捕获流。"""
+        self._stream.write(f"{message}\n")
+
+
+class _BackgroundScriptRun:
+    def __init__(self) -> None:
+        """初始化后台脚本会话状态。"""
+        self.cancellation = _CancellationFlag()
+        self.log = _ThreadSafeRunLog()
+        self._lock = threading.Lock()
+        self._running = True
+        self._exit_code: int | None = None
+
+    def finish(self, exit_code: int) -> None:
+        """记录后台脚本结束状态。"""
+        with self._lock:
+            self._running = False
+            self._exit_code = exit_code
+
+    def snapshot(self) -> ScriptRunStatus:
+        """返回后台脚本当前状态快照。"""
+        stdout, stderr = self.log.snapshot()
+        with self._lock:
+            return ScriptRunStatus(
+                running=self._running,
+                exit_code=self._exit_code,
+                stdout=stdout,
+                stderr=stderr,
+            )
+
+
 class LocalControlApplication:
     def __init__(
         self,
@@ -62,6 +171,8 @@ class LocalControlApplication:
         self._real_color_reader_factory = real_color_reader_factory
         self._real_image_locator_factory = real_image_locator_factory
         self._screen_capture_factory = screen_capture_factory
+        self._run_lock = threading.Lock()
+        self._current_run: _BackgroundScriptRun | None = None
         self._test_tasks: dict[str, tuple[str, ...]] = {
             "all": (sys.executable, "-m", "pytest"),
         }
@@ -110,6 +221,7 @@ class LocalControlApplication:
                 real_device_factory=self._real_device_factory,
                 real_color_reader_factory=self._real_color_reader_factory,
                 real_image_locator_factory=self._real_image_locator_factory,
+                logger=_StringRunLogger(stdout),
             )
 
         if result.error_message is not None:
@@ -120,6 +232,53 @@ class LocalControlApplication:
             stdout=stdout.getvalue(),
             stderr=stderr.getvalue(),
         )
+
+    def start_named_script(
+        self,
+        name: str,
+        *,
+        dry_run: bool,
+        dry_run_color: str = "#000000",
+    ) -> ScriptRunStatus:
+        """启动一个后台脚本运行会话。"""
+        with self._run_lock:
+            if self._current_run is not None and self._current_run.snapshot().running:
+                current = self._current_run.snapshot()
+                return ScriptRunStatus(
+                    running=current.running,
+                    exit_code=current.exit_code,
+                    stdout=current.stdout,
+                    stderr=current.stderr + "script is already running\n",
+                )
+            try:
+                script = self._catalog.get(name)
+            except ScriptNotFoundError as exc:
+                return ScriptRunStatus(running=False, exit_code=1, stderr=str(exc))
+
+            session = _BackgroundScriptRun()
+            self._current_run = session
+            thread = threading.Thread(
+                target=self._run_script_session,
+                args=(script, dry_run, dry_run_color, session),
+                daemon=True,
+            )
+            thread.start()
+            return session.snapshot()
+
+    def current_script_run(self) -> ScriptRunStatus:
+        """返回当前后台脚本运行状态。"""
+        with self._run_lock:
+            if self._current_run is None:
+                return ScriptRunStatus(running=False)
+            return self._current_run.snapshot()
+
+    def stop_running_script(self) -> ScriptRunStatus:
+        """请求停止当前后台脚本运行。"""
+        with self._run_lock:
+            if self._current_run is None:
+                return ScriptRunStatus(running=False, exit_code=0, stderr="no script is running\n")
+            self._current_run.cancellation.cancel()
+            return self._current_run.snapshot()
 
     def click_image_asset(
         self,
@@ -155,6 +314,7 @@ class LocalControlApplication:
                 dry_run_images=(str(asset_path),) if dry_run else (),
                 real_device_factory=self._real_device_factory,
                 real_image_locator_factory=self._real_image_locator_factory,
+                logger=_StringRunLogger(stdout),
             )
 
         if result.error_message is not None:
@@ -165,6 +325,29 @@ class LocalControlApplication:
             stdout=stdout.getvalue(),
             stderr=stderr.getvalue(),
         )
+
+    def _run_script_session(
+        self,
+        script: Script,
+        dry_run: bool,
+        dry_run_color: str,
+        session: _BackgroundScriptRun,
+    ) -> None:
+        """在后台线程中运行脚本并写入会话状态。"""
+        with redirect_stdout(session.log.stdout_writer()), redirect_stderr(session.log.stderr_writer()):
+            result = run_script(
+                script,
+                dry_run=dry_run,
+                dry_run_color=dry_run_color,
+                real_device_factory=self._real_device_factory,
+                real_color_reader_factory=self._real_color_reader_factory,
+                real_image_locator_factory=self._real_image_locator_factory,
+                cancellation_token=session.cancellation,
+                logger=session.log,
+            )
+        if result.error_message is not None:
+            session.log.write_stderr(f"{result.error_message}\n")
+        session.finish(result.exit_code)
 
     def capture_screen_screenshot(self) -> ControlResult:
         """保存一张真实屏幕截图，供 UI 诊断截图权限和画面内容。"""

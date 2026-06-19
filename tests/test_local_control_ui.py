@@ -10,7 +10,7 @@ import http.client
 import json
 import threading
 
-from game_automation.portable.application.local_control import ControlResult
+from game_automation.portable.application.local_control import ControlResult, ScriptRunStatus
 from game_automation.platform.local_desktop.entrypoints.local_ui import create_local_control_server
 
 
@@ -46,6 +46,7 @@ def test_local_ui_serves_control_page() -> None:
     assert 'id="script-select"' in html
     assert 'id="dry-run-enabled" type="checkbox" checked' in html
     assert 'id="run-script"' in html
+    assert 'id="stop-script"' in html
     assert 'id="image-asset-select"' in html
     assert 'id="image-confidence"' in html
     assert 'id="click-image"' in html
@@ -77,7 +78,7 @@ def test_local_ui_lists_image_assets_over_http() -> None:
 
 
 def test_local_ui_runs_script_over_http() -> None:
-    """验证 UI HTTP 接口把运行请求委托给 application。"""
+    """验证 UI HTTP 接口把后台运行请求委托给 application。"""
     app = FakeControlApplication()
     server = create_local_control_server(host="127.0.0.1", port=0, app=app)
     thread = threading.Thread(target=server.serve_forever)
@@ -98,7 +99,7 @@ def test_local_ui_runs_script_over_http() -> None:
         thread.join(timeout=2)
         server.server_close()
 
-    assert app.run_requests == [
+    assert app.start_requests == [
         {
             "name": "conditional-color-demo",
             "dry_run": True,
@@ -106,8 +107,53 @@ def test_local_ui_runs_script_over_http() -> None:
         }
     ]
     assert payload == {
+        "running": True,
+        "exit_code": None,
+        "stdout": "started\n",
+        "stderr": "",
+    }
+
+
+def test_local_ui_gets_script_run_status_over_http() -> None:
+    """验证 UI HTTP 接口可以查询后台脚本状态。"""
+    app = FakeControlApplication()
+    server = create_local_control_server(host="127.0.0.1", port=0, app=app)
+    thread = threading.Thread(target=server.serve_forever)
+    thread.start()
+    try:
+        payload = _request_json(server.server_address, "GET", "/api/script-run")
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+    assert app.status_requests == 1
+    assert payload == {
+        "running": False,
         "exit_code": 0,
-        "stdout": "click Point(x=100, y=200)\n",
+        "stdout": "done\n",
+        "stderr": "",
+    }
+
+
+def test_local_ui_stops_script_run_over_http() -> None:
+    """验证 UI HTTP 接口可以请求停止后台脚本。"""
+    app = FakeControlApplication()
+    server = create_local_control_server(host="127.0.0.1", port=0, app=app)
+    thread = threading.Thread(target=server.serve_forever)
+    thread.start()
+    try:
+        payload = _request_json(server.server_address, "POST", "/api/stop-script", {})
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+    assert app.stop_requests == 1
+    assert payload == {
+        "running": True,
+        "exit_code": None,
+        "stdout": "stopping\n",
         "stderr": "",
     }
 
@@ -235,7 +281,9 @@ def test_local_ui_runs_tests_over_http() -> None:
 class FakeControlApplication:
     def __init__(self) -> None:
         """初始化 fake application 的请求记录。"""
-        self.run_requests: list[dict[str, object]] = []
+        self.start_requests: list[dict[str, object]] = []
+        self.status_requests = 0
+        self.stop_requests = 0
         self.test_requests: list[str] = []
         self.image_click_requests: list[dict[str, object]] = []
         self.capture_requests = 0
@@ -251,19 +299,26 @@ class FakeControlApplication:
         """返回 fake 图片资源列表。"""
         return ("start.png", "confirm.webp")
 
-    def run_named_script(self, name: str, *, dry_run: bool, dry_run_color: str) -> ControlResult:
-        self.run_requests.append(
+    def start_named_script(self, name: str, *, dry_run: bool, dry_run_color: str) -> ScriptRunStatus:
+        """记录 fake 后台脚本启动请求。"""
+        self.start_requests.append(
             {
                 "name": name,
                 "dry_run": dry_run,
                 "dry_run_color": dry_run_color,
             }
         )
-        return ControlResult(
-            exit_code=0,
-            stdout="click Point(x=100, y=200)\n",
-            stderr="",
-        )
+        return ScriptRunStatus(running=True, stdout="started\n")
+
+    def current_script_run(self) -> ScriptRunStatus:
+        """记录 fake 后台脚本状态查询。"""
+        self.status_requests += 1
+        return ScriptRunStatus(running=False, exit_code=0, stdout="done\n")
+
+    def stop_running_script(self) -> ScriptRunStatus:
+        """记录 fake 后台脚本停止请求。"""
+        self.stop_requests += 1
+        return ScriptRunStatus(running=True, stdout="stopping\n")
 
     def run_tests(self, task_name: str = "all") -> ControlResult:
         self.test_requests.append(task_name)

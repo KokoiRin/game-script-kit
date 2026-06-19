@@ -62,6 +62,9 @@ def create_local_control_server(
                     }
                 )
                 return
+            if path == "/api/script-run":
+                self._send_json(_status_to_payload(control_app.current_script_run()))
+                return
             if path == "/api/debug-screenshot":
                 self._send_png_file(Path(latest_screenshot_path))
                 return
@@ -72,12 +75,16 @@ def create_local_control_server(
             nonlocal latest_screenshot_path, screenshot_version
             if self.path == "/api/run-script":
                 payload = self._read_json()
-                result = control_app.run_named_script(
+                status = control_app.start_named_script(
                     str(payload.get("name", "")),
                     dry_run=bool(payload.get("dry_run", True)),
                     dry_run_color=str(payload.get("dry_run_color", "#000000")),
                 )
-                self._send_json(_result_to_payload(result))
+                self._send_json(_status_to_payload(status))
+                return
+            if self.path == "/api/stop-script":
+                status = control_app.stop_running_script()
+                self._send_json(_status_to_payload(status))
                 return
             if self.path == "/api/click-image":
                 payload = self._read_json()
@@ -171,6 +178,16 @@ def _result_to_payload(result) -> dict[str, object]:
     return payload
 
 
+def _status_to_payload(status) -> dict[str, object]:
+    """把后台脚本运行状态转换成 HTTP JSON payload。"""
+    return {
+        "running": status.running,
+        "exit_code": status.exit_code,
+        "stdout": status.stdout,
+        "stderr": status.stderr,
+    }
+
+
 def _parse_min_confidence(payload: dict[str, object]) -> float | None:
     """把 HTTP payload 中的图片匹配置信度解析为数字。"""
     try:
@@ -216,7 +233,7 @@ CONTROL_PAGE_HTML = """<!doctype html>
     }
     .toolbar {
       display: grid;
-      grid-template-columns: minmax(180px, 1fr) 120px 140px auto;
+      grid-template-columns: minmax(180px, 1fr) 120px 140px auto auto;
       gap: 10px;
       align-items: end;
       background: #ffffff;
@@ -349,6 +366,7 @@ CONTROL_PAGE_HTML = """<!doctype html>
         <input id="dry-run-color" value="#000000" pattern="#[0-9A-Fa-f]{6}">
       </label>
       <button id="run-script" type="button">运行脚本</button>
+      <button class="secondary" id="stop-script" type="button" disabled>停止</button>
     </section>
     <section class="image-toolbar">
       <label>
@@ -378,6 +396,7 @@ CONTROL_PAGE_HTML = """<!doctype html>
     const statusEl = document.querySelector("#status");
     const outputEl = document.querySelector("#output");
     const runScriptButton = document.querySelector("#run-script");
+    const stopScriptButton = document.querySelector("#stop-script");
     const runTestsButton = document.querySelector("#run-tests");
     const imageAssetSelect = document.querySelector("#image-asset-select");
     const imageAssetFolder = document.querySelector("#image-asset-folder");
@@ -387,6 +406,8 @@ CONTROL_PAGE_HTML = """<!doctype html>
     const imageConfidenceInput = document.querySelector("#image-confidence");
     const debugPreview = document.querySelector("#debug-preview");
     const debugScreenshot = document.querySelector("#debug-screenshot");
+    let scriptRunPollTimer = null;
+    let activeScriptRun = false;
 
     function setBusy(isBusy) {
       runScriptButton.disabled = isBusy;
@@ -394,6 +415,7 @@ CONTROL_PAGE_HTML = """<!doctype html>
       refreshImagesButton.disabled = isBusy;
       captureScreenButton.disabled = isBusy;
       clickImageButton.disabled = isBusy || !imageAssetSelect.value;
+      stopScriptButton.disabled = !activeScriptRun;
     }
 
     function renderResult(prefix, result) {
@@ -402,6 +424,35 @@ CONTROL_PAGE_HTML = """<!doctype html>
       if (result.screenshot_url) {
         debugScreenshot.src = result.screenshot_url;
         debugPreview.style.display = "block";
+      }
+    }
+
+    function renderScriptStatus(result) {
+      if (result.running) {
+        statusEl.textContent = "脚本运行中...";
+      } else if (result.exit_code === null || result.exit_code === undefined) {
+        statusEl.textContent = "脚本未运行";
+      } else {
+        statusEl.textContent = `脚本退出码：${result.exit_code}`;
+      }
+      outputEl.textContent = `${result.stdout || ""}${result.stderr || ""}`;
+    }
+
+    function scheduleScriptRunPoll() {
+      if (scriptRunPollTimer) {
+        window.clearTimeout(scriptRunPollTimer);
+      }
+      scriptRunPollTimer = window.setTimeout(pollScriptRun, 500);
+    }
+
+    async function pollScriptRun() {
+      const response = await fetch("/api/script-run");
+      const result = await response.json();
+      renderScriptStatus(result);
+      activeScriptRun = Boolean(result.running);
+      setBusy(activeScriptRun);
+      if (activeScriptRun) {
+        scheduleScriptRunPoll();
       }
     }
 
@@ -432,6 +483,7 @@ CONTROL_PAGE_HTML = """<!doctype html>
     }
 
     async function runScript() {
+      activeScriptRun = true;
       setBusy(true);
       statusEl.textContent = "正在运行脚本...";
       outputEl.textContent = "";
@@ -445,9 +497,35 @@ CONTROL_PAGE_HTML = """<!doctype html>
             dry_run_color: colorInput.value
           })
         });
-        renderResult("脚本", await response.json());
+        const result = await response.json();
+        renderScriptStatus(result);
+        activeScriptRun = Boolean(result.running);
+        setBusy(activeScriptRun);
+        if (activeScriptRun) {
+          scheduleScriptRunPoll();
+        }
       } finally {
-        setBusy(false);
+        setBusy(activeScriptRun);
+      }
+    }
+
+    async function stopScript() {
+      statusEl.textContent = "正在停止脚本...";
+      try {
+        const response = await fetch("/api/stop-script", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({})
+        });
+        const result = await response.json();
+        renderScriptStatus(result);
+        activeScriptRun = Boolean(result.running);
+        setBusy(activeScriptRun);
+        if (activeScriptRun) {
+          scheduleScriptRunPoll();
+        }
+      } finally {
+        stopScriptButton.disabled = !activeScriptRun;
       }
     }
 
@@ -504,6 +582,7 @@ CONTROL_PAGE_HTML = """<!doctype html>
     }
 
     runScriptButton.addEventListener("click", runScript);
+    stopScriptButton.addEventListener("click", stopScript);
     runTestsButton.addEventListener("click", runTests);
     refreshImagesButton.addEventListener("click", loadImageAssets);
     captureScreenButton.addEventListener("click", captureScreen);

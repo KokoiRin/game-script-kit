@@ -45,6 +45,18 @@ class ScreenImageLocator(Protocol):
         ...
 
 
+class CancellationToken(Protocol):
+    def is_cancelled(self) -> bool:
+        """返回当前脚本运行是否已被请求取消。"""
+        ...
+
+
+class RunLogger(Protocol):
+    def log(self, message: str) -> None:
+        """记录一条脚本运行诊断日志。"""
+        ...
+
+
 class KeyStateReader(Protocol):
     def is_pressed(self, key: str) -> bool:
         """判断指定按键是否在本轮检测中被触发。"""

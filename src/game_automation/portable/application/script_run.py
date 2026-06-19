@@ -15,8 +15,14 @@ from game_automation.portable.adapters.dry_run import (
     DryRunScreenImageLocator,
 )
 from game_automation.portable.domain import Color, ImageMatch, ImageTemplate, Rect, Script
-from game_automation.portable.engine.ports import InputDevice, PixelColorReader, ScreenImageLocator
-from game_automation.portable.engine.runner import ScriptRunner
+from game_automation.portable.engine.ports import (
+    CancellationToken,
+    InputDevice,
+    PixelColorReader,
+    RunLogger,
+    ScreenImageLocator,
+)
+from game_automation.portable.engine.runner import ScriptCancelledError, ScriptRunner
 from game_automation.portable.engine.script_requirements import inspect_script_requirements
 
 InputDeviceFactory = Callable[[], InputDevice]
@@ -39,6 +45,8 @@ def run_script(
     real_device_factory: InputDeviceFactory | None = None,
     real_color_reader_factory: PixelColorReaderFactory | None = None,
     real_image_locator_factory: ScreenImageLocatorFactory | None = None,
+    cancellation_token: CancellationToken | None = None,
+    logger: RunLogger | None = None,
 ) -> ScriptRunResult:
     """运行一份已解析脚本，并返回入口层可直接映射的结果。"""
     try:
@@ -50,6 +58,8 @@ def run_script(
             real_device_factory=real_device_factory,
             real_color_reader_factory=real_color_reader_factory,
             real_image_locator_factory=real_image_locator_factory,
+            cancellation_token=cancellation_token,
+            logger=logger,
         )
     except ValueError as exc:
         return ScriptRunResult(
@@ -64,6 +74,11 @@ def run_script(
 
     try:
         runner.run(script)
+    except ScriptCancelledError as exc:
+        return ScriptRunResult(
+            exit_code=130,
+            error_message=str(exc),
+        )
     except TimeoutError as exc:
         return ScriptRunResult(
             exit_code=1,
@@ -86,6 +101,8 @@ def _build_runner(
     real_device_factory: InputDeviceFactory | None,
     real_color_reader_factory: PixelColorReaderFactory | None,
     real_image_locator_factory: ScreenImageLocatorFactory | None,
+    cancellation_token: CancellationToken | None,
+    logger: RunLogger | None,
 ) -> ScriptRunner:
     """按脚本运行模式和端口需求组装 runner。"""
     requirements = inspect_script_requirements(script)
@@ -100,6 +117,8 @@ def _build_runner(
                 dry_run_images,
                 needs_image_locator=requirements.needs_image_locator,
             ),
+            cancellation_token=cancellation_token,
+            logger=logger,
         )
 
     return ScriptRunner(
@@ -112,6 +131,8 @@ def _build_runner(
             needs_image_locator=requirements.needs_image_locator,
             real_image_locator_factory=real_image_locator_factory,
         ),
+        cancellation_token=cancellation_token,
+        logger=logger,
     )
 
 

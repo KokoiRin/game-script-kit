@@ -5,10 +5,12 @@
 """
 
 import subprocess
+import time
 
-from game_automation.portable.domain import ImageMatch, Point, Rect
+from game_automation.portable.domain import ImageExists, ImageMatch, ImageTemplate, Point, Rect, Repeat, ScreenWindow, Script, Wait, WaitUntil
 from game_automation.portable.engine.ports import InputDevice
 from game_automation.portable.application.local_control import LocalControlApplication, PROJECT_ROOT
+from game_automation.portable.scripts_manager.catalog import ScriptCatalog
 
 
 def test_local_control_project_root_points_to_repository_root() -> None:
@@ -33,6 +35,120 @@ def test_local_control_runs_named_script_and_captures_dry_run_output() -> None:
         "click Point(x=100, y=200)",
         "wait 0.25s",
     ]
+
+
+def test_local_control_can_stop_background_script_run() -> None:
+    """验证 UI application 可以取消后台运行中的脚本。"""
+    script = Script(
+        name="long-loop",
+        window=ScreenWindow(),
+        steps=(Repeat(times=1000, steps=(Wait(0.01),)),),
+    )
+
+    class SlowDevice(InputDevice):
+        def click(self, target: Point) -> None:
+            """本测试不会点击。"""
+
+        def drag_to(self, start: Point, end: Point, duration_seconds: float = 0.0) -> None:
+            """本测试不会拖拽。"""
+
+        def wait(self, duration_seconds: float) -> None:
+            """短暂等待，让后台线程保持运行并允许停止请求进入。"""
+            time.sleep(duration_seconds)
+
+    app = LocalControlApplication(
+        catalog=ScriptCatalog((script,)),
+        real_device_factory=SlowDevice,
+    )
+
+    started = app.start_named_script("long-loop", dry_run=False)
+    assert started.running is True
+
+    stopped = app.stop_running_script()
+    assert stopped.running is True
+
+    final = _wait_until_finished(app)
+    assert final.running is False
+    assert final.exit_code == 130
+    assert "script run cancelled" in final.stderr
+
+
+def test_local_control_rejects_second_background_script_while_running() -> None:
+    """验证已有后台脚本运行时不会启动第二个脚本。"""
+    script = Script(
+        name="long-loop",
+        window=ScreenWindow(),
+        steps=(Repeat(times=1000, steps=(Wait(0.01),)),),
+    )
+
+    class SlowDevice(InputDevice):
+        def click(self, target: Point) -> None:
+            """本测试不会点击。"""
+
+        def drag_to(self, start: Point, end: Point, duration_seconds: float = 0.0) -> None:
+            """本测试不会拖拽。"""
+
+        def wait(self, duration_seconds: float) -> None:
+            """短暂等待，让后台线程保持运行。"""
+            time.sleep(duration_seconds)
+
+    app = LocalControlApplication(
+        catalog=ScriptCatalog((script,)),
+        real_device_factory=SlowDevice,
+    )
+
+    app.start_named_script("long-loop", dry_run=False)
+    duplicate = app.start_named_script("long-loop", dry_run=False)
+    app.stop_running_script()
+
+    final = _wait_until_finished(app)
+    assert duplicate.running is True
+    assert "script is already running" in duplicate.stderr
+    assert final.exit_code == 130
+
+
+def test_local_control_background_status_includes_image_match_logs() -> None:
+    """验证后台脚本状态会展示图片匹配耗时日志。"""
+    script = Script(
+        name="image-loop",
+        window=ScreenWindow(),
+        steps=(
+            WaitUntil(
+                condition=ImageExists(ImageTemplate("assets/start.png"), min_confidence=0.8),
+                timeout_seconds=1,
+                interval_seconds=0.1,
+            ),
+        ),
+    )
+
+    class FakeDevice(InputDevice):
+        def click(self, target: Point) -> None:
+            """本测试不会点击。"""
+
+        def drag_to(self, start: Point, end: Point, duration_seconds: float = 0.0) -> None:
+            """本测试不会拖拽。"""
+
+        def wait(self, duration_seconds: float) -> None:
+            """本测试中的条件会立即满足，不需要等待。"""
+
+    class FakeImageLocator:
+        def locate(self, template, *, region=None, min_confidence=1.0):
+            """返回固定图片匹配。"""
+            return ImageMatch(Rect(10, 20, 30, 40), confidence=0.91)
+
+    app = LocalControlApplication(
+        catalog=ScriptCatalog((script,)),
+        real_device_factory=FakeDevice,
+        real_image_locator_factory=FakeImageLocator,
+    )
+
+    app.start_named_script("image-loop", dry_run=False)
+    final = _wait_until_finished(app)
+
+    assert final.exit_code == 0
+    assert "image match template=assets/start.png" in final.stdout
+    assert "found=True" in final.stdout
+    assert "confidence=0.91" in final.stdout
 
 
 def test_local_control_lists_image_assets_from_project_assets_folder(tmp_path) -> None:
@@ -60,7 +176,10 @@ def test_local_control_clicks_selected_image_asset_in_dry_run(tmp_path) -> None:
 
     assert result.exit_code == 0
     assert result.stderr == ""
-    assert result.stdout == "click Point(x=0, y=0)\n"
+    assert "image match template=" in result.stdout
+    assert "assets/start.png" in result.stdout
+    assert "found=True" in result.stdout
+    assert result.stdout.endswith("click Point(x=0, y=0)\n")
 
 
 def test_local_control_passes_min_confidence_to_image_click(tmp_path) -> None:
@@ -98,6 +217,8 @@ def test_local_control_passes_min_confidence_to_image_click(tmp_path) -> None:
 
     assert result.exit_code == 0
     assert result.stderr == ""
+    assert "image match template=" in result.stdout
+    assert "confidence=0.91" in result.stdout
     assert confidences == [0.7]
     assert clicks == [Point(14, 23)]
 
@@ -188,3 +309,14 @@ def test_local_control_runs_whitelisted_test_task() -> None:
     assert result.stderr == ""
     assert len(commands) == 1
     assert commands[0][0][-2:] == ("-m", "pytest")
+
+
+def _wait_until_finished(app: LocalControlApplication):
+    """轮询等待后台脚本结束，避免测试绑定具体线程调度。"""
+    deadline = time.monotonic() + 2
+    while time.monotonic() < deadline:
+        status = app.current_script_run()
+        if not status.running:
+            return status
+        time.sleep(0.01)
+    raise AssertionError("background script did not finish")
