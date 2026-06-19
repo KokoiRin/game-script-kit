@@ -8,7 +8,7 @@ from game_automation.portable.domain.actions import Click, ClickTarget, Drag, If
 from game_automation.portable.domain.color import Color
 from game_automation.portable.domain.conditions import ColorIs, Condition, ImageExists
 from game_automation.portable.domain.geometry import Point, Rect
-from game_automation.portable.domain.image_matching import ImageMatch, ImageTemplate
+from game_automation.portable.domain.image_matching import ImageLookupResult, ImageMatch, ImageTemplate
 from game_automation.portable.domain.point_aliases import (
     ImageRef,
     NamedImage,
@@ -32,6 +32,7 @@ __all__ = [
     "Drag",
     "If",
     "ImageExists",
+    "ImageLookupResult",
     "ImageMatch",
     "ImageRef",
     "ImageTemplate",

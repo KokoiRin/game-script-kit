@@ -24,6 +24,7 @@ from game_automation.portable.domain import (
     WaitUntil,
 )
 from game_automation.portable.engine.condition_evaluator import evaluate_condition
+from game_automation.portable.engine.image_query import locate_image
 from game_automation.portable.engine.ports import InputDevice, PixelColorReader, ScreenImageLocator
 
 
@@ -126,11 +127,14 @@ class ScriptRunner:
         if self.image_locator is None:
             raise RuntimeError("image locator is required for image targets")
         template = script.resources.resolve_image(target.template)
-        match = self.image_locator.locate(
-            template,
+        result = locate_image(
+            target.template,
+            image_locator=self.image_locator,
+            resources=script.resources,
             region=self._resolve_image_target_region(script, target.region),
             min_confidence=target.min_confidence,
         )
+        match = result.match
         if match is None:
             raise RuntimeError(f"image target not found: {template.path}")
         return Point(

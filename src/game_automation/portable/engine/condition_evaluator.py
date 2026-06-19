@@ -10,6 +10,7 @@ from game_automation.portable.domain import Color, ColorIs, ImageExists, Point, 
 from game_automation.portable.domain.conditions import Condition
 from game_automation.portable.domain.point_aliases import TargetCatalog
 from game_automation.portable.domain.windows import Window
+from game_automation.portable.engine.image_query import locate_image
 from game_automation.portable.engine.ports import PixelColorReader, ScreenImageLocator
 
 
@@ -69,12 +70,14 @@ def _evaluate_image_exists(
     if image_locator is None:
         raise RuntimeError("image locator is required for image conditions")
 
-    match = image_locator.locate(
-        resources.resolve_image(condition.template),
+    result = locate_image(
+        condition.template,
+        image_locator=image_locator,
+        resources=resources,
         region=_resolve_region(window, condition.region),
         min_confidence=condition.min_confidence,
     )
-    return match is not None
+    return result.found
 
 
 def _resolve_region(window: Window, region: Rect | None) -> Rect | None:
