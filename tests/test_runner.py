@@ -14,13 +14,17 @@ from game_automation.portable.domain import (
     ImageMatch,
     ImageTemplate,
     ImageTarget,
+    NamedPoint,
     Point,
+    PointRef,
     Rect,
     Repeat,
     ScreenWindow,
     Script,
+    TargetCatalog,
     Wait,
     WaitUntil,
+    UnknownPointNameError,
 )
 from tests.support.fake_device import FakeInputDevice
 
@@ -96,6 +100,49 @@ def test_runner_maps_steps_to_device_with_script_window() -> None:
     assert device.actions[1].end == Point(150, 260)
     assert device.actions[1].duration_seconds == 0.4
     assert device.actions[2].duration_seconds == 0.2
+
+
+def test_runner_clicks_named_point_on_screen_window() -> None:
+    """验证 runner 能把命名点位解析为屏幕坐标点击。"""
+    device = FakeInputDevice()
+    script = Script(
+        name="named-point-runner",
+        window=ScreenWindow(),
+        steps=(Click(PointRef("头像")),),
+        resources=TargetCatalog(points=(NamedPoint("头像", Point(242, 92)),)),
+    )
+
+    ScriptRunner(device=device).run(script)
+
+    assert [action.name for action in device.actions] == ["click"]
+    assert device.actions[0].target == Point(242, 92)
+
+
+def test_runner_resolves_named_point_with_area_window() -> None:
+    """验证命名点位仍然应用脚本窗口坐标规则。"""
+    device = FakeInputDevice()
+    script = Script(
+        name="named-point-area-runner",
+        window=AreaWindow(Rect(100, 200, 800, 600)),
+        steps=(Click(PointRef("头像")),),
+        resources=TargetCatalog(points=(NamedPoint("头像", Point(42, 9)),)),
+    )
+
+    ScriptRunner(device=device).run(script)
+
+    assert device.actions[0].target == Point(142, 209)
+
+
+def test_runner_reports_unknown_named_point() -> None:
+    """验证未知点位名称会在执行时报告清楚。"""
+    script = Script(
+        name="unknown-named-point-runner",
+        window=ScreenWindow(),
+        steps=(Click(PointRef("头像")),),
+    )
+
+    with pytest.raises(UnknownPointNameError, match="unknown point target: 头像"):
+        ScriptRunner(device=FakeInputDevice()).run(script)
 
 
 def test_runner_expands_repeat_steps() -> None:
