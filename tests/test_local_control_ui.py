@@ -47,6 +47,7 @@ def test_local_ui_serves_control_page() -> None:
     assert 'id="dry-run-enabled" type="checkbox" checked' in html
     assert 'id="run-script"' in html
     assert 'id="image-asset-select"' in html
+    assert 'id="image-confidence"' in html
     assert 'id="click-image"' in html
     assert 'id="capture-screen"' in html
     assert 'id="debug-screenshot"' in html
@@ -125,6 +126,7 @@ def test_local_ui_clicks_image_asset_over_http() -> None:
             {
                 "asset": "start.png",
                 "dry_run": True,
+                "min_confidence": 0.7,
             },
         )
     finally:
@@ -136,12 +138,43 @@ def test_local_ui_clicks_image_asset_over_http() -> None:
         {
             "asset": "start.png",
             "dry_run": True,
+            "min_confidence": 0.7,
         }
     ]
     assert payload == {
         "exit_code": 0,
         "stdout": "click Point(x=0, y=0)\n",
         "stderr": "",
+    }
+
+
+def test_local_ui_rejects_non_numeric_image_confidence_over_http() -> None:
+    """验证 UI HTTP 接口拒绝非数字图片置信度。"""
+    app = FakeControlApplication()
+    server = create_local_control_server(host="127.0.0.1", port=0, app=app)
+    thread = threading.Thread(target=server.serve_forever)
+    thread.start()
+    try:
+        payload = _request_json(
+            server.server_address,
+            "POST",
+            "/api/click-image",
+            {
+                "asset": "start.png",
+                "dry_run": True,
+                "min_confidence": "bad",
+            },
+        )
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+    assert app.image_click_requests == []
+    assert payload == {
+        "exit_code": 2,
+        "stdout": "",
+        "stderr": "invalid image click request: min_confidence must be a number\n",
     }
 
 
@@ -236,12 +269,19 @@ class FakeControlApplication:
         self.test_requests.append(task_name)
         return ControlResult(exit_code=0, stdout="109 passed\n", stderr="")
 
-    def click_image_asset(self, asset_name: str, *, dry_run: bool) -> ControlResult:
+    def click_image_asset(
+        self,
+        asset_name: str,
+        *,
+        dry_run: bool,
+        min_confidence: float = 0.8,
+    ) -> ControlResult:
         """记录 fake 图片点击请求。"""
         self.image_click_requests.append(
             {
                 "asset": asset_name,
                 "dry_run": dry_run,
+                "min_confidence": min_confidence,
             }
         )
         return ControlResult(exit_code=0, stdout="click Point(x=0, y=0)\n", stderr="")

@@ -6,6 +6,8 @@
 
 import subprocess
 
+from game_automation.portable.domain import ImageMatch, Point, Rect
+from game_automation.portable.engine.ports import InputDevice
 from game_automation.portable.application.local_control import LocalControlApplication, PROJECT_ROOT
 
 
@@ -61,6 +63,45 @@ def test_local_control_clicks_selected_image_asset_in_dry_run(tmp_path) -> None:
     assert result.stdout == "click Point(x=0, y=0)\n"
 
 
+def test_local_control_passes_min_confidence_to_image_click(tmp_path) -> None:
+    """验证 UI 用例会把最低匹配置信度传给图片目标。"""
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    (assets / "start.png").write_bytes(b"fake")
+    clicks = []
+    confidences = []
+
+    class FakeDevice(InputDevice):
+        def click(self, target) -> None:
+            """记录真实点击坐标。"""
+            clicks.append(target)
+
+        def drag_to(self, start, end, duration_seconds: float = 0.0) -> None:
+            """图片点击用例不会拖拽。"""
+
+        def wait(self, duration_seconds: float) -> None:
+            """图片点击用例不会等待。"""
+
+    class FakeImageLocator:
+        def locate(self, template, *, region=None, min_confidence=1.0):
+            """记录最低置信度并返回固定匹配。"""
+            confidences.append(min_confidence)
+            return ImageMatch(Rect(10, 20, 8, 6), confidence=0.91)
+
+    app = LocalControlApplication(
+        project_root=tmp_path,
+        real_device_factory=FakeDevice,
+        real_image_locator_factory=FakeImageLocator,
+    )
+
+    result = app.click_image_asset("start.png", dry_run=False, min_confidence=0.7)
+
+    assert result.exit_code == 0
+    assert result.stderr == ""
+    assert confidences == [0.7]
+    assert clicks == [Point(14, 23)]
+
+
 def test_local_control_captures_screen_debug_screenshot(tmp_path) -> None:
     """验证 UI 用例可把真实截图保存到项目内诊断文件。"""
     captured_paths = []
@@ -90,7 +131,21 @@ def test_local_control_rejects_image_asset_outside_assets_folder(tmp_path) -> No
 
     assert result.exit_code == 2
     assert result.stdout == ""
-    assert result.stderr == "invalid image asset: ../secret.png\n"
+    assert "invalid image click request:" in result.stderr
+
+
+def test_local_control_rejects_invalid_image_confidence(tmp_path) -> None:
+    """验证 UI 用例拒绝非法图片最低匹配置信度。"""
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    (assets / "start.png").write_bytes(b"fake")
+    app = LocalControlApplication(project_root=tmp_path)
+
+    result = app.click_image_asset("start.png", dry_run=True, min_confidence=1.1)
+
+    assert result.exit_code == 2
+    assert result.stdout == ""
+    assert "image target min_confidence" in result.stderr
 
 
 def test_local_control_rejects_unknown_test_task_without_running_command() -> None:
