@@ -85,6 +85,7 @@ def test_image_target_preserves_template_and_defaults() -> None:
     assert target.region is None
     assert target.min_confidence == 1.0
     assert target.offset == Point(0, 0)
+    assert target.anchor == "center"
 
 
 def test_image_target_preserves_region_confidence_and_offset() -> None:
@@ -94,11 +95,13 @@ def test_image_target_preserves_region_confidence_and_offset() -> None:
         region=Rect(10, 20, 30, 40),
         min_confidence=0.8,
         offset=Point(5, -3),
+        anchor="right_center",
     )
 
     assert target.region == Rect(10, 20, 30, 40)
     assert target.min_confidence == 0.8
     assert target.offset == Point(5, -3)
+    assert target.anchor == "right_center"
 
 
 @pytest.mark.parametrize("min_confidence", [0.0, -0.1, 1.1])
@@ -109,6 +112,12 @@ def test_image_target_rejects_invalid_min_confidence(min_confidence: float) -> N
             ImageTemplate("assets/start.png"),
             min_confidence=min_confidence,
         )
+
+
+def test_image_target_rejects_unknown_anchor() -> None:
+    """验证图片目标拒绝未知 anchor。"""
+    with pytest.raises(ValueError, match="unknown image anchor: diagonal"):
+        ImageTarget(ImageTemplate("assets/start.png"), anchor="diagonal")
 
 
 def test_click_preserves_image_target() -> None:

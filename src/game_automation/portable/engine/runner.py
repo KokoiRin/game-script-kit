@@ -137,9 +137,10 @@ class ScriptRunner:
         match = result.match
         if match is None:
             raise RuntimeError(f"image target not found: {template.path}")
+        anchor_point = match.point_at(target.anchor)
         return Point(
-            match.center.x + target.offset.x,
-            match.center.y + target.offset.y,
+            anchor_point.x + target.offset.x,
+            anchor_point.y + target.offset.y,
         )
 
     def _resolve_image_target_region(self, script: Script, region: Rect | None) -> Rect | None:
