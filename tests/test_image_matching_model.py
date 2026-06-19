@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from game_automation.portable.domain import ImageMatch, ImageTemplate, Point, Rect
+from game_automation.portable.domain import ImageLookupResult, ImageMatch, ImageTemplate, Point, Rect
 
 
 def test_image_template_preserves_path() -> None:
@@ -37,3 +37,26 @@ def test_image_match_rejects_confidence_outside_unit_range(confidence: float) ->
     """验证图像匹配结果拒绝 0 到 1 之外的置信度。"""
     with pytest.raises(ValueError, match="image match confidence"):
         ImageMatch(rect=Rect(left=0, top=0, width=10, height=10), confidence=confidence)
+
+
+def test_image_lookup_result_exposes_match_details_when_found() -> None:
+    """验证图片查询成功结果会暴露匹配细节。"""
+    match = ImageMatch(rect=Rect(left=10, top=20, width=30, height=40), confidence=0.75)
+    result = ImageLookupResult(match)
+
+    assert result.found is True
+    assert result.match == match
+    assert result.rect == Rect(left=10, top=20, width=30, height=40)
+    assert result.center == Point(x=25, y=40)
+    assert result.confidence == 0.75
+
+
+def test_image_lookup_result_exposes_missing_state() -> None:
+    """验证图片查询未找到结果不会伪造匹配细节。"""
+    result = ImageLookupResult(None)
+
+    assert result.found is False
+    assert result.match is None
+    assert result.rect is None
+    assert result.center is None
+    assert result.confidence is None

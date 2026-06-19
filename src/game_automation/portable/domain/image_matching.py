@@ -38,3 +38,28 @@ class ImageMatch:
             x=self.rect.left + self.rect.width // 2,
             y=self.rect.top + self.rect.height // 2,
         )
+
+
+@dataclass(frozen=True, slots=True)
+class ImageLookupResult:
+    match: ImageMatch | None
+
+    @property
+    def found(self) -> bool:
+        """判断本次图片查询是否找到匹配。"""
+        return self.match is not None
+
+    @property
+    def rect(self) -> Rect | None:
+        """返回匹配矩形，未找到时返回 None。"""
+        return None if self.match is None else self.match.rect
+
+    @property
+    def center(self) -> Point | None:
+        """返回匹配中心点，未找到时返回 None。"""
+        return None if self.match is None else self.match.center
+
+    @property
+    def confidence(self) -> float | None:
+        """返回匹配置信度，未找到时返回 None。"""
+        return None if self.match is None else self.match.confidence
