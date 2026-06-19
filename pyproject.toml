@@ -22,6 +22,9 @@ dev = [
 [project.scripts]
 star = "game_automation.platform.local_desktop.entrypoints.cli:main"
 
+[tool.setuptools.package-data]
+"game_automation.platform.local_desktop.entrypoints" = ["ui_static/*"]
+
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
