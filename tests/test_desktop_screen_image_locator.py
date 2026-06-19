@@ -14,9 +14,11 @@ class ScreenshotBackend:
         """初始化只提供截图能力的 fake backend。"""
         self.image = image
         self.pointer_size = pointer_size if pointer_size is not None else image.size
+        self.screenshot_calls = 0
 
     def screenshot(self) -> Image.Image:
         """返回测试构造的屏幕截图。"""
+        self.screenshot_calls += 1
         return self.image
 
     def size(self) -> tuple[int, int]:
@@ -86,6 +88,39 @@ def test_screen_image_locator_logs_stage_durations(tmp_path) -> None:
     assert "total_ms=" in message
     assert "found=True" in message
     assert "confidence=" in message
+
+
+def test_screen_image_locator_batch_matches_many_templates_with_one_screenshot(tmp_path) -> None:
+    """验证批量定位会复用同一张截图匹配多张模板。"""
+    first_template = _build_template_image()
+    second_template = _build_second_template_image()
+    first_path = tmp_path / "first.png"
+    second_path = tmp_path / "second.png"
+    first_template.save(first_path)
+    second_template.save(second_path)
+    screenshot = Image.new("RGB", (80, 50), "white")
+    screenshot.paste(first_template, (12, 9))
+    screenshot.paste(second_template, (44, 31))
+    backend = ScreenshotBackend(screenshot)
+    logger = FakeLogger()
+
+    results = PyAutoGuiScreenImageLocator(backend=backend).locate_many(
+        (ImageTemplate(str(first_path)), ImageTemplate(str(second_path))),
+        min_confidence=0.8,
+        logger=logger,
+    )
+
+    assert backend.screenshot_calls == 1
+    assert [result.template for result in results] == [
+        ImageTemplate(str(first_path)),
+        ImageTemplate(str(second_path)),
+    ]
+    assert results[0].match is not None
+    assert results[0].match.rect == Rect(left=12, top=9, width=8, height=6)
+    assert results[1].match is not None
+    assert results[1].match.rect == Rect(left=44, top=31, width=8, height=6)
+    assert any("image batch match stages " in message for message in logger.messages)
+    assert any("template_count=2" in message for message in logger.messages)
 
 
 def test_screen_image_locator_matches_template_inside_region(tmp_path) -> None:
@@ -204,4 +239,12 @@ def _build_template_image() -> Image.Image:
     image = Image.new("RGB", (8, 6), "red")
     image.putpixel((1, 1), (0, 0, 0))
     image.putpixel((5, 3), (0, 0, 255))
+    return image
+
+
+def _build_second_template_image() -> Image.Image:
+    """构造第二张带纹理模板，避免批量匹配测试中两图混淆。"""
+    image = Image.new("RGB", (8, 6), "green")
+    image.putpixel((2, 2), (255, 255, 0))
+    image.putpixel((6, 4), (0, 0, 0))
     return image

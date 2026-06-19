@@ -24,7 +24,7 @@ from game_automation.portable.application.script_run import (
 )
 from game_automation.portable.domain import Click, ImageTarget, ImageTemplate, ScreenWindow, Script
 from game_automation.portable.domain import ScreenStateCandidate, ScreenStateProbeResult
-from game_automation.portable.engine.ports import RunLogger, ScreenImageLocator
+from game_automation.portable.engine.ports import RunLogger, ScreenImageBatchLocator, ScreenImageLocator
 from game_automation.portable.engine.screen_state_probe import probe_screen_state
 from game_automation.portable.scripts_manager import DEFAULT_SCRIPT_CATALOG
 from game_automation.portable.scripts_manager.catalog import ScriptCatalog, ScriptNotFoundError
@@ -32,6 +32,7 @@ from game_automation.portable.scripts_manager.catalog import ScriptCatalog, Scri
 CommandRunner = Callable[[Sequence[str], Path], subprocess.CompletedProcess[str]]
 ScreenCapture = Callable[[Path], None]
 ScreenCaptureFactory = Callable[[], ScreenCapture]
+ScreenImageBatchLocatorFactory = Callable[[], ScreenImageBatchLocator]
 
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
 IMAGE_ASSET_FOLDER = "assets"
@@ -208,6 +209,7 @@ class LocalControlApplication:
         real_device_factory: InputDeviceFactory | None = None,
         real_color_reader_factory: PixelColorReaderFactory | None = None,
         real_image_locator_factory: ScreenImageLocatorFactory | None = None,
+        real_image_batch_locator_factory: ScreenImageBatchLocatorFactory | None = None,
         screen_capture_factory: ScreenCaptureFactory | None = None,
     ) -> None:
         """注入 UI 用例需要的脚本 catalog、项目路径和外部能力工厂。"""
@@ -217,6 +219,7 @@ class LocalControlApplication:
         self._real_device_factory = real_device_factory
         self._real_color_reader_factory = real_color_reader_factory
         self._real_image_locator_factory = real_image_locator_factory
+        self._real_image_batch_locator_factory = real_image_batch_locator_factory
         self._screen_capture_factory = screen_capture_factory
         self._run_lock = threading.Lock()
         self._current_run: _BackgroundScriptRun | None = None
@@ -385,6 +388,7 @@ class LocalControlApplication:
         return probe_screen_state(
             self._screen_state_candidates(),
             image_locator=self._build_screen_image_locator(),
+            batch_image_locator=self._build_screen_image_batch_locator(),
             min_confidence=min_confidence,
             logger=logger,
         )
@@ -546,6 +550,12 @@ class LocalControlApplication:
     def _build_screen_image_locator(self) -> ScreenImageLocator | None:
         """创建真实图像定位 adapter，未装配时返回 None。"""
         return None if self._real_image_locator_factory is None else self._real_image_locator_factory()
+
+    def _build_screen_image_batch_locator(self) -> ScreenImageBatchLocator | None:
+        """创建真实批量图像定位 adapter，未装配时返回 None。"""
+        if self._real_image_batch_locator_factory is None:
+            return None
+        return self._real_image_batch_locator_factory()
 
 
 def _log_screen_state_probe_result(logger: RunLogger, result: ScreenStateProbeResult) -> None:

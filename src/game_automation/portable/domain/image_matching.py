@@ -82,3 +82,25 @@ class ImageLookupResult:
     def point_at(self, anchor: str) -> Point | None:
         """返回查询结果匹配区域中的 anchor 点位，未找到时返回 None。"""
         return None if self.match is None else self.match.point_at(anchor)
+
+
+@dataclass(frozen=True, slots=True)
+class ImageBatchMatchResult:
+    template: ImageTemplate
+    match: ImageMatch | None
+    elapsed_ms: float
+
+    def __post_init__(self) -> None:
+        """校验批量匹配中单个模板耗时必须非负。"""
+        if self.elapsed_ms < 0:
+            raise ValueError("image batch match elapsed_ms cannot be negative")
+
+    @property
+    def found(self) -> bool:
+        """判断批量匹配中该模板是否命中。"""
+        return self.match is not None
+
+    @property
+    def confidence(self) -> float | None:
+        """返回该模板命中的置信度，未命中时返回 None。"""
+        return None if self.match is None else self.match.confidence

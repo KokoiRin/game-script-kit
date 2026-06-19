@@ -9,12 +9,14 @@ import time
 from game_automation.portable.application.local_control import LocalControlApplication
 from game_automation.portable.domain import (
     ImageMatch,
+    ImageBatchMatchResult,
     ImageTemplate,
     Rect,
     ScreenStateCandidate,
     ScreenStateCandidateResult,
     ScreenStateProbeResult,
 )
+from game_automation.portable.engine.screen_state_probe import probe_screen_state
 
 
 def test_screen_state_probe_result_uses_found_candidate_as_current_state() -> None:
@@ -105,6 +107,90 @@ def test_local_control_probes_screen_state_from_image_assets(tmp_path) -> None:
     assert requested_templates == [
         (str(assets / "人物.png"), 0.8),
         (str(assets / "装备.webp"), 0.8),
+    ]
+
+
+def test_local_control_screen_state_probe_uses_batch_locator_when_configured(tmp_path) -> None:
+    """验证 UI application 装配 batch locator 后一轮探测只走批量定位。"""
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    (assets / "人物.png").write_bytes(b"fake")
+    (assets / "装备.webp").write_bytes(b"fake")
+    batch_requests = []
+
+    class FailingSingleLocator:
+        def locate(self, template, *, region=None, min_confidence=1.0, logger=None):
+            """batch 已装配时 application 不应调用单图定位。"""
+            raise AssertionError("single image locator should not be called")
+
+    class FakeBatchLocator:
+        def locate_many(self, templates, *, region=None, min_confidence=1.0, logger=None):
+            """记录批量请求并返回装备命中。"""
+            batch_requests.append((templates, min_confidence))
+            return (
+                ImageBatchMatchResult(templates[0], None, elapsed_ms=3.0),
+                ImageBatchMatchResult(
+                    templates[1],
+                    ImageMatch(Rect(10, 20, 30, 40), confidence=0.91),
+                    elapsed_ms=4.0,
+                ),
+            )
+
+    app = LocalControlApplication(
+        project_root=tmp_path,
+        real_image_locator_factory=FailingSingleLocator,
+        real_image_batch_locator_factory=FakeBatchLocator,
+    )
+
+    result = app.probe_screen_state_once(min_confidence=0.8)
+
+    assert result.current_state == "装备"
+    assert len(batch_requests) == 1
+
+
+def test_probe_screen_state_prefers_batch_locator_and_preserves_candidate_order() -> None:
+    """验证界面探测优先使用批量定位并按候选顺序映射结果。"""
+    candidates = (
+        ScreenStateCandidate("人物", ImageTemplate("assets/character.png")),
+        ScreenStateCandidate("装备", ImageTemplate("assets/equipment.png")),
+    )
+
+    class FailingSingleLocator:
+        def locate(self, template, *, region=None, min_confidence=1.0, logger=None):
+            """batch 可用时不应回退到单图定位。"""
+            raise AssertionError("single image locator should not be called")
+
+    class FakeBatchLocator:
+        def __init__(self) -> None:
+            """初始化 fake batch 请求记录。"""
+            self.requests = []
+
+        def locate_many(self, templates, *, region=None, min_confidence=1.0, logger=None):
+            """记录批量模板请求并返回同序结果。"""
+            self.requests.append((templates, min_confidence))
+            return (
+                ImageBatchMatchResult(templates[0], None, elapsed_ms=3.0),
+                ImageBatchMatchResult(
+                    templates[1],
+                    ImageMatch(Rect(10, 20, 30, 40), confidence=0.91),
+                    elapsed_ms=4.0,
+                ),
+            )
+
+    batch_locator = FakeBatchLocator()
+
+    result = probe_screen_state(
+        candidates,
+        image_locator=FailingSingleLocator(),
+        batch_image_locator=batch_locator,
+        min_confidence=0.8,
+    )
+
+    assert result.current_state == "装备"
+    assert [candidate.candidate.name for candidate in result.candidates] == ["人物", "装备"]
+    assert [candidate.elapsed_ms for candidate in result.candidates] == [3.0, 4.0]
+    assert batch_locator.requests == [
+        ((ImageTemplate("assets/character.png"), ImageTemplate("assets/equipment.png")), 0.8)
     ]
 
 
