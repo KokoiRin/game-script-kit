@@ -19,8 +19,13 @@ class ImageTarget:
     region: Rect | None = None
     min_confidence: float = 1.0
     offset: Point = field(default_factory=lambda: Point(0, 0))
+    anchor: str = "center"
 
     def __post_init__(self) -> None:
         """校验图片目标最低匹配置信度必须大于 0 且不超过 1。"""
         if not 0 < self.min_confidence <= 1:
             raise ValueError("image target min_confidence must be greater than 0 and at most 1")
+        from game_automation.portable.domain.image_matching import ImageMatch
+
+        # 用一个最小矩形复用领域 anchor 校验，避免在多个 module 维护合法值列表。
+        ImageMatch(Rect(0, 0, 1, 1), confidence=1.0).point_at(self.anchor)

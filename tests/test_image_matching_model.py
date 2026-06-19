@@ -60,3 +60,40 @@ def test_image_lookup_result_exposes_missing_state() -> None:
     assert result.rect is None
     assert result.center is None
     assert result.confidence is None
+
+
+def test_image_match_returns_common_anchor_points() -> None:
+    """验证图片匹配结果可以按 anchor 返回常用点位。"""
+    match = ImageMatch(Rect(10, 20, 30, 40), confidence=0.9)
+
+    assert match.point_at("center") == Point(25, 40)
+    assert match.point_at("top_left") == Point(10, 20)
+    assert match.point_at("top_center") == Point(25, 20)
+    assert match.point_at("top_right") == Point(40, 20)
+    assert match.point_at("left_center") == Point(10, 40)
+    assert match.point_at("right_center") == Point(40, 40)
+    assert match.point_at("bottom_left") == Point(10, 60)
+    assert match.point_at("bottom_center") == Point(25, 60)
+    assert match.point_at("bottom_right") == Point(40, 60)
+
+
+def test_image_match_rejects_unknown_anchor() -> None:
+    """验证未知 anchor 会被拒绝。"""
+    match = ImageMatch(Rect(10, 20, 30, 40), confidence=0.9)
+
+    with pytest.raises(ValueError, match="unknown image anchor: diagonal"):
+        match.point_at("diagonal")
+
+
+def test_image_lookup_result_returns_anchor_point_when_found() -> None:
+    """验证图片查询结果可以代理匹配结果 anchor 点位。"""
+    result = ImageLookupResult(ImageMatch(Rect(10, 20, 30, 40), confidence=0.9))
+
+    assert result.point_at("right_center") == Point(40, 40)
+
+
+def test_image_lookup_result_returns_none_anchor_when_missing() -> None:
+    """验证未找到图片时 anchor 点位为 None。"""
+    result = ImageLookupResult(None)
+
+    assert result.point_at("center") is None

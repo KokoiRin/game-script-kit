@@ -394,6 +394,28 @@ def test_runner_clicks_image_target_center_with_offset_and_region() -> None:
     ]
 
 
+def test_runner_clicks_image_target_anchor() -> None:
+    """验证图片目标可以点击指定匹配 anchor。"""
+    device = FakeInputDevice()
+    locator = SequenceImageLocator([ImageMatch(Rect(10, 20, 30, 40), confidence=0.9)])
+    script = Script(
+        name="click-image-target-anchor",
+        window=ScreenWindow(),
+        steps=(
+            Click(
+                ImageTarget(
+                    ImageTemplate("assets/start.png"),
+                    anchor="right_center",
+                )
+            ),
+        ),
+    )
+
+    ScriptRunner(device=device, image_locator=locator).run(script)
+
+    assert device.actions[0].target == Point(40, 40)
+
+
 def test_runner_resolves_named_image_target_before_clicking() -> None:
     """验证图片点击会把命名图片解析为模板后再定位。"""
     device = FakeInputDevice()

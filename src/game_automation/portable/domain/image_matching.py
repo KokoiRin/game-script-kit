@@ -34,10 +34,25 @@ class ImageMatch:
     @property
     def center(self) -> Point:
         """计算匹配区域的中心屏幕坐标。"""
-        return Point(
-            x=self.rect.left + self.rect.width // 2,
-            y=self.rect.top + self.rect.height // 2,
-        )
+        return self.point_at("center")
+
+    def point_at(self, anchor: str) -> Point:
+        """按 anchor 名称返回匹配区域内的点位。"""
+        points = {
+            "center": Point(self.rect.left + self.rect.width // 2, self.rect.top + self.rect.height // 2),
+            "top_left": Point(self.rect.left, self.rect.top),
+            "top_center": Point(self.rect.left + self.rect.width // 2, self.rect.top),
+            "top_right": Point(self.rect.left + self.rect.width, self.rect.top),
+            "left_center": Point(self.rect.left, self.rect.top + self.rect.height // 2),
+            "right_center": Point(self.rect.left + self.rect.width, self.rect.top + self.rect.height // 2),
+            "bottom_left": Point(self.rect.left, self.rect.top + self.rect.height),
+            "bottom_center": Point(self.rect.left + self.rect.width // 2, self.rect.top + self.rect.height),
+            "bottom_right": Point(self.rect.left + self.rect.width, self.rect.top + self.rect.height),
+        }
+        try:
+            return points[anchor]
+        except KeyError as exc:
+            raise ValueError(f"unknown image anchor: {anchor}") from exc
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,3 +78,7 @@ class ImageLookupResult:
     def confidence(self) -> float | None:
         """返回匹配置信度，未找到时返回 None。"""
         return None if self.match is None else self.match.confidence
+
+    def point_at(self, anchor: str) -> Point | None:
+        """返回查询结果匹配区域中的 anchor 点位，未找到时返回 None。"""
+        return None if self.match is None else self.match.point_at(anchor)
