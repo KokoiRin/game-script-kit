@@ -14,6 +14,7 @@ from game_automation.portable.domain import (
     Drag,
     If,
     ImageTarget,
+    OffsetTarget,
     Point,
     PointRef,
     Rect,
@@ -118,6 +119,9 @@ class ScriptRunner:
             return script.window.resolve(target)
         if isinstance(target, PointRef):
             return script.window.resolve(script.resources.resolve_point(target))
+        if isinstance(target, OffsetTarget):
+            base = self._resolve_click_target(script, target.base)
+            return base.offset(x=target.offset.x, y=target.offset.y)
         if isinstance(target, ImageTarget):
             return self._resolve_image_target(script, target)
         raise TypeError(f"unsupported click target: {type(target).__name__}")

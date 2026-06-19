@@ -12,10 +12,11 @@ from typing import TypeAlias
 from game_automation.portable.domain.conditions import Condition
 from game_automation.portable.domain.geometry import Point
 from game_automation.portable.domain.point_aliases import PointRef
+from game_automation.portable.domain.target_offsets import OffsetTarget
 from game_automation.portable.domain.targets import ImageTarget
 
 
-ClickTarget: TypeAlias = Point | PointRef | ImageTarget
+ClickTarget: TypeAlias = Point | PointRef | ImageTarget | OffsetTarget
 
 
 @dataclass(frozen=True, slots=True)

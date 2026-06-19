@@ -5,6 +5,7 @@ import pytest
 from game_automation.portable.domain import (
     Click,
     NamedPoint,
+    OffsetTarget,
     Point,
     PointRef,
     ScreenWindow,
@@ -72,3 +73,27 @@ def test_click_can_hold_point_ref_target() -> None:
     action = Click(PointRef("头像"))
 
     assert action.point == PointRef("头像")
+
+
+def test_point_offset_returns_new_point() -> None:
+    """验证固定点位 offset 返回新点且不修改原点。"""
+    point = Point(242, 92)
+
+    shifted = point.offset(x=120, y=-5)
+
+    assert shifted == Point(362, 87)
+    assert point == Point(242, 92)
+
+
+def test_point_ref_offset_builds_offset_target() -> None:
+    """验证命名点位引用可以构造偏移目标。"""
+    target = PointRef("头像").offset(x=120, y=0)
+
+    assert target == OffsetTarget(PointRef("头像"), Point(120, 0))
+
+
+def test_click_can_hold_offset_target() -> None:
+    """验证点击动作可以保留偏移目标。"""
+    target = OffsetTarget(PointRef("头像"), Point(120, 0))
+
+    assert Click(target).point == target
