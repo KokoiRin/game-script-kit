@@ -26,7 +26,17 @@ from game_automation.portable.domain import (
 )
 from game_automation.portable.engine.condition_evaluator import evaluate_condition
 from game_automation.portable.engine.image_query import locate_image
-from game_automation.portable.engine.ports import InputDevice, PixelColorReader, ScreenImageLocator
+from game_automation.portable.engine.ports import (
+    CancellationToken,
+    InputDevice,
+    PixelColorReader,
+    RunLogger,
+    ScreenImageLocator,
+)
+
+
+class ScriptCancelledError(RuntimeError):
+    """表示脚本运行被外部取消信号停止。"""
 
 
 @dataclass(frozen=True, slots=True)
@@ -34,6 +44,8 @@ class ScriptRunner:
     device: InputDevice
     color_reader: PixelColorReader | None = None
     image_locator: ScreenImageLocator | None = None
+    cancellation_token: CancellationToken | None = None
+    logger: RunLogger | None = None
 
     def run(self, script: Script) -> None:
         """按脚本步骤树顺序执行所有步骤。"""
@@ -42,7 +54,9 @@ class ScriptRunner:
     def _run_steps(self, script: Script, steps: tuple[Step, ...]) -> None:
         """按顺序解释一组步骤。"""
         for step in steps:
+            self._raise_if_cancelled()
             self._run_step(script, step)
+            self._raise_if_cancelled()
 
     def _run_step(self, script: Script, step: Step) -> None:
         """解释单个步骤并触发对应运行时行为。"""
@@ -88,6 +102,7 @@ class ScriptRunner:
             color_reader=self.color_reader,
             image_locator=self.image_locator,
             resources=script.resources,
+            logger=self.logger,
         ):
             self._run_steps(script, step.then_steps)
         else:
@@ -97,12 +112,14 @@ class ScriptRunner:
         """轮询条件直到满足或超时。"""
         elapsed_seconds = 0.0
         while True:
+            self._raise_if_cancelled()
             if evaluate_condition(
                 step.condition,
                 window=script.window,
                 color_reader=self.color_reader,
                 image_locator=self.image_locator,
                 resources=script.resources,
+                logger=self.logger,
             ):
                 return
             if elapsed_seconds >= step.timeout_seconds:
@@ -111,7 +128,13 @@ class ScriptRunner:
             remaining_seconds = step.timeout_seconds - elapsed_seconds
             wait_seconds = min(step.interval_seconds, remaining_seconds)
             self.device.wait(wait_seconds)
+            self._raise_if_cancelled()
             elapsed_seconds += wait_seconds
+
+    def _raise_if_cancelled(self) -> None:
+        """在脚本步骤边界发现取消信号时停止运行。"""
+        if self.cancellation_token is not None and self.cancellation_token.is_cancelled():
+            raise ScriptCancelledError("script run cancelled")
 
     def _resolve_click_target(self, script: Script, target: ClickTarget) -> Point:
         """把静态或图片点击目标解析成最终屏幕坐标。"""
@@ -137,6 +160,7 @@ class ScriptRunner:
             resources=script.resources,
             region=self._resolve_image_target_region(script, target.region),
             min_confidence=target.min_confidence,
+            logger=self.logger,
         )
         match = result.match
         if match is None:

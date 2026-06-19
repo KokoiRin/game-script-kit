@@ -11,7 +11,7 @@ from game_automation.portable.domain.conditions import Condition
 from game_automation.portable.domain.point_aliases import TargetCatalog
 from game_automation.portable.domain.windows import Window
 from game_automation.portable.engine.image_query import locate_image
-from game_automation.portable.engine.ports import PixelColorReader, ScreenImageLocator
+from game_automation.portable.engine.ports import PixelColorReader, RunLogger, ScreenImageLocator
 
 
 def evaluate_condition(
@@ -21,6 +21,7 @@ def evaluate_condition(
     color_reader: PixelColorReader | None,
     image_locator: ScreenImageLocator | None,
     resources: TargetCatalog | None = None,
+    logger: RunLogger | None = None,
 ) -> bool:
     """根据运行时端口和脚本窗口评估条件。"""
     target_catalog = resources if resources is not None else TargetCatalog()
@@ -32,6 +33,7 @@ def evaluate_condition(
             window=window,
             image_locator=image_locator,
             resources=target_catalog,
+            logger=logger,
         )
     raise TypeError(f"unsupported script condition: {type(condition).__name__}")
 
@@ -65,6 +67,7 @@ def _evaluate_image_exists(
     window: Window,
     image_locator: ScreenImageLocator | None,
     resources: TargetCatalog,
+    logger: RunLogger | None,
 ) -> bool:
     """通过图像定位端口判断模板图片是否存在。"""
     if image_locator is None:
@@ -76,6 +79,7 @@ def _evaluate_image_exists(
         resources=resources,
         region=_resolve_region(window, condition.region),
         min_confidence=condition.min_confidence,
+        logger=logger,
     )
     return result.found
 

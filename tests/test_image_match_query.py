@@ -33,6 +33,18 @@ class FakeImageLocator:
         return self.match
 
 
+class FakeLogger:
+    """记录图片查询产生的诊断日志。"""
+
+    def __init__(self) -> None:
+        """初始化日志列表。"""
+        self.messages: list[str] = []
+
+    def log(self, message: str) -> None:
+        """保存一条日志消息。"""
+        self.messages.append(message)
+
+
 def test_locate_image_with_direct_template_returns_found_result() -> None:
     """验证直接模板查询会返回 found 结果。"""
     match = ImageMatch(Rect(10, 20, 30, 40), confidence=0.9)
@@ -50,6 +62,25 @@ def test_locate_image_with_direct_template_returns_found_result() -> None:
     assert result.match == match
     assert locator.calls == [
         (ImageTemplate("assets/start.png"), Rect(1, 2, 30, 40), 0.8)
+    ]
+
+
+def test_locate_image_logs_match_duration_and_result() -> None:
+    """验证图片查询会记录模板、耗时和匹配结果摘要。"""
+    logger = FakeLogger()
+    clock_values = iter([10.0, 10.125])
+
+    locate_image(
+        ImageTemplate("assets/start.png"),
+        image_locator=FakeImageLocator(ImageMatch(Rect(10, 20, 30, 40), confidence=0.91)),
+        resources=TargetCatalog(),
+        min_confidence=0.8,
+        logger=logger,
+        clock=lambda: next(clock_values),
+    )
+
+    assert logger.messages == [
+        "image match template=assets/start.png min_confidence=0.8 region=None elapsed_ms=125.00 found=True confidence=0.91"
     ]
 
 
