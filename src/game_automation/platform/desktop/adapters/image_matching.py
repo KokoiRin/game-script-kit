@@ -13,7 +13,7 @@ from types import ModuleType
 
 from PIL import Image
 
-from game_automation.portable.domain import ImageMatch, ImageTemplate, Rect
+from game_automation.portable.domain import ImageBatchMatchResult, ImageMatch, ImageTemplate, Rect
 from game_automation.portable.engine.ports import RunLogger, ScreenImageLocator
 
 
@@ -66,6 +66,70 @@ class PyAutoGuiScreenImageLocator(ScreenImageLocator):
                 match=match,
             )
             return match
+        except Exception as exc:
+            if _is_setup_error(exc):
+                raise exc
+            raise RuntimeError(
+                "failed to perform screen image matching. Check template path, "
+                "screenshot permissions, and image matching dependencies."
+            ) from exc
+
+    def locate_many(
+        self,
+        templates: tuple[ImageTemplate, ...],
+        *,
+        region: Rect | None = None,
+        min_confidence: float = 1.0,
+        logger: RunLogger | None = None,
+    ) -> tuple[ImageBatchMatchResult, ...]:
+        """在一次截图中查找多张模板图片。"""
+        _validate_min_confidence(min_confidence)
+        try:
+            total_started_at = perf_counter()
+            cv_started_at = perf_counter()
+            cv2, numpy = _load_cv_modules()
+            cv_load_ms = _elapsed_ms(cv_started_at)
+            screenshot_started_at = perf_counter()
+            screenshot = _capture_screen(self._backend, region=region)
+            screenshot_ms = _elapsed_ms(screenshot_started_at)
+            results: list[ImageBatchMatchResult] = []
+            template_load_ms = 0.0
+            match_ms = 0.0
+            for template in templates:
+                template_started_at = perf_counter()
+                template_image = _load_template_image(template)
+                template_load_ms += _elapsed_ms(template_started_at)
+                match_started_at = perf_counter()
+                match = _locate_template(
+                    cv2=cv2,
+                    numpy=numpy,
+                    screenshot=screenshot,
+                    template=template_image,
+                    min_confidence=min_confidence,
+                )
+                one_match_ms = _elapsed_ms(match_started_at)
+                match_ms += one_match_ms
+                results.append(
+                    ImageBatchMatchResult(
+                        template=template,
+                        match=match,
+                        elapsed_ms=one_match_ms,
+                    )
+                )
+            batch_results = tuple(results)
+            _log_batch_match_stages(
+                logger,
+                templates=templates,
+                region=region,
+                screenshot=screenshot,
+                cv_load_ms=cv_load_ms,
+                screenshot_ms=screenshot_ms,
+                template_load_ms=template_load_ms,
+                match_ms=match_ms,
+                total_ms=_elapsed_ms(total_started_at),
+                results=batch_results,
+            )
+            return batch_results
         except Exception as exc:
             if _is_setup_error(exc):
                 raise exc
@@ -229,6 +293,36 @@ def _log_match_stages(
         f"total_ms={total_ms:.2f} "
         f"found={match is not None} "
         f"confidence={None if match is None else match.confidence}"
+    )
+
+
+def _log_batch_match_stages(
+    logger: RunLogger | None,
+    *,
+    templates: tuple[ImageTemplate, ...],
+    region: Rect | None,
+    screenshot: CapturedScreen,
+    cv_load_ms: float,
+    screenshot_ms: float,
+    template_load_ms: float,
+    match_ms: float,
+    total_ms: float,
+    results: tuple[ImageBatchMatchResult, ...],
+) -> None:
+    """记录桌面批量图像匹配各阶段耗时，帮助定位性能瓶颈。"""
+    if logger is None:
+        return
+    logger.log(
+        "image batch match stages "
+        f"template_count={len(templates)} "
+        f"region={region} "
+        f"screenshot_size={screenshot.image.width}x{screenshot.image.height} "
+        f"cv_load_ms={cv_load_ms:.2f} "
+        f"screenshot_ms={screenshot_ms:.2f} "
+        f"template_load_ms={template_load_ms:.2f} "
+        f"match_ms={match_ms:.2f} "
+        f"total_ms={total_ms:.2f} "
+        f"found_count={sum(1 for result in results if result.found)}"
     )
 
 

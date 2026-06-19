@@ -43,3 +43,21 @@ def test_run_script_on_local_desktop_passes_screen_image_locator_factory(monkeyp
 
     assert result == "result"
     assert captured["kwargs"]["real_image_locator_factory"] is composition.build_real_screen_image_locator
+
+
+def test_build_local_control_application_passes_batch_image_locator_factory(monkeypatch) -> None:
+    """验证本地控制 UI 会装配批量图像定位 factory。"""
+    captured = {}
+
+    class FakeLocalControlApplication:
+        def __init__(self, **kwargs) -> None:
+            """记录 composition 传入的 application 依赖。"""
+            captured["kwargs"] = kwargs
+
+    monkeypatch.setattr(composition, "LocalControlApplication", FakeLocalControlApplication)
+
+    app = composition.build_local_control_application()
+
+    assert isinstance(app, FakeLocalControlApplication)
+    assert captured["kwargs"]["real_image_locator_factory"] is composition.build_real_screen_image_locator
+    assert captured["kwargs"]["real_image_batch_locator_factory"] is composition.build_real_screen_image_batch_locator

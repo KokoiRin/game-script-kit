@@ -9,7 +9,7 @@ from __future__ import annotations
 from game_automation.portable.application.local_control import LocalControlApplication, ScreenCapture
 from game_automation.portable.application.script_run import ScriptRunResult, run_script
 from game_automation.portable.domain import Script
-from game_automation.portable.engine.ports import InputDevice, PixelColorReader, ScreenImageLocator
+from game_automation.portable.engine.ports import InputDevice, PixelColorReader, ScreenImageBatchLocator, ScreenImageLocator
 
 
 def run_script_on_local_desktop(
@@ -37,6 +37,7 @@ def build_local_control_application() -> LocalControlApplication:
         real_device_factory=build_real_input_device,
         real_color_reader_factory=build_real_color_reader,
         real_image_locator_factory=build_real_screen_image_locator,
+        real_image_batch_locator_factory=build_real_screen_image_batch_locator,
         screen_capture_factory=build_real_screen_capture,
     )
 
@@ -57,6 +58,13 @@ def build_real_color_reader() -> PixelColorReader:
 
 def build_real_screen_image_locator() -> ScreenImageLocator:
     """延迟创建真实图像定位 adapter，避免普通脚本触发截图依赖。"""
+    from game_automation.platform.desktop.adapters import PyAutoGuiScreenImageLocator
+
+    return PyAutoGuiScreenImageLocator()
+
+
+def build_real_screen_image_batch_locator() -> ScreenImageBatchLocator:
+    """延迟创建真实批量图像定位 adapter，避免打开 UI 时触发截图权限。"""
     from game_automation.platform.desktop.adapters import PyAutoGuiScreenImageLocator
 
     return PyAutoGuiScreenImageLocator()
