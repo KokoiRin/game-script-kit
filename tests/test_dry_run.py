@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
-from game_automation.portable.adapters.dry_run import DryRunInputDevice, DryRunPixelColorReader
-from game_automation.portable.domain import Color, Point
+from game_automation.portable.adapters.dry_run import (
+    DryRunInputDevice,
+    DryRunPixelColorReader,
+    DryRunScreenImageLocator,
+)
+from game_automation.portable.domain import Color, ImageMatch, ImageTemplate, Point, Rect
 
 
 def test_dry_run_input_device_prints_click(capsys) -> None:
@@ -32,3 +36,28 @@ def test_dry_run_pixel_color_reader_returns_fixed_color() -> None:
     reader = DryRunPixelColorReader(Color(1, 2, 3))
 
     assert reader.read_color(Point(10, 20)) == Color(1, 2, 3)
+
+
+def test_dry_run_screen_image_locator_returns_configured_match() -> None:
+    """验证 dry-run 图像定位会返回预设匹配结果。"""
+    template = ImageTemplate("assets/start.png")
+    match = ImageMatch(Rect(left=10, top=20, width=30, height=40), confidence=0.9)
+    locator = DryRunScreenImageLocator({template: match})
+
+    assert locator.locate(template, min_confidence=0.8) == match
+
+
+def test_dry_run_screen_image_locator_returns_none_for_missing_template() -> None:
+    """验证 dry-run 图像定位对未配置模板返回未找到。"""
+    locator = DryRunScreenImageLocator({})
+
+    assert locator.locate(ImageTemplate("assets/missing.png")) is None
+
+
+def test_dry_run_screen_image_locator_respects_min_confidence() -> None:
+    """验证 dry-run 图像定位会按最低置信度过滤预设匹配。"""
+    template = ImageTemplate("assets/start.png")
+    match = ImageMatch(Rect(left=0, top=0, width=10, height=10), confidence=0.7)
+    locator = DryRunScreenImageLocator({template: match})
+
+    assert locator.locate(template, min_confidence=0.8) is None

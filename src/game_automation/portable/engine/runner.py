@@ -8,15 +8,29 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from game_automation.portable.domain import Click, Drag, If, Repeat, Script, Step, Wait, WaitUntil
+from game_automation.portable.domain import (
+    Click,
+    ClickTarget,
+    Drag,
+    If,
+    ImageTarget,
+    Point,
+    Rect,
+    Repeat,
+    Script,
+    Step,
+    Wait,
+    WaitUntil,
+)
 from game_automation.portable.engine.condition_evaluator import evaluate_condition
-from game_automation.portable.engine.ports import InputDevice, PixelColorReader
+from game_automation.portable.engine.ports import InputDevice, PixelColorReader, ScreenImageLocator
 
 
 @dataclass(frozen=True, slots=True)
 class ScriptRunner:
     device: InputDevice
     color_reader: PixelColorReader | None = None
+    image_locator: ScreenImageLocator | None = None
 
     def run(self, script: Script) -> None:
         """按脚本步骤树顺序执行所有步骤。"""
@@ -46,7 +60,7 @@ class ScriptRunner:
 
     def _run_click(self, script: Script, action: Click) -> None:
         """解析脚本窗口内点击点并调用输入设备。"""
-        self.device.click(script.window.resolve(action.point))
+        self.device.click(self._resolve_click_target(script, action.point))
 
     def _run_drag(self, script: Script, action: Drag) -> None:
         """解析脚本窗口内拖拽起止点并调用输入设备。"""
@@ -69,6 +83,7 @@ class ScriptRunner:
             step.condition,
             window=script.window,
             color_reader=self.color_reader,
+            image_locator=self.image_locator,
         ):
             self._run_steps(script, step.then_steps)
         else:
@@ -82,6 +97,7 @@ class ScriptRunner:
                 step.condition,
                 window=script.window,
                 color_reader=self.color_reader,
+                image_locator=self.image_locator,
             ):
                 return
             if elapsed_seconds >= step.timeout_seconds:
@@ -91,3 +107,34 @@ class ScriptRunner:
             wait_seconds = min(step.interval_seconds, remaining_seconds)
             self.device.wait(wait_seconds)
             elapsed_seconds += wait_seconds
+
+    def _resolve_click_target(self, script: Script, target: ClickTarget) -> Point:
+        """把静态或图片点击目标解析成最终屏幕坐标。"""
+        if isinstance(target, Point):
+            return script.window.resolve(target)
+        if isinstance(target, ImageTarget):
+            return self._resolve_image_target(script, target)
+        raise TypeError(f"unsupported click target: {type(target).__name__}")
+
+    def _resolve_image_target(self, script: Script, target: ImageTarget) -> Point:
+        """通过图像定位端口把图片目标解析成屏幕坐标。"""
+        if self.image_locator is None:
+            raise RuntimeError("image locator is required for image targets")
+        match = self.image_locator.locate(
+            target.template,
+            region=self._resolve_image_target_region(script, target.region),
+            min_confidence=target.min_confidence,
+        )
+        if match is None:
+            raise RuntimeError(f"image target not found: {target.template.path}")
+        return Point(
+            match.center.x + target.offset.x,
+            match.center.y + target.offset.y,
+        )
+
+    def _resolve_image_target_region(self, script: Script, region: Rect | None) -> Rect | None:
+        """按脚本窗口解析图片目标搜索区域左上角。"""
+        if region is None:
+            return None
+        top_left = script.window.resolve(Point(region.left, region.top))
+        return Rect(top_left.x, top_left.y, region.width, region.height)

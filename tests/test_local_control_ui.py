@@ -46,8 +46,33 @@ def test_local_ui_serves_control_page() -> None:
     assert 'id="script-select"' in html
     assert 'id="dry-run-enabled" type="checkbox" checked' in html
     assert 'id="run-script"' in html
+    assert 'id="image-asset-select"' in html
+    assert 'id="click-image"' in html
+    assert 'id="capture-screen"' in html
+    assert 'id="debug-screenshot"' in html
     assert 'id="run-tests"' in html
     assert "运行测试" in html
+    assert "查找并点击图片" in html
+    assert "截屏诊断" in html
+
+
+def test_local_ui_lists_image_assets_over_http() -> None:
+    """验证 UI HTTP 接口可以返回图片资源列表。"""
+    app = FakeControlApplication()
+    server = create_local_control_server(host="127.0.0.1", port=0, app=app)
+    thread = threading.Thread(target=server.serve_forever)
+    thread.start()
+    try:
+        payload = _request_json(server.server_address, "GET", "/api/image-assets")
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+    assert payload == {
+        "asset_folder": "assets",
+        "assets": ["start.png", "confirm.webp"],
+    }
 
 
 def test_local_ui_runs_script_over_http() -> None:
@@ -86,6 +111,68 @@ def test_local_ui_runs_script_over_http() -> None:
     }
 
 
+def test_local_ui_clicks_image_asset_over_http() -> None:
+    """验证 UI HTTP 接口把图片点击请求委托给 application。"""
+    app = FakeControlApplication()
+    server = create_local_control_server(host="127.0.0.1", port=0, app=app)
+    thread = threading.Thread(target=server.serve_forever)
+    thread.start()
+    try:
+        payload = _request_json(
+            server.server_address,
+            "POST",
+            "/api/click-image",
+            {
+                "asset": "start.png",
+                "dry_run": True,
+            },
+        )
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+    assert app.image_click_requests == [
+        {
+            "asset": "start.png",
+            "dry_run": True,
+        }
+    ]
+    assert payload == {
+        "exit_code": 0,
+        "stdout": "click Point(x=0, y=0)\n",
+        "stderr": "",
+    }
+
+
+def test_local_ui_captures_screen_over_http() -> None:
+    """验证 UI HTTP 接口把截屏诊断请求委托给 application。"""
+    app = FakeControlApplication()
+    server = create_local_control_server(host="127.0.0.1", port=0, app=app)
+    thread = threading.Thread(target=server.serve_forever)
+    thread.start()
+    try:
+        payload = _request_json(
+            server.server_address,
+            "POST",
+            "/api/capture-screen",
+            {},
+        )
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+    assert app.capture_requests == 1
+    assert payload == {
+        "exit_code": 0,
+        "stdout": "saved screenshot: /tmp/latest-screen.png\n",
+        "stderr": "",
+        "screenshot_path": "/tmp/latest-screen.png",
+        "screenshot_url": "/api/debug-screenshot?version=1",
+    }
+
+
 def test_local_ui_runs_tests_over_http() -> None:
     """验证 UI HTTP 接口可以触发固定测试任务。"""
     app = FakeControlApplication()
@@ -114,11 +201,22 @@ def test_local_ui_runs_tests_over_http() -> None:
 
 class FakeControlApplication:
     def __init__(self) -> None:
+        """初始化 fake application 的请求记录。"""
         self.run_requests: list[dict[str, object]] = []
         self.test_requests: list[str] = []
+        self.image_click_requests: list[dict[str, object]] = []
+        self.capture_requests = 0
 
     def list_scripts(self) -> tuple[str, ...]:
         return ("conditional-color-demo",)
+
+    def image_asset_folder_label(self) -> str:
+        """返回 fake 图片目录展示名。"""
+        return "assets"
+
+    def list_image_assets(self) -> tuple[str, ...]:
+        """返回 fake 图片资源列表。"""
+        return ("start.png", "confirm.webp")
 
     def run_named_script(self, name: str, *, dry_run: bool, dry_run_color: str) -> ControlResult:
         self.run_requests.append(
@@ -137,6 +235,26 @@ class FakeControlApplication:
     def run_tests(self, task_name: str = "all") -> ControlResult:
         self.test_requests.append(task_name)
         return ControlResult(exit_code=0, stdout="109 passed\n", stderr="")
+
+    def click_image_asset(self, asset_name: str, *, dry_run: bool) -> ControlResult:
+        """记录 fake 图片点击请求。"""
+        self.image_click_requests.append(
+            {
+                "asset": asset_name,
+                "dry_run": dry_run,
+            }
+        )
+        return ControlResult(exit_code=0, stdout="click Point(x=0, y=0)\n", stderr="")
+
+    def capture_screen_screenshot(self) -> ControlResult:
+        """记录 fake 截屏诊断请求。"""
+        self.capture_requests += 1
+        return ControlResult(
+            exit_code=0,
+            stdout="saved screenshot: /tmp/latest-screen.png\n",
+            stderr="",
+            screenshot_path="/tmp/latest-screen.png",
+        )
 
 
 def _request_json(address, method: str, path: str, body: dict[str, object] | None = None) -> dict[str, object]:

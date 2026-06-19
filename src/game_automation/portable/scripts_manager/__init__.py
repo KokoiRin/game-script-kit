@@ -9,6 +9,11 @@ from game_automation.portable.scripts_manager.conditional_color_demo import (
     build_conditional_color_demo_script,
 )
 from game_automation.portable.scripts_manager.catalog import DEFAULT_SCRIPT_CATALOG
+from game_automation.portable.scripts_manager.click_image_demo import (
+    CLICK_IMAGE_DEMO_SCRIPT,
+    CLICK_IMAGE_DEMO_TEMPLATE,
+    build_click_image_demo_script,
+)
 from game_automation.portable.scripts_manager.demo import DEMO_SCRIPT, build_demo_script
 from game_automation.portable.scripts_manager.recorded_clicks import (
     RECORDED_CLICKS_SCRIPT,
@@ -22,17 +27,28 @@ from game_automation.portable.scripts_manager.wait_until_color_demo import (
     WAIT_UNTIL_COLOR_DEMO_SCRIPT,
     build_wait_until_color_demo_script,
 )
+from game_automation.portable.scripts_manager.wait_until_image_demo import (
+    WAIT_UNTIL_IMAGE_DEMO_SCRIPT,
+    WAIT_UNTIL_IMAGE_DEMO_TEMPLATE,
+    build_wait_until_image_demo_script,
+)
 
 __all__ = [
     "DEFAULT_SCRIPT_CATALOG",
     "DEMO_SCRIPT",
     "CONDITIONAL_COLOR_DEMO_SCRIPT",
+    "CLICK_IMAGE_DEMO_SCRIPT",
+    "CLICK_IMAGE_DEMO_TEMPLATE",
     "RECORDED_CLICKS_SCRIPT",
     "REPEAT_DEMO_SCRIPT",
     "WAIT_UNTIL_COLOR_DEMO_SCRIPT",
+    "WAIT_UNTIL_IMAGE_DEMO_SCRIPT",
+    "WAIT_UNTIL_IMAGE_DEMO_TEMPLATE",
     "build_conditional_color_demo_script",
+    "build_click_image_demo_script",
     "build_demo_script",
     "build_recorded_clicks_script",
     "build_repeat_demo_script",
     "build_wait_until_color_demo_script",
+    "build_wait_until_image_demo_script",
 ]

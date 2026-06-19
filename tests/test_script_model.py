@@ -9,6 +9,9 @@ from game_automation.portable.domain import (
     ColorIs,
     Drag,
     If,
+    ImageExists,
+    ImageTemplate,
+    ImageTarget,
     Point,
     Rect,
     Repeat,
@@ -72,6 +75,47 @@ def test_actions_do_not_expose_move_or_mouse_button() -> None:
 
     assert not hasattr(actions, "Move")
     assert not hasattr(actions, "MouseButton")
+
+
+def test_image_target_preserves_template_and_defaults() -> None:
+    """验证图片目标会保留模板并默认点击匹配中心。"""
+    target = ImageTarget(ImageTemplate("assets/start.png"))
+
+    assert target.template == ImageTemplate("assets/start.png")
+    assert target.region is None
+    assert target.min_confidence == 1.0
+    assert target.offset == Point(0, 0)
+
+
+def test_image_target_preserves_region_confidence_and_offset() -> None:
+    """验证图片目标会保留搜索区域、置信度和中心偏移。"""
+    target = ImageTarget(
+        ImageTemplate("assets/start.png"),
+        region=Rect(10, 20, 30, 40),
+        min_confidence=0.8,
+        offset=Point(5, -3),
+    )
+
+    assert target.region == Rect(10, 20, 30, 40)
+    assert target.min_confidence == 0.8
+    assert target.offset == Point(5, -3)
+
+
+@pytest.mark.parametrize("min_confidence", [0.0, -0.1, 1.1])
+def test_image_target_rejects_invalid_min_confidence(min_confidence: float) -> None:
+    """验证图片目标拒绝非法最低匹配置信度。"""
+    with pytest.raises(ValueError, match="image target min_confidence"):
+        ImageTarget(
+            ImageTemplate("assets/start.png"),
+            min_confidence=min_confidence,
+        )
+
+
+def test_click_preserves_image_target() -> None:
+    """验证 Click 可以保存图片目标。"""
+    target = ImageTarget(ImageTemplate("assets/start.png"))
+
+    assert Click(target).point == target
 
 
 def test_wait_rejects_negative_duration() -> None:
@@ -158,6 +202,39 @@ def test_color_condition_rejects_invalid_tolerance() -> None:
 
     with pytest.raises(ValueError, match="color tolerance"):
         ColorIs(point=Point(1, 2), expected=Color(1, 2, 3), tolerance=256)
+
+
+def test_image_exists_condition_preserves_template_and_defaults() -> None:
+    """验证图片存在条件会保留模板并默认全屏精确匹配。"""
+    condition = ImageExists(template=ImageTemplate("assets/start.png"))
+
+    assert condition.template == ImageTemplate("assets/start.png")
+    assert condition.region is None
+    assert condition.min_confidence == 1.0
+
+
+def test_image_exists_condition_preserves_region_and_min_confidence() -> None:
+    """验证图片存在条件会保留搜索区域和最低匹配置信度。"""
+    condition = ImageExists(
+        template=ImageTemplate("assets/start.png"),
+        region=Rect(left=10, top=20, width=30, height=40),
+        min_confidence=0.8,
+    )
+
+    assert condition.region == Rect(left=10, top=20, width=30, height=40)
+    assert condition.min_confidence == 0.8
+
+
+@pytest.mark.parametrize("min_confidence", [0.0, -0.1, 1.1])
+def test_image_exists_condition_rejects_invalid_min_confidence(
+    min_confidence: float,
+) -> None:
+    """验证图片存在条件拒绝非法最低匹配置信度。"""
+    with pytest.raises(ValueError, match="image exists min_confidence"):
+        ImageExists(
+            template=ImageTemplate("assets/start.png"),
+            min_confidence=min_confidence,
+        )
 
 
 def test_if_preserves_condition_and_branch_steps() -> None:

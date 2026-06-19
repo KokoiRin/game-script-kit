@@ -52,3 +52,13 @@ def test_default_catalog_includes_conditional_color_demo() -> None:
 def test_default_catalog_includes_wait_until_color_demo() -> None:
     """验证默认注册表包含条件等待示例脚本。"""
     assert "wait-until-color-demo" in DEFAULT_SCRIPT_CATALOG.list_names()
+
+
+def test_default_catalog_includes_wait_until_image_demo() -> None:
+    """验证默认注册表包含图片条件等待示例脚本。"""
+    assert "wait-until-image-demo" in DEFAULT_SCRIPT_CATALOG.list_names()
+
+
+def test_default_catalog_includes_click_image_demo() -> None:
+    """验证默认注册表包含图片目标点击示例脚本。"""
+    assert "click-image-demo" in DEFAULT_SCRIPT_CATALOG.list_names()

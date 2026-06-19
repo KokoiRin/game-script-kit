@@ -10,7 +10,8 @@ from dataclasses import dataclass
 from typing import TypeAlias
 
 from game_automation.portable.domain.color import Color
-from game_automation.portable.domain.geometry import Point
+from game_automation.portable.domain.geometry import Point, Rect
+from game_automation.portable.domain.image_matching import ImageTemplate
 
 
 @dataclass(frozen=True, slots=True)
@@ -25,4 +26,16 @@ class ColorIs:
             raise ValueError("color tolerance must be between 0 and 255")
 
 
-Condition: TypeAlias = ColorIs
+@dataclass(frozen=True, slots=True)
+class ImageExists:
+    template: ImageTemplate
+    region: Rect | None = None
+    min_confidence: float = 1.0
+
+    def __post_init__(self) -> None:
+        """校验图片匹配最低置信度必须大于 0 且不超过 1。"""
+        if not 0 < self.min_confidence <= 1:
+            raise ValueError("image exists min_confidence must be greater than 0 and at most 1")
+
+
+Condition: TypeAlias = ColorIs | ImageExists

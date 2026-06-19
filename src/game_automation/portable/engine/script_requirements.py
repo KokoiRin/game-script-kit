@@ -8,35 +8,73 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from game_automation.portable.domain import ColorIs, If, Repeat, Script, Step, WaitUntil
+from game_automation.portable.domain import (
+    Click,
+    ColorIs,
+    If,
+    ImageExists,
+    ImageTarget,
+    Repeat,
+    Script,
+    Step,
+    WaitUntil,
+)
+from game_automation.portable.domain.conditions import Condition
 
 
 @dataclass(frozen=True, slots=True)
 class ScriptRequirements:
     needs_color_reader: bool = False
+    needs_image_locator: bool = False
 
 
 def inspect_script_requirements(script: Script) -> ScriptRequirements:
     """递归分析脚本步骤树并返回运行时端口需求。"""
-    return ScriptRequirements(needs_color_reader=_steps_need_color_reader(script.steps))
+    return _inspect_steps(script.steps)
 
 
-def _steps_need_color_reader(steps: tuple[Step, ...]) -> bool:
-    """检查步骤序列是否包含需要颜色读取端口的条件。"""
+def _inspect_steps(steps: tuple[Step, ...]) -> ScriptRequirements:
+    """检查步骤序列需要哪些运行时端口。"""
+    needs_color_reader = False
+    needs_image_locator = False
     for step in steps:
-        if isinstance(step, Repeat) and _steps_need_color_reader(step.steps):
-            return True
-        if isinstance(step, If) and _if_needs_color_reader(step):
-            return True
-        if isinstance(step, WaitUntil) and isinstance(step.condition, ColorIs):
-            return True
-    return False
+        requirements = _inspect_step(step)
+        needs_color_reader = needs_color_reader or requirements.needs_color_reader
+        needs_image_locator = needs_image_locator or requirements.needs_image_locator
+    return ScriptRequirements(
+        needs_color_reader=needs_color_reader,
+        needs_image_locator=needs_image_locator,
+    )
 
 
-def _if_needs_color_reader(step: If) -> bool:
-    """检查条件分支是否直接或间接需要颜色读取端口。"""
-    return (
-        isinstance(step.condition, ColorIs)
-        or _steps_need_color_reader(step.then_steps)
-        or _steps_need_color_reader(step.else_steps)
+def _inspect_step(step: Step) -> ScriptRequirements:
+    """检查单个步骤直接或间接需要哪些端口。"""
+    if isinstance(step, Click) and isinstance(step.point, ImageTarget):
+        return ScriptRequirements(needs_image_locator=True)
+    if isinstance(step, Repeat):
+        return _inspect_steps(step.steps)
+    if isinstance(step, If):
+        return _merge_requirements(
+            _inspect_condition(step.condition),
+            _inspect_steps(step.then_steps),
+            _inspect_steps(step.else_steps),
+        )
+    if isinstance(step, WaitUntil):
+        return _inspect_condition(step.condition)
+    return ScriptRequirements()
+
+
+def _inspect_condition(condition: Condition) -> ScriptRequirements:
+    """检查条件自身需要哪些运行时端口。"""
+    return ScriptRequirements(
+        needs_color_reader=isinstance(condition, ColorIs),
+        needs_image_locator=isinstance(condition, ImageExists),
+    )
+
+
+def _merge_requirements(*requirements: ScriptRequirements) -> ScriptRequirements:
+    """合并多段步骤或条件的端口需求。"""
+    return ScriptRequirements(
+        needs_color_reader=any(item.needs_color_reader for item in requirements),
+        needs_image_locator=any(item.needs_image_locator for item in requirements),
     )

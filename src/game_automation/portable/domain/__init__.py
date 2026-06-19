@@ -4,21 +4,28 @@
 也不承载应用编排逻辑。
 """
 
-from game_automation.portable.domain.actions import Click, Drag, If, PrimitiveAction, Repeat, Step, Wait, WaitUntil
+from game_automation.portable.domain.actions import Click, ClickTarget, Drag, If, PrimitiveAction, Repeat, Step, Wait, WaitUntil
 from game_automation.portable.domain.color import Color
-from game_automation.portable.domain.conditions import ColorIs, Condition
+from game_automation.portable.domain.conditions import ColorIs, Condition, ImageExists
 from game_automation.portable.domain.geometry import Point, Rect
+from game_automation.portable.domain.image_matching import ImageMatch, ImageTemplate
 from game_automation.portable.domain.script import Script
+from game_automation.portable.domain.targets import ImageTarget
 from game_automation.portable.domain.windows import AreaWindow, ScreenWindow, Window
 
 __all__ = [
     "AreaWindow",
     "Click",
+    "ClickTarget",
     "Color",
     "ColorIs",
     "Condition",
     "Drag",
     "If",
+    "ImageExists",
+    "ImageMatch",
+    "ImageTemplate",
+    "ImageTarget",
     "Point",
     "PrimitiveAction",
     "Rect",

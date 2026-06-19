@@ -5,11 +5,15 @@
 """
 
 from game_automation.platform.desktop.adapters.pixel_color import PyAutoGuiPixelColorReader
+from game_automation.platform.desktop.adapters.image_matching import PyAutoGuiScreenImageLocator
 from game_automation.platform.desktop.adapters.pointer_position import PyAutoGuiPointerPositionReader
+from game_automation.platform.desktop.adapters.screen_capture import PyAutoGuiScreenCapture
 from game_automation.platform.desktop.adapters.terminal_keyboard import TerminalKeyStateReader
 
 __all__ = [
     "PyAutoGuiPixelColorReader",
+    "PyAutoGuiScreenImageLocator",
     "PyAutoGuiPointerPositionReader",
+    "PyAutoGuiScreenCapture",
     "TerminalKeyStateReader",
 ]
