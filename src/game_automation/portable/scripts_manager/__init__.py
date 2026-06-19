@@ -15,6 +15,13 @@ from game_automation.portable.scripts_manager.click_image_demo import (
     build_click_image_demo_script,
 )
 from game_automation.portable.scripts_manager.demo import DEMO_SCRIPT, build_demo_script
+from game_automation.portable.scripts_manager.leave_retry_loop import (
+    LEAVE_IMAGE_TEMPLATE,
+    LEAVE_RETRY_LOOP_SCRIPT,
+    LEAVE_RETRY_LOOP_TIMES,
+    RETRY_IMAGE_TEMPLATE,
+    build_leave_retry_loop_script,
+)
 from game_automation.portable.scripts_manager.recorded_clicks import (
     RECORDED_CLICKS_SCRIPT,
     build_recorded_clicks_script,
@@ -39,7 +46,11 @@ __all__ = [
     "CONDITIONAL_COLOR_DEMO_SCRIPT",
     "CLICK_IMAGE_DEMO_SCRIPT",
     "CLICK_IMAGE_DEMO_TEMPLATE",
+    "LEAVE_IMAGE_TEMPLATE",
+    "LEAVE_RETRY_LOOP_SCRIPT",
+    "LEAVE_RETRY_LOOP_TIMES",
     "RECORDED_CLICKS_SCRIPT",
+    "RETRY_IMAGE_TEMPLATE",
     "REPEAT_DEMO_SCRIPT",
     "WAIT_UNTIL_COLOR_DEMO_SCRIPT",
     "WAIT_UNTIL_IMAGE_DEMO_SCRIPT",
@@ -47,6 +58,7 @@ __all__ = [
     "build_conditional_color_demo_script",
     "build_click_image_demo_script",
     "build_demo_script",
+    "build_leave_retry_loop_script",
     "build_recorded_clicks_script",
     "build_repeat_demo_script",
     "build_wait_until_color_demo_script",

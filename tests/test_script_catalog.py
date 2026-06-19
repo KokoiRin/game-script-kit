@@ -62,3 +62,8 @@ def test_default_catalog_includes_wait_until_image_demo() -> None:
 def test_default_catalog_includes_click_image_demo() -> None:
     """验证默认注册表包含图片目标点击示例脚本。"""
     assert "click-image-demo" in DEFAULT_SCRIPT_CATALOG.list_names()
+
+
+def test_default_catalog_includes_leave_retry_loop() -> None:
+    """验证默认注册表包含离开/重来轮询点击脚本。"""
+    assert "click-leave-or-retry-loop" in DEFAULT_SCRIPT_CATALOG.list_names()
