@@ -15,5 +15,6 @@ htmlcov/
 .hermes/
 .star/
 assets/
+resources/xqtd/
 
 .DS_Store
