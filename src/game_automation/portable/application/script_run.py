@@ -9,14 +9,19 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from game_automation.portable.adapters.dry_run import DryRunInputDevice, DryRunPixelColorReader
-from game_automation.portable.domain import Color, Script
-from game_automation.portable.engine.ports import InputDevice, PixelColorReader
+from game_automation.portable.adapters.dry_run import (
+    DryRunInputDevice,
+    DryRunPixelColorReader,
+    DryRunScreenImageLocator,
+)
+from game_automation.portable.domain import Color, ImageMatch, ImageTemplate, Rect, Script
+from game_automation.portable.engine.ports import InputDevice, PixelColorReader, ScreenImageLocator
 from game_automation.portable.engine.runner import ScriptRunner
 from game_automation.portable.engine.script_requirements import inspect_script_requirements
 
 InputDeviceFactory = Callable[[], InputDevice]
 PixelColorReaderFactory = Callable[[], PixelColorReader]
+ScreenImageLocatorFactory = Callable[[], ScreenImageLocator]
 
 
 @dataclass(frozen=True, slots=True)
@@ -30,8 +35,10 @@ def run_script(
     *,
     dry_run: bool,
     dry_run_color: str = "#000000",
+    dry_run_images: tuple[str, ...] = (),
     real_device_factory: InputDeviceFactory | None = None,
     real_color_reader_factory: PixelColorReaderFactory | None = None,
+    real_image_locator_factory: ScreenImageLocatorFactory | None = None,
 ) -> ScriptRunResult:
     """运行一份已解析脚本，并返回入口层可直接映射的结果。"""
     try:
@@ -39,8 +46,10 @@ def run_script(
             script,
             dry_run=dry_run,
             dry_run_color=dry_run_color,
+            dry_run_images=dry_run_images,
             real_device_factory=real_device_factory,
             real_color_reader_factory=real_color_reader_factory,
+            real_image_locator_factory=real_image_locator_factory,
         )
     except ValueError as exc:
         return ScriptRunResult(
@@ -60,6 +69,11 @@ def run_script(
             exit_code=1,
             error_message=f"script run timed out: {exc}",
         )
+    except RuntimeError as exc:
+        return ScriptRunResult(
+            exit_code=1,
+            error_message=f"script run failed: {exc}",
+        )
     return ScriptRunResult(exit_code=0)
 
 
@@ -68,8 +82,10 @@ def _build_runner(
     *,
     dry_run: bool,
     dry_run_color: str,
+    dry_run_images: tuple[str, ...],
     real_device_factory: InputDeviceFactory | None,
     real_color_reader_factory: PixelColorReaderFactory | None,
+    real_image_locator_factory: ScreenImageLocatorFactory | None,
 ) -> ScriptRunner:
     """按脚本运行模式和端口需求组装 runner。"""
     requirements = inspect_script_requirements(script)
@@ -80,6 +96,10 @@ def _build_runner(
                 dry_run_color,
                 needs_color_reader=requirements.needs_color_reader,
             ),
+            image_locator=_build_dry_run_image_locator(
+                dry_run_images,
+                needs_image_locator=requirements.needs_image_locator,
+            ),
         )
 
     return ScriptRunner(
@@ -87,6 +107,10 @@ def _build_runner(
         color_reader=_build_real_color_reader(
             needs_color_reader=requirements.needs_color_reader,
             real_color_reader_factory=real_color_reader_factory,
+        ),
+        image_locator=_build_real_image_locator(
+            needs_image_locator=requirements.needs_image_locator,
+            real_image_locator_factory=real_image_locator_factory,
         ),
     )
 
@@ -109,6 +133,21 @@ def _build_real_device(real_device_factory: InputDeviceFactory | None) -> InputD
     return real_device_factory()
 
 
+def _build_dry_run_image_locator(
+    dry_run_images: tuple[str, ...],
+    *,
+    needs_image_locator: bool,
+) -> ScreenImageLocator | None:
+    """按脚本需求创建 dry-run 固定图像定位 adapter。"""
+    if not needs_image_locator:
+        return None
+    matches = {
+        ImageTemplate(path): ImageMatch(Rect(0, 0, 1, 1), confidence=1.0)
+        for path in dry_run_images
+    }
+    return DryRunScreenImageLocator(matches)
+
+
 def _build_real_color_reader(
     *,
     needs_color_reader: bool,
@@ -120,3 +159,16 @@ def _build_real_color_reader(
     if real_color_reader_factory is None:
         raise RuntimeError("real color reader factory is required")
     return real_color_reader_factory()
+
+
+def _build_real_image_locator(
+    *,
+    needs_image_locator: bool,
+    real_image_locator_factory: ScreenImageLocatorFactory | None,
+) -> ScreenImageLocator | None:
+    """按脚本需求通过平台层注入的工厂创建真实图像定位 adapter。"""
+    if not needs_image_locator:
+        return None
+    if real_image_locator_factory is None:
+        raise RuntimeError("real image locator factory is required")
+    return real_image_locator_factory()

@@ -10,6 +10,10 @@ from game_automation.portable.domain import (
     ColorIs,
     Drag,
     If,
+    ImageExists,
+    ImageMatch,
+    ImageTemplate,
+    ImageTarget,
     Point,
     Rect,
     Repeat,
@@ -48,6 +52,27 @@ class SequenceColorReader:
         self.points.append(point)
         index = min(len(self.points) - 1, len(self.colors) - 1)
         return self.colors[index]
+
+
+class SequenceImageLocator:
+    """按序返回图像匹配结果，序列耗尽后保持最后一个结果。"""
+
+    def __init__(self, matches: list[ImageMatch | None]) -> None:
+        """保存匹配结果序列并记录定位参数。"""
+        self.matches = matches
+        self.calls = []
+
+    def locate(
+        self,
+        template: ImageTemplate,
+        *,
+        region: Rect | None = None,
+        min_confidence: float = 1.0,
+    ) -> ImageMatch | None:
+        """返回下一个匹配结果并记录定位参数。"""
+        self.calls.append((template, region, min_confidence))
+        index = min(len(self.calls) - 1, len(self.matches) - 1)
+        return self.matches[index]
 
 
 def test_runner_maps_steps_to_device_with_script_window() -> None:
@@ -262,6 +287,90 @@ def test_runner_requires_color_reader_for_color_condition() -> None:
         ScriptRunner(device=FakeInputDevice()).run(script)
 
 
+def test_runner_executes_then_branch_when_image_exists() -> None:
+    """验证图片存在条件为真时 runner 执行 then 分支。"""
+    device = FakeInputDevice()
+    locator = SequenceImageLocator([ImageMatch(Rect(0, 0, 10, 10), confidence=1.0)])
+    script = Script(
+        name="if-image-runner",
+        window=AreaWindow(Rect(100, 200, 800, 600)),
+        steps=(
+            If(
+                condition=ImageExists(
+                    ImageTemplate("assets/start.png"),
+                    region=Rect(1, 2, 30, 40),
+                    min_confidence=0.8,
+                ),
+                then_steps=(Click(Point(3, 4)),),
+                else_steps=(Wait(0.5),),
+            ),
+        ),
+    )
+
+    ScriptRunner(device=device, image_locator=locator).run(script)
+
+    assert [action.name for action in device.actions] == ["click"]
+    assert device.actions[0].target == Point(103, 204)
+    assert locator.calls == [
+        (ImageTemplate("assets/start.png"), Rect(101, 202, 30, 40), 0.8)
+    ]
+
+
+def test_runner_clicks_image_target_center_with_offset_and_region() -> None:
+    """验证图片目标点击会解析区域并点击匹配中心加 offset。"""
+    device = FakeInputDevice()
+    locator = SequenceImageLocator([ImageMatch(Rect(10, 20, 30, 40), confidence=0.9)])
+    script = Script(
+        name="click-image-target",
+        window=AreaWindow(Rect(100, 200, 800, 600)),
+        steps=(
+            Click(
+                ImageTarget(
+                    ImageTemplate("assets/start.png"),
+                    region=Rect(1, 2, 300, 400),
+                    min_confidence=0.8,
+                    offset=Point(5, -3),
+                )
+            ),
+        ),
+    )
+
+    ScriptRunner(device=device, image_locator=locator).run(script)
+
+    assert [action.name for action in device.actions] == ["click"]
+    assert device.actions[0].target == Point(30, 37)
+    assert locator.calls == [
+        (ImageTemplate("assets/start.png"), Rect(101, 202, 300, 400), 0.8)
+    ]
+
+
+def test_runner_reports_missing_image_target() -> None:
+    """验证图片目标未找到时 runner 报告运行错误。"""
+    script = Script(
+        name="click-missing-image-target",
+        window=ScreenWindow(),
+        steps=(Click(ImageTarget(ImageTemplate("assets/missing.png"))),),
+    )
+
+    with pytest.raises(RuntimeError, match="image target not found"):
+        ScriptRunner(
+            device=FakeInputDevice(),
+            image_locator=SequenceImageLocator([None]),
+        ).run(script)
+
+
+def test_runner_requires_image_locator_for_image_target() -> None:
+    """验证图片目标点击需要图像定位端口。"""
+    script = Script(
+        name="click-image-target-no-locator",
+        window=ScreenWindow(),
+        steps=(Click(ImageTarget(ImageTemplate("assets/start.png"))),),
+    )
+
+    with pytest.raises(RuntimeError, match="image locator"):
+        ScriptRunner(device=FakeInputDevice()).run(script)
+
+
 def test_runner_executes_nested_if_and_repeat_steps() -> None:
     """验证 runner 能递归解释嵌套 If 和 Repeat。"""
     device = FakeInputDevice()
@@ -343,6 +452,37 @@ def test_runner_wait_until_waits_until_condition_matches() -> None:
     assert [action.duration_seconds for action in device.actions if action.name == "wait"] == [0.5, 0.5]
     assert device.actions[-1].target == Point(103, 204)
     assert color_reader.points == [Point(101, 202), Point(101, 202), Point(101, 202)]
+
+
+def test_runner_wait_until_waits_until_image_exists() -> None:
+    """验证 WaitUntil 可以轮询图片存在条件直到满足。"""
+    device = FakeInputDevice()
+    locator = SequenceImageLocator(
+        [
+            None,
+            ImageMatch(Rect(10, 20, 30, 40), confidence=1.0),
+        ]
+    )
+    script = Script(
+        name="wait-until-image",
+        window=ScreenWindow(),
+        steps=(
+            WaitUntil(
+                condition=ImageExists(ImageTemplate("assets/start.png")),
+                timeout_seconds=5,
+                interval_seconds=0.5,
+            ),
+            Click(Point(3, 4)),
+        ),
+    )
+
+    ScriptRunner(device=device, image_locator=locator).run(script)
+
+    assert [action.name for action in device.actions] == ["wait", "click"]
+    assert locator.calls == [
+        (ImageTemplate("assets/start.png"), None, 1.0),
+        (ImageTemplate("assets/start.png"), None, 1.0),
+    ]
 
 
 def test_runner_wait_until_times_out_and_stops_following_steps() -> None:

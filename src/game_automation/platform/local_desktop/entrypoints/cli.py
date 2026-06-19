@@ -33,6 +33,7 @@ def _run_script(args: argparse.Namespace) -> int:
         script,
         dry_run=args.dry_run,
         dry_run_color=args.dry_run_color,
+        dry_run_images=tuple(args.dry_run_image),
     )
     if result.error_message is not None:
         print(result.error_message, file=sys.stderr)
@@ -97,6 +98,12 @@ def main(argv: list[str] | None = None) -> int:
         "--dry-run-color",
         default="#000000",
         help="Fixed #RRGGBB screen color used when dry-running color conditions.",
+    )
+    run_parser.add_argument(
+        "--dry-run-image",
+        action="append",
+        default=[],
+        help="Template path treated as found when dry-running image conditions. Can be repeated.",
     )
 
     recorder_parser = subparsers.add_parser("recorder", help="Record screen coordinates.")

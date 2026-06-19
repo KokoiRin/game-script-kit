@@ -11,11 +11,13 @@
 - 支持固定次数重复步骤：`Repeat(times, steps)`。
 - 支持颜色条件分支：`If(ColorIs(...), then_steps, else_steps)`。
 - 支持颜色条件等待：`WaitUntil(ColorIs(...), timeout_seconds, interval_seconds)`。
+- 支持图片存在条件等待：`WaitUntil(ImageExists(...), timeout_seconds, interval_seconds)`。
 - 脚本绑定单个窗口，脚本内点击和拖拽都在该窗口坐标系内执行。
 - 支持两类窗口：
   - `ScreenWindow`：点坐标直接视为屏幕坐标。
   - `AreaWindow(Rect(...))`：点坐标按区域左上角偏移解析为屏幕坐标。
 - 通过 `InputDevice` 端口隔离平台输入实现。
+- 通过 `ScreenImageLocator` 端口隔离屏幕图像匹配实现。
 - 提供 macOS `pyautogui` adapter 和 dry-run demo。
 - 提供独立坐标记录工具，用于采集屏幕绝对坐标。
 - 提供命名脚本管理入口，可列出脚本并通过脚本名称启动。
@@ -26,7 +28,7 @@
 ```text
 src/game_automation/
 ├── portable/             # 跨平台可复用核心
-│   ├── domain/           # 纯领域数据模型：Click / Wait / If / WaitUntil / ColorIs
+│   ├── domain/           # 纯领域数据模型：Click / Wait / If / WaitUntil / ColorIs / ImageMatch
 │   ├── engine/           # 脚本执行引擎和运行能力 ports
 │   ├── scripts_manager/  # 脚本定义与注册管理
 │   ├── application/      # 用例编排：脚本运行、本地 UI 控制
@@ -98,6 +100,8 @@ cd /path/to/game-script-kit
 
 打开 `http://127.0.0.1:8765/` 后，可以选择脚本、勾选或取消“模拟运行”、输入模拟颜色并查看输出。“运行测试”按钮只运行项目内置的固定测试任务，不接受任意 shell 命令。
 
+UI 也提供图片点击路径：把 `.png`、`.jpg`、`.jpeg` 或 `.webp` 模板图片放到项目根目录 `assets/` 下，点击“刷新图片”，选择目标图片后点击“查找并点击图片”。模拟运行会把所选图片视为已找到并打印计划点击；真实运行会在当前屏幕中查找该图片并点击匹配区域中心点。
+
 端到端 smoke 方法：
 
 ```bash
@@ -106,6 +110,10 @@ curl http://127.0.0.1:8765/api/scripts
 curl -X POST http://127.0.0.1:8765/api/run-script \
   -H 'Content-Type: application/json' \
   -d '{"name":"conditional-color-demo","dry_run":true,"dry_run_color":"#102030"}'
+curl http://127.0.0.1:8765/api/image-assets
+curl -X POST http://127.0.0.1:8765/api/click-image \
+  -H 'Content-Type: application/json' \
+  -d '{"asset":"start.png","dry_run":true}'
 ```
 
 自动化测试：
@@ -150,6 +158,61 @@ curl -X POST http://127.0.0.1:8765/api/run-script \
 .venv/bin/star run wait-until-color-demo --dry-run --dry-run-color '#102030'
 .venv/bin/star run wait-until-color-demo --dry-run
 ```
+
+## 图片存在条件、图片目标点击和屏幕图像匹配
+
+当前已经提供平台无关的屏幕图像匹配 seam，并接入 `ImageExists(...)` 条件和 `Click(ImageTarget(...))` 图片目标点击。第一版能力包括：
+
+- `ImageTemplate(path)` 表达待查找模板图片。
+- `ImageMatch(rect, confidence)` 表达匹配区域、中心点和置信度。
+- `ImageExists(template, region=None, min_confidence=1.0)` 表达图片存在条件。
+- `ImageTarget(template, region=None, min_confidence=1.0, offset=Point(0, 0))` 表达按图片匹配中心点点击的目标。
+- `ScreenImageLocator.locate(template, region=None, min_confidence=1.0)` 在当前屏幕或指定区域内查找模板。
+- `PyAutoGuiScreenImageLocator` 是本地桌面 adapter，延迟加载 `pyautogui` 并隐藏截图、模板读取和平台依赖错误。
+- `DryRunScreenImageLocator` 可在测试或 dry-run 路径中返回预设匹配结果。
+
+`wait-until-image-demo` 使用 `WaitUntil(ImageExists(ImageTemplate("assets/start.png")), timeout_seconds=1, interval_seconds=0.5)`。默认 dry-run 不配置图片，条件会超时；指定匹配模板路径会立即通过并点击：
+
+```bash
+.venv/bin/star run wait-until-image-demo --dry-run
+.venv/bin/star run wait-until-image-demo --dry-run --dry-run-image assets/start.png
+```
+
+`click-image-demo` 使用 `Click(ImageTarget(ImageTemplate("assets/start.png")))`。默认 dry-run 不配置图片，会报告目标未找到；指定匹配模板路径会点击匹配区域中心点：
+
+```bash
+.venv/bin/star run click-image-demo --dry-run
+.venv/bin/star run click-image-demo --dry-run --dry-run-image assets/start.png
+```
+
+示例：
+
+```python
+from game_automation.portable.domain import ImageExists, ImageTarget, ImageTemplate, Point, Rect
+
+condition = ImageExists(
+    ImageTemplate("assets/start-button.png"),
+    region=Rect(left=0, top=0, width=800, height=600),
+    min_confidence=1.0,
+)
+
+target = ImageTarget(
+    ImageTemplate("assets/start-button.png"),
+    region=Rect(left=0, top=0, width=800, height=600),
+    min_confidence=1.0,
+    offset=Point(0, 8),
+)
+```
+
+macOS 真实运行前确认：
+
+- 终端或 Python 运行时已获得“屏幕录制”权限。
+- 真实点击还需要终端或 Python 运行时已获得“辅助功能”权限。
+- 模板图片路径存在且适合当前缩放、主题和分辨率。
+- 尽量提供 `region` 缩小搜索范围，避免全屏模板匹配过慢。
+- `min_confidence < 1.0` 需要后端支持置信度匹配；缺少依赖时 adapter 会报告清晰错误。
+
+注意：当前只支持把首个匹配区域中心点解析为点击坐标；拖拽图片目标、多匹配选择、截图录制和脚本文件格式仍未接入。
 
 ## 记录鼠标坐标和颜色
 
@@ -256,4 +319,4 @@ ScriptRunner(device).run(script)
 
 ## 项目状态
 
-这是一个早期实验项目，当前重点是领域模型和 port-and-adapter 边界。图像识别、OCR、脚本文件格式、多窗口编排和自动窗口查找都还没有实现。
+这是一个早期实验项目，当前重点是领域模型和 port-and-adapter 边界。屏幕图像匹配端口、脚本级图片存在条件和按图片定位点击已经建立；OCR、脚本文件格式、多窗口编排和自动窗口查找都还没有实现。

@@ -4,6 +4,10 @@
 实现放在 platform/ 下。
 """
 
-from game_automation.portable.adapters.dry_run import DryRunInputDevice, DryRunPixelColorReader
+from game_automation.portable.adapters.dry_run import (
+    DryRunInputDevice,
+    DryRunPixelColorReader,
+    DryRunScreenImageLocator,
+)
 
-__all__ = ["DryRunInputDevice", "DryRunPixelColorReader"]
+__all__ = ["DryRunInputDevice", "DryRunPixelColorReader", "DryRunScreenImageLocator"]

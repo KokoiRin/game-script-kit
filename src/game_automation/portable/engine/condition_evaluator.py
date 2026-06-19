@@ -6,10 +6,10 @@
 
 from __future__ import annotations
 
-from game_automation.portable.domain import Color, ColorIs
+from game_automation.portable.domain import Color, ColorIs, ImageExists, Point, Rect
 from game_automation.portable.domain.conditions import Condition
 from game_automation.portable.domain.windows import Window
-from game_automation.portable.engine.ports import PixelColorReader
+from game_automation.portable.engine.ports import PixelColorReader, ScreenImageLocator
 
 
 def evaluate_condition(
@@ -17,10 +17,13 @@ def evaluate_condition(
     *,
     window: Window,
     color_reader: PixelColorReader | None,
+    image_locator: ScreenImageLocator | None,
 ) -> bool:
     """根据运行时端口和脚本窗口评估条件。"""
     if isinstance(condition, ColorIs):
         return _evaluate_color_is(condition, window=window, color_reader=color_reader)
+    if isinstance(condition, ImageExists):
+        return _evaluate_image_exists(condition, window=window, image_locator=image_locator)
     raise TypeError(f"unsupported script condition: {type(condition).__name__}")
 
 
@@ -45,3 +48,39 @@ def _color_matches(actual: Color, expected: Color, tolerance: int) -> bool:
         and abs(actual.green - expected.green) <= tolerance
         and abs(actual.blue - expected.blue) <= tolerance
     )
+
+
+def _evaluate_image_exists(
+    condition: ImageExists,
+    *,
+    window: Window,
+    image_locator: ScreenImageLocator | None,
+) -> bool:
+    """通过图像定位端口判断模板图片是否存在。"""
+    if image_locator is None:
+        raise RuntimeError("image locator is required for image conditions")
+
+    match = image_locator.locate(
+        condition.template,
+        region=_resolve_region(window, condition.region),
+        min_confidence=condition.min_confidence,
+    )
+    return match is not None
+
+
+def _resolve_region(window: Window, region: Rect | None) -> Rect | None:
+    """按脚本窗口解析图片搜索区域的左上角。"""
+    if region is None:
+        return None
+    top_left = window.resolve(_region_top_left(region))
+    return Rect(
+        left=top_left.x,
+        top=top_left.y,
+        width=region.width,
+        height=region.height,
+    )
+
+
+def _region_top_left(region: Rect) -> Point:
+    """把 Rect 左上角转换为窗口可解析的点。"""
+    return Point(region.left, region.top)

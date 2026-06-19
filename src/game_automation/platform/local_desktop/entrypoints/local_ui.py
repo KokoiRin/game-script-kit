@@ -10,6 +10,7 @@ import json
 import webbrowser
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from typing import Any
 
 from game_automation.platform.local_desktop.composition import build_local_control_application
@@ -40,18 +41,35 @@ def create_local_control_server(
 ) -> ThreadingHTTPServer:
     """创建本地 UI HTTP server，供 CLI 或测试控制生命周期。"""
     control_app = app if app is not None else build_local_control_application()
+    latest_screenshot_path = ""
+    screenshot_version = 0
 
     class LocalControlHandler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
-            if self.path == "/":
+            """处理控制页面、脚本列表和图片资源列表读取请求。"""
+            path = self.path.split("?", 1)[0]
+            if path == "/":
                 self._send_html(CONTROL_PAGE_HTML)
                 return
-            if self.path == "/api/scripts":
+            if path == "/api/scripts":
                 self._send_json({"scripts": list(control_app.list_scripts())})
+                return
+            if path == "/api/image-assets":
+                self._send_json(
+                    {
+                        "asset_folder": control_app.image_asset_folder_label(),
+                        "assets": list(control_app.list_image_assets()),
+                    }
+                )
+                return
+            if path == "/api/debug-screenshot":
+                self._send_png_file(Path(latest_screenshot_path))
                 return
             self.send_error(HTTPStatus.NOT_FOUND)
 
         def do_POST(self) -> None:
+            """处理脚本运行、图片点击和固定测试任务请求。"""
+            nonlocal latest_screenshot_path, screenshot_version
             if self.path == "/api/run-script":
                 payload = self._read_json()
                 result = control_app.run_named_script(
@@ -60,6 +78,23 @@ def create_local_control_server(
                     dry_run_color=str(payload.get("dry_run_color", "#000000")),
                 )
                 self._send_json(_result_to_payload(result))
+                return
+            if self.path == "/api/click-image":
+                payload = self._read_json()
+                result = control_app.click_image_asset(
+                    str(payload.get("asset", "")),
+                    dry_run=bool(payload.get("dry_run", True)),
+                )
+                self._send_json(_result_to_payload(result))
+                return
+            if self.path == "/api/capture-screen":
+                result = control_app.capture_screen_screenshot()
+                payload = _result_to_payload(result)
+                if result.screenshot_path:
+                    screenshot_version += 1
+                    latest_screenshot_path = result.screenshot_path
+                    payload["screenshot_url"] = f"/api/debug-screenshot?version={screenshot_version}"
+                self._send_json(payload)
                 return
             if self.path == "/api/run-tests":
                 payload = self._read_json()
@@ -89,6 +124,19 @@ def create_local_control_server(
             self.end_headers()
             self.wfile.write(body)
 
+        def _send_png_file(self, path: Path) -> None:
+            """把最近保存的诊断截图作为 PNG 响应给浏览器。"""
+            if not path.is_file():
+                self.send_error(HTTPStatus.NOT_FOUND)
+                return
+            body = path.read_bytes()
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "image/png")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
         def _send_html(self, html: str) -> None:
             body = html.encode("utf-8")
             self.send_response(HTTPStatus.OK)
@@ -102,11 +150,14 @@ def create_local_control_server(
 
 def _result_to_payload(result) -> dict[str, object]:
     """把 application 结果转换成 HTTP JSON payload。"""
-    return {
+    payload = {
         "exit_code": result.exit_code,
         "stdout": result.stdout,
         "stderr": result.stderr,
     }
+    if result.screenshot_path:
+        payload["screenshot_path"] = result.screenshot_path
+    return payload
 
 
 CONTROL_PAGE_HTML = """<!doctype html>
@@ -147,6 +198,17 @@ CONTROL_PAGE_HTML = """<!doctype html>
     .toolbar {
       display: grid;
       grid-template-columns: minmax(180px, 1fr) 120px 140px auto;
+      gap: 10px;
+      align-items: end;
+      background: #ffffff;
+      border: 1px solid #d8dde5;
+      border-radius: 8px;
+      padding: 14px;
+    }
+    .image-toolbar {
+      margin-top: 12px;
+      display: grid;
+      grid-template-columns: minmax(180px, 1fr) auto auto auto;
       gap: 10px;
       align-items: end;
       background: #ffffff;
@@ -226,8 +288,22 @@ CONTROL_PAGE_HTML = """<!doctype html>
       font-size: 13px;
       line-height: 1.45;
     }
+    .debug-preview {
+      display: none;
+      margin-top: 12px;
+      border: 1px solid #bfc7d2;
+      border-radius: 8px;
+      background: #ffffff;
+      overflow: auto;
+      max-height: 460px;
+    }
+    .debug-preview img {
+      display: block;
+      max-width: 100%;
+      height: auto;
+    }
     @media (max-width: 760px) {
-      header, .toolbar {
+      header, .toolbar, .image-toolbar {
         display: grid;
         grid-template-columns: 1fr;
       }
@@ -255,9 +331,21 @@ CONTROL_PAGE_HTML = """<!doctype html>
       </label>
       <button id="run-script" type="button">运行脚本</button>
     </section>
+    <section class="image-toolbar">
+      <label>
+        目标图片 <span id="image-asset-folder">assets</span>/
+        <select id="image-asset-select"></select>
+      </label>
+      <button class="secondary" id="refresh-images" type="button">刷新图片</button>
+      <button class="secondary" id="capture-screen" type="button">截屏诊断</button>
+      <button id="click-image" type="button">查找并点击图片</button>
+    </section>
     <section class="output">
       <div class="status" id="status"></div>
       <pre id="output"></pre>
+      <div class="debug-preview" id="debug-preview">
+        <img id="debug-screenshot" alt="最新截屏诊断图">
+      </div>
     </section>
   </main>
   <script>
@@ -268,15 +356,29 @@ CONTROL_PAGE_HTML = """<!doctype html>
     const outputEl = document.querySelector("#output");
     const runScriptButton = document.querySelector("#run-script");
     const runTestsButton = document.querySelector("#run-tests");
+    const imageAssetSelect = document.querySelector("#image-asset-select");
+    const imageAssetFolder = document.querySelector("#image-asset-folder");
+    const refreshImagesButton = document.querySelector("#refresh-images");
+    const clickImageButton = document.querySelector("#click-image");
+    const captureScreenButton = document.querySelector("#capture-screen");
+    const debugPreview = document.querySelector("#debug-preview");
+    const debugScreenshot = document.querySelector("#debug-screenshot");
 
     function setBusy(isBusy) {
       runScriptButton.disabled = isBusy;
       runTestsButton.disabled = isBusy;
+      refreshImagesButton.disabled = isBusy;
+      captureScreenButton.disabled = isBusy;
+      clickImageButton.disabled = isBusy || !imageAssetSelect.value;
     }
 
     function renderResult(prefix, result) {
       statusEl.textContent = `${prefix}退出码：${result.exit_code}`;
       outputEl.textContent = `${result.stdout || ""}${result.stderr || ""}`;
+      if (result.screenshot_url) {
+        debugScreenshot.src = result.screenshot_url;
+        debugPreview.style.display = "block";
+      }
     }
 
     async function loadScripts() {
@@ -289,6 +391,20 @@ CONTROL_PAGE_HTML = """<!doctype html>
         option.textContent = name;
         scriptSelect.appendChild(option);
       }
+    }
+
+    async function loadImageAssets() {
+      const response = await fetch("/api/image-assets");
+      const payload = await response.json();
+      imageAssetFolder.textContent = payload.asset_folder || "assets";
+      imageAssetSelect.innerHTML = "";
+      for (const name of payload.assets || []) {
+        const option = document.createElement("option");
+        option.value = name;
+        option.textContent = name;
+        imageAssetSelect.appendChild(option);
+      }
+      setBusy(false);
     }
 
     async function runScript() {
@@ -327,9 +443,48 @@ CONTROL_PAGE_HTML = """<!doctype html>
       }
     }
 
+    async function clickImage() {
+      setBusy(true);
+      statusEl.textContent = "正在查找图片...";
+      outputEl.textContent = "";
+      try {
+        const response = await fetch("/api/click-image", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({
+            asset: imageAssetSelect.value,
+            dry_run: dryRunCheckbox.checked
+          })
+        });
+        renderResult("图片点击", await response.json());
+      } finally {
+        setBusy(false);
+      }
+    }
+
+    async function captureScreen() {
+      setBusy(true);
+      statusEl.textContent = "正在截屏...";
+      outputEl.textContent = "";
+      try {
+        const response = await fetch("/api/capture-screen", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({})
+        });
+        renderResult("截屏诊断", await response.json());
+      } finally {
+        setBusy(false);
+      }
+    }
+
     runScriptButton.addEventListener("click", runScript);
     runTestsButton.addEventListener("click", runTests);
+    refreshImagesButton.addEventListener("click", loadImageAssets);
+    captureScreenButton.addEventListener("click", captureScreen);
+    clickImageButton.addEventListener("click", clickImage);
     loadScripts();
+    loadImageAssets();
   </script>
 </body>
 </html>

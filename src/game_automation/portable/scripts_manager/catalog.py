@@ -9,11 +9,19 @@ from __future__ import annotations
 from collections.abc import Iterable
 
 from game_automation.portable.domain import Script
-from game_automation.portable.scripts_manager.conditional_color_demo import build_conditional_color_demo_script
+from game_automation.portable.scripts_manager.click_image_demo import build_click_image_demo_script
+from game_automation.portable.scripts_manager.conditional_color_demo import (
+    build_conditional_color_demo_script,
+)
 from game_automation.portable.scripts_manager.demo import build_demo_script
 from game_automation.portable.scripts_manager.recorded_clicks import build_recorded_clicks_script
 from game_automation.portable.scripts_manager.repeat_demo import build_repeat_demo_script
-from game_automation.portable.scripts_manager.wait_until_color_demo import build_wait_until_color_demo_script
+from game_automation.portable.scripts_manager.wait_until_color_demo import (
+    build_wait_until_color_demo_script,
+)
+from game_automation.portable.scripts_manager.wait_until_image_demo import (
+    build_wait_until_image_demo_script,
+)
 
 
 class ScriptNotFoundError(LookupError):
@@ -46,5 +54,7 @@ DEFAULT_SCRIPT_CATALOG = ScriptCatalog(
         build_repeat_demo_script(),
         build_conditional_color_demo_script(),
         build_wait_until_color_demo_script(),
+        build_wait_until_image_demo_script(),
+        build_click_image_demo_script(),
     )
 )

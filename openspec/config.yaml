@@ -1,13 +1,9 @@
 schema: spec-driven
 
-# Project context (optional)
-# This is shown to AI when creating artifacts.
-# Add your tech stack, conventions, style guides, domain knowledge, etc.
-# Example:
-#   context: |
-#     Tech stack: TypeScript, React, Node.js
-#     We use conventional commits
-#     Domain: e-commerce platform
+context: |
+  这是一个 Python 游戏自动化项目，采用 ports-and-adapters 思路。
+  自动开发时遵循根目录 agents.md 中的架构、注释、测试金字塔和 TDD 原则。
+  OpenSpec 文档正文默认使用中文，保留 schema 关键字、命令和代码标识符原文。
 
 # Per-artifact rules (optional)
 # Add custom rules for specific artifacts.

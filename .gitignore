@@ -11,5 +11,6 @@ env/
 .coverage
 htmlcov/
 .hermes/
+.star/
 
 .DS_Store

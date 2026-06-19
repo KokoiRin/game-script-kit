@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from game_automation.portable.domain import Color, Point
+from game_automation.portable.domain import Color, ImageMatch, ImageTemplate, Point, Rect
 
 
 class InputDevice(Protocol):
@@ -30,6 +30,18 @@ class PointerPositionReader(Protocol):
 class PixelColorReader(Protocol):
     def read_color(self, point: Point) -> Color:
         """读取指定屏幕坐标点的 RGB 颜色。"""
+        ...
+
+
+class ScreenImageLocator(Protocol):
+    def locate(
+        self,
+        template: ImageTemplate,
+        *,
+        region: Rect | None = None,
+        min_confidence: float = 1.0,
+    ) -> ImageMatch | None:
+        """在当前屏幕或指定区域内查找模板图片。"""
         ...
 
 

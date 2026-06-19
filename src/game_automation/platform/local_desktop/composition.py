@@ -6,10 +6,10 @@
 
 from __future__ import annotations
 
-from game_automation.portable.application.local_control import LocalControlApplication
+from game_automation.portable.application.local_control import LocalControlApplication, ScreenCapture
 from game_automation.portable.application.script_run import ScriptRunResult, run_script
 from game_automation.portable.domain import Script
-from game_automation.portable.engine.ports import InputDevice, PixelColorReader
+from game_automation.portable.engine.ports import InputDevice, PixelColorReader, ScreenImageLocator
 
 
 def run_script_on_local_desktop(
@@ -17,14 +17,17 @@ def run_script_on_local_desktop(
     *,
     dry_run: bool,
     dry_run_color: str = "#000000",
+    dry_run_images: tuple[str, ...] = (),
 ) -> ScriptRunResult:
     """用本机桌面 adapter 运行脚本。"""
     return run_script(
         script,
         dry_run=dry_run,
         dry_run_color=dry_run_color,
+        dry_run_images=dry_run_images,
         real_device_factory=build_real_input_device,
         real_color_reader_factory=build_real_color_reader,
+        real_image_locator_factory=build_real_screen_image_locator,
     )
 
 
@@ -33,6 +36,8 @@ def build_local_control_application() -> LocalControlApplication:
     return LocalControlApplication(
         real_device_factory=build_real_input_device,
         real_color_reader_factory=build_real_color_reader,
+        real_image_locator_factory=build_real_screen_image_locator,
+        screen_capture_factory=build_real_screen_capture,
     )
 
 
@@ -48,3 +53,17 @@ def build_real_color_reader() -> PixelColorReader:
     from game_automation.platform.desktop.adapters import PyAutoGuiPixelColorReader
 
     return PyAutoGuiPixelColorReader()
+
+
+def build_real_screen_image_locator() -> ScreenImageLocator:
+    """延迟创建真实图像定位 adapter，避免普通脚本触发截图依赖。"""
+    from game_automation.platform.desktop.adapters import PyAutoGuiScreenImageLocator
+
+    return PyAutoGuiScreenImageLocator()
+
+
+def build_real_screen_capture() -> ScreenCapture:
+    """延迟创建真实截屏 adapter，避免打开 UI 时触发截图权限。"""
+    from game_automation.platform.desktop.adapters import PyAutoGuiScreenCapture
+
+    return PyAutoGuiScreenCapture().capture

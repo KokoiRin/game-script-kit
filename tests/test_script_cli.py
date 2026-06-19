@@ -2,7 +2,7 @@
 
 from types import ModuleType
 
-from game_automation.portable.domain import Color, Point
+from game_automation.portable.domain import Color, ImageMatch, ImageTemplate, Point, Rect
 from game_automation.portable.engine.ports import InputDevice
 from game_automation.platform.local_desktop.entrypoints.cli import main
 
@@ -18,6 +18,8 @@ def test_star_cli_lists_available_scripts(capsys) -> None:
         "repeat-demo",
         "conditional-color-demo",
         "wait-until-color-demo",
+        "wait-until-image-demo",
+        "click-image-demo",
     ]
 
 
@@ -97,6 +99,36 @@ def test_star_cli_runs_wait_until_color_demo_with_custom_dry_run_color(capsys) -
 def test_star_cli_reports_wait_until_color_demo_timeout(capsys) -> None:
     """验证条件等待脚本 dry-run 默认颜色会超时并返回非零。"""
     assert main(["run", "wait-until-color-demo", "--dry-run"]) == 1
+
+    captured = capsys.readouterr()
+    assert captured.out.splitlines() == [
+        "wait 0.5s",
+        "wait 0.5s",
+    ]
+    assert "script run timed out: wait until condition timed out" in captured.err
+
+
+def test_star_cli_runs_wait_until_image_demo_with_dry_run_image(capsys) -> None:
+    """验证图片等待脚本 dry-run 可用指定模板立即成功。"""
+    assert main(
+        [
+            "run",
+            "wait-until-image-demo",
+            "--dry-run",
+            "--dry-run-image",
+            "assets/start.png",
+        ]
+    ) == 0
+
+    output = capsys.readouterr().out.splitlines()
+    assert output == [
+        "click Point(x=100, y=200)",
+    ]
+
+
+def test_star_cli_reports_wait_until_image_demo_timeout(capsys) -> None:
+    """验证图片等待脚本 dry-run 默认未找到会超时并返回非零。"""
+    assert main(["run", "wait-until-image-demo", "--dry-run"]) == 1
 
     captured = capsys.readouterr()
     assert captured.out.splitlines() == [
@@ -203,6 +235,75 @@ def test_star_cli_run_reports_color_reader_setup_error(monkeypatch, capsys) -> N
     captured = capsys.readouterr()
     assert captured.out == ""
     assert "script run setup failed: screen color unavailable" in captured.err
+
+
+def test_star_cli_run_injects_image_locator_for_image_script(monkeypatch, capsys) -> None:
+    """验证真实运行图片条件脚本时 CLI 会注入图像定位 adapter。"""
+    import game_automation.platform.desktop.adapters as desktop
+
+    clicks = []
+    located_templates = []
+
+    class FakeMacOSPointerDevice(InputDevice):
+        def click(self, target) -> None:
+            """记录真实模式点击请求。"""
+            clicks.append(target)
+
+        def drag_to(self, start, end, duration_seconds: float = 0.0) -> None:
+            """图片示例脚本不会拖拽。"""
+
+        def wait(self, duration_seconds: float) -> None:
+            """测试中不真实等待。"""
+
+    class FakeScreenImageLocator:
+        def locate(self, template, *, region=None, min_confidence=1.0):
+            """记录模板并返回图片存在。"""
+            located_templates.append(template)
+            return ImageMatch(Rect(0, 0, 1, 1), confidence=1.0)
+
+    fake_macos_module = ModuleType("game_automation.platform.macos.adapters")
+    fake_macos_module.MacOSPointerDevice = FakeMacOSPointerDevice
+    monkeypatch.setitem(
+        __import__("sys").modules,
+        "game_automation.platform.macos.adapters",
+        fake_macos_module,
+    )
+    monkeypatch.setattr(desktop, "PyAutoGuiScreenImageLocator", FakeScreenImageLocator)
+    monkeypatch.setitem(__import__("sys").modules, "game_automation.platform.desktop.adapters", desktop)
+
+    assert main(["run", "wait-until-image-demo"]) == 0
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert located_templates == [ImageTemplate("assets/start.png")]
+    assert clicks == [Point(100, 200)]
+
+
+def test_star_cli_runs_click_image_demo_with_dry_run_image(capsys) -> None:
+    """验证图片目标点击 demo 可用 dry-run 图片配置解析点击坐标。"""
+    assert main(
+        [
+            "run",
+            "click-image-demo",
+            "--dry-run",
+            "--dry-run-image",
+            "assets/start.png",
+        ]
+    ) == 0
+
+    output = capsys.readouterr().out.splitlines()
+    assert output == [
+        "click Point(x=0, y=0)",
+    ]
+
+
+def test_star_cli_reports_click_image_demo_missing_target(capsys) -> None:
+    """验证图片目标点击 demo 未配置 dry-run 图片时报告未找到。"""
+    assert main(["run", "click-image-demo", "--dry-run"]) == 1
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "script run failed: image target not found: assets/start.png" in captured.err
 
 
 def test_star_cli_reports_unknown_script(capsys) -> None:
