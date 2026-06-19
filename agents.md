@@ -128,6 +128,18 @@ git diff --check
 
 如果正在实现具体 OpenSpec change，还要运行对应 change 的 strict validate。
 
+每完成一轮 OpenSpec change，包括实现、验证和归档后，必须立即创建一次 commit 并 push 到远端。commit message 使用中文，说明本轮改了什么，并在开头区分变更类型：
+
+- 新增需求：用于新增能力、扩展公开行为、接入新 adapter 或新入口能力。
+- Bugfix：用于修复缺陷、坐标偏差、错误路径、回归或环境兼容问题。
+
+示例：
+
+```bash
+git commit -m "新增需求：接入 OpenCV 图片匹配"
+git commit -m "Bugfix：修正 Retina 屏幕图片点击坐标"
+```
+
 ## 停下来重审的信号
 
 出现以下信号时，不要继续堆代码，先重新审视 module 设计：
