@@ -257,7 +257,7 @@ def test_star_cli_run_injects_image_locator_for_image_script(monkeypatch, capsys
             """测试中不真实等待。"""
 
     class FakeScreenImageLocator:
-        def locate(self, template, *, region=None, min_confidence=1.0):
+        def locate(self, template, *, region=None, min_confidence=1.0, logger=None):
             """记录模板并返回图片存在。"""
             located_templates.append(template)
             return ImageMatch(Rect(0, 0, 1, 1), confidence=1.0)

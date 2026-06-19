@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from typing import Mapping
 
 from game_automation.portable.domain import Color, ImageMatch, ImageTemplate, Point, Rect
-from game_automation.portable.engine.ports import InputDevice, PixelColorReader, ScreenImageLocator
+from game_automation.portable.engine.ports import InputDevice, PixelColorReader, RunLogger, ScreenImageLocator
 
 
 class DryRunInputDevice(InputDevice):
@@ -43,6 +43,7 @@ class DryRunScreenImageLocator(ScreenImageLocator):
         *,
         region: Rect | None = None,
         min_confidence: float = 1.0,
+        logger: RunLogger | None = None,
     ) -> ImageMatch | None:
         """按预设模板结果返回匹配，让 dry-run 图像定位可预测。"""
         match = self.matches.get(template)

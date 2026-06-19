@@ -27,6 +27,7 @@ class FakeImageLocator:
         *,
         region: Rect | None = None,
         min_confidence: float = 1.0,
+        logger=None,
     ) -> ImageMatch | None:
         """记录定位参数并返回固定匹配结果。"""
         self.calls.append((template, region, min_confidence))

@@ -8,12 +8,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from time import perf_counter
 from types import ModuleType
 
 from PIL import Image
 
 from game_automation.portable.domain import ImageMatch, ImageTemplate, Rect
-from game_automation.portable.engine.ports import ScreenImageLocator
+from game_automation.portable.engine.ports import RunLogger, ScreenImageLocator
 
 
 class PyAutoGuiScreenImageLocator(ScreenImageLocator):
@@ -27,20 +28,44 @@ class PyAutoGuiScreenImageLocator(ScreenImageLocator):
         *,
         region: Rect | None = None,
         min_confidence: float = 1.0,
+        logger: RunLogger | None = None,
     ) -> ImageMatch | None:
         """在当前屏幕或指定区域内查找模板图片。"""
         _validate_min_confidence(min_confidence)
         try:
+            total_started_at = perf_counter()
+            cv_started_at = perf_counter()
             cv2, numpy = _load_cv_modules()
+            cv_load_ms = _elapsed_ms(cv_started_at)
+            screenshot_started_at = perf_counter()
             screenshot = _capture_screen(self._backend, region=region)
+            screenshot_ms = _elapsed_ms(screenshot_started_at)
+            template_started_at = perf_counter()
             template_image = _load_template_image(template)
-            return _locate_template(
+            template_load_ms = _elapsed_ms(template_started_at)
+            match_started_at = perf_counter()
+            match = _locate_template(
                 cv2=cv2,
                 numpy=numpy,
                 screenshot=screenshot,
                 template=template_image,
                 min_confidence=min_confidence,
             )
+            match_ms = _elapsed_ms(match_started_at)
+            _log_match_stages(
+                logger,
+                template=template,
+                region=region,
+                screenshot=screenshot,
+                template_image=template_image,
+                cv_load_ms=cv_load_ms,
+                screenshot_ms=screenshot_ms,
+                template_load_ms=template_load_ms,
+                match_ms=match_ms,
+                total_ms=_elapsed_ms(total_started_at),
+                match=match,
+            )
+            return match
         except Exception as exc:
             if _is_setup_error(exc):
                 raise exc
@@ -68,6 +93,11 @@ class CapturedScreen:
     origin_top_pixels: int
     pixels_per_point_x: float
     pixels_per_point_y: float
+
+
+def _elapsed_ms(started_at: float) -> float:
+    """把 perf_counter 起点转换成毫秒耗时。"""
+    return (perf_counter() - started_at) * 1000
 
 
 def _load_cv_modules() -> tuple[ModuleType, ModuleType]:
@@ -166,6 +196,39 @@ def _locate_template(
             height=round(template.height / screenshot.pixels_per_point_y),
         ),
         confidence=confidence,
+    )
+
+
+def _log_match_stages(
+    logger: RunLogger | None,
+    *,
+    template: ImageTemplate,
+    region: Rect | None,
+    screenshot: CapturedScreen,
+    template_image: Image.Image,
+    cv_load_ms: float,
+    screenshot_ms: float,
+    template_load_ms: float,
+    match_ms: float,
+    total_ms: float,
+    match: ImageMatch | None,
+) -> None:
+    """记录桌面图像匹配各阶段耗时，帮助定位性能瓶颈。"""
+    if logger is None:
+        return
+    logger.log(
+        "image match stages "
+        f"template={template.path} "
+        f"region={region} "
+        f"screenshot_size={screenshot.image.width}x{screenshot.image.height} "
+        f"template_size={template_image.width}x{template_image.height} "
+        f"cv_load_ms={cv_load_ms:.2f} "
+        f"screenshot_ms={screenshot_ms:.2f} "
+        f"template_load_ms={template_load_ms:.2f} "
+        f"match_ms={match_ms:.2f} "
+        f"total_ms={total_ms:.2f} "
+        f"found={match is not None} "
+        f"confidence={None if match is None else match.confidence}"
     )
 
 

@@ -224,7 +224,7 @@ def test_run_script_real_mode_injects_image_locator_for_image_script() -> None:
             """测试中不真实等待。"""
 
     class FakeImageLocator:
-        def locate(self, template, *, region=None, min_confidence=1.0):
+        def locate(self, template, *, region=None, min_confidence=1.0, logger=None):
             """记录模板并返回固定图片匹配。"""
             located_templates.append(template)
             return ImageMatch(Rect(0, 0, 10, 10), confidence=1.0)
@@ -279,7 +279,7 @@ def test_run_script_real_mode_reports_image_locator_setup_error() -> None:
 def test_run_script_real_mode_reports_image_locator_runtime_error() -> None:
     """验证真实图像定位运行失败时应用层返回运行错误。"""
     class FailingImageLocator:
-        def locate(self, template, *, region=None, min_confidence=1.0):
+        def locate(self, template, *, region=None, min_confidence=1.0, logger=None):
             """模拟模板读取或截图匹配失败。"""
             raise RuntimeError("template unreadable")
 

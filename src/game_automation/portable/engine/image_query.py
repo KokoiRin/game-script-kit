@@ -32,6 +32,7 @@ def locate_image(
         template,
         region=region,
         min_confidence=min_confidence,
+        logger=logger,
     )
     elapsed_ms = (clock() - started_at) * 1000
     _log_image_match(
