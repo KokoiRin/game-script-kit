@@ -6,6 +6,7 @@ from game_automation.portable.domain import (
     ColorIs,
     If,
     ImageExists,
+    ImageRef,
     ImageTemplate,
     ImageTarget,
     Point,
@@ -108,6 +109,25 @@ def test_script_requirements_need_image_locator_for_image_condition() -> None:
     assert requirements.needs_image_locator is True
 
 
+def test_script_requirements_need_image_locator_for_named_image_condition() -> None:
+    """验证命名图片条件会声明需要图像定位端口。"""
+    script = Script(
+        name="named-image-if",
+        window=ScreenWindow(),
+        steps=(
+            If(
+                condition=ImageExists(ImageRef("开始按钮")),
+                then_steps=(Click(Point(3, 4)),),
+            ),
+        ),
+    )
+
+    requirements = inspect_script_requirements(script)
+
+    assert requirements.needs_color_reader is False
+    assert requirements.needs_image_locator is True
+
+
 def test_script_requirements_find_nested_image_condition() -> None:
     """验证需求分析会递归检查嵌套图片条件。"""
     nested = If(
@@ -150,6 +170,20 @@ def test_script_requirements_need_image_locator_for_image_target_click() -> None
         name="click-image",
         window=ScreenWindow(),
         steps=(Click(ImageTarget(ImageTemplate("assets/start.png"))),),
+    )
+
+    requirements = inspect_script_requirements(script)
+
+    assert requirements.needs_color_reader is False
+    assert requirements.needs_image_locator is True
+
+
+def test_script_requirements_need_image_locator_for_named_image_target_click() -> None:
+    """验证命名图片目标点击会声明需要图像定位端口。"""
+    script = Script(
+        name="click-named-image",
+        window=ScreenWindow(),
+        steps=(Click(ImageTarget(ImageRef("开始按钮"))),),
     )
 
     requirements = inspect_script_requirements(script)

@@ -9,7 +9,15 @@ from game_automation.portable.domain.color import Color
 from game_automation.portable.domain.conditions import ColorIs, Condition, ImageExists
 from game_automation.portable.domain.geometry import Point, Rect
 from game_automation.portable.domain.image_matching import ImageMatch, ImageTemplate
-from game_automation.portable.domain.point_aliases import NamedPoint, PointRef, TargetCatalog, UnknownPointNameError
+from game_automation.portable.domain.point_aliases import (
+    ImageRef,
+    NamedImage,
+    NamedPoint,
+    PointRef,
+    TargetCatalog,
+    UnknownImageNameError,
+    UnknownPointNameError,
+)
 from game_automation.portable.domain.script import Script
 from game_automation.portable.domain.targets import ImageTarget
 from game_automation.portable.domain.windows import AreaWindow, ScreenWindow, Window
@@ -25,8 +33,10 @@ __all__ = [
     "If",
     "ImageExists",
     "ImageMatch",
+    "ImageRef",
     "ImageTemplate",
     "ImageTarget",
+    "NamedImage",
     "NamedPoint",
     "Point",
     "PointRef",
@@ -37,6 +47,7 @@ __all__ = [
     "Script",
     "Step",
     "TargetCatalog",
+    "UnknownImageNameError",
     "UnknownPointNameError",
     "Wait",
     "WaitUntil",

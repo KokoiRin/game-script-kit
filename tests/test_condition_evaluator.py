@@ -7,10 +7,14 @@ from game_automation.portable.domain import (
     Color,
     ColorIs,
     ImageExists,
+    ImageRef,
     ImageMatch,
     ImageTemplate,
+    NamedImage,
     Point,
     Rect,
+    TargetCatalog,
+    UnknownImageNameError,
 )
 from game_automation.portable.engine.condition_evaluator import evaluate_condition
 
@@ -107,6 +111,38 @@ def test_condition_evaluator_returns_true_when_image_exists() -> None:
 
     assert result is True
     assert locator.calls == [(ImageTemplate("assets/start.png"), None, 1.0)]
+
+
+def test_condition_evaluator_resolves_named_image() -> None:
+    """验证图片存在条件会把命名图片解析为模板后再定位。"""
+    locator = FakeImageLocator(ImageMatch(Rect(10, 20, 30, 40), confidence=1.0))
+    condition = ImageExists(ImageRef("开始按钮"))
+    catalog = TargetCatalog(images=(NamedImage("开始按钮", ImageTemplate("assets/start.png")),))
+
+    result = evaluate_condition(
+        condition,
+        window=AreaWindow(Rect(100, 200, 800, 600)),
+        color_reader=None,
+        image_locator=locator,
+        resources=catalog,
+    )
+
+    assert result is True
+    assert locator.calls == [(ImageTemplate("assets/start.png"), None, 1.0)]
+
+
+def test_condition_evaluator_reports_unknown_named_image() -> None:
+    """验证未知图片名称会在条件评估时报错。"""
+    condition = ImageExists(ImageRef("开始按钮"))
+
+    with pytest.raises(UnknownImageNameError, match="unknown image target: 开始按钮"):
+        evaluate_condition(
+            condition,
+            window=AreaWindow(Rect(100, 200, 800, 600)),
+            color_reader=None,
+            image_locator=FakeImageLocator(None),
+            resources=TargetCatalog(),
+        )
 
 
 def test_condition_evaluator_returns_false_when_image_is_missing() -> None:

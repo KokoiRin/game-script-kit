@@ -12,8 +12,10 @@ from game_automation.portable.domain import (
     If,
     ImageExists,
     ImageMatch,
+    ImageRef,
     ImageTemplate,
     ImageTarget,
+    NamedImage,
     NamedPoint,
     Point,
     PointRef,
@@ -24,6 +26,7 @@ from game_automation.portable.domain import (
     TargetCatalog,
     Wait,
     WaitUntil,
+    UnknownImageNameError,
     UnknownPointNameError,
 )
 from tests.support.fake_device import FakeInputDevice
@@ -389,6 +392,38 @@ def test_runner_clicks_image_target_center_with_offset_and_region() -> None:
     assert locator.calls == [
         (ImageTemplate("assets/start.png"), Rect(101, 202, 300, 400), 0.8)
     ]
+
+
+def test_runner_resolves_named_image_target_before_clicking() -> None:
+    """验证图片点击会把命名图片解析为模板后再定位。"""
+    device = FakeInputDevice()
+    locator = SequenceImageLocator([ImageMatch(Rect(10, 20, 30, 40), confidence=0.9)])
+    script = Script(
+        name="named-image-click-runner",
+        window=ScreenWindow(),
+        steps=(Click(ImageTarget(ImageRef("开始按钮"), min_confidence=0.8)),),
+        resources=TargetCatalog(images=(NamedImage("开始按钮", ImageTemplate("assets/start.png")),)),
+    )
+
+    ScriptRunner(device=device, image_locator=locator).run(script)
+
+    assert device.actions[0].target == Point(25, 40)
+    assert locator.calls == [(ImageTemplate("assets/start.png"), None, 0.8)]
+
+
+def test_runner_reports_unknown_named_image_target() -> None:
+    """验证未知图片名称会在图片目标点击时报错。"""
+    script = Script(
+        name="unknown-named-image-click-runner",
+        window=ScreenWindow(),
+        steps=(Click(ImageTarget(ImageRef("开始按钮"))),),
+    )
+
+    with pytest.raises(UnknownImageNameError, match="unknown image target: 开始按钮"):
+        ScriptRunner(
+            device=FakeInputDevice(),
+            image_locator=SequenceImageLocator([None]),
+        ).run(script)
 
 
 def test_runner_reports_missing_image_target() -> None:
