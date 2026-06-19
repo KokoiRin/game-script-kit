@@ -48,6 +48,10 @@ TBD - created by archiving change add-screen-image-matching-port. Update Purpose
 - **WHEN** adapter 成功在当前屏幕或指定区域内找到模板图片
 - **THEN** adapter 会返回包含匹配矩形、中心点和置信度的 `ImageMatch`
 
+#### Scenario: adapter 返回可点击坐标系
+- **WHEN** adapter 在高分屏或 Retina 屏幕上使用物理像素截图完成匹配
+- **THEN** adapter 返回的匹配矩形会转换为鼠标输入 adapter 可点击的屏幕坐标系
+
 #### Scenario: adapter 返回未找到
 - **WHEN** adapter 完成截图和匹配但没有找到满足最低置信度的模板图片
 - **THEN** adapter 会返回 `None`

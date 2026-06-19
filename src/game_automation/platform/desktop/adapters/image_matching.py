@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType
 
@@ -38,7 +39,6 @@ class PyAutoGuiScreenImageLocator(ScreenImageLocator):
                 numpy=numpy,
                 screenshot=screenshot,
                 template=template_image,
-                region=region,
                 min_confidence=min_confidence,
             )
         except Exception as exc:
@@ -61,6 +61,15 @@ class PyAutoGuiScreenImageLocator(ScreenImageLocator):
         return pyautogui
 
 
+@dataclass(frozen=True, slots=True)
+class CapturedScreen:
+    image: Image.Image
+    origin_left_pixels: int
+    origin_top_pixels: int
+    pixels_per_point_x: float
+    pixels_per_point_y: float
+
+
 def _load_cv_modules() -> tuple[ModuleType, ModuleType]:
     """延迟加载 OpenCV 和 numpy，避免普通导入触发图像匹配依赖。"""
     try:
@@ -74,19 +83,51 @@ def _load_cv_modules() -> tuple[ModuleType, ModuleType]:
     return cv2, numpy
 
 
-def _capture_screen(backend: object, *, region: Rect | None) -> Image.Image:
-    """截取屏幕并按搜索区域裁剪。"""
-    screenshot = backend.screenshot()
+def _capture_screen(backend: object, *, region: Rect | None) -> CapturedScreen:
+    """截取屏幕并按鼠标坐标系区域裁剪。"""
+    screenshot = backend.screenshot().convert("RGB")
+    pixels_per_point_x, pixels_per_point_y = _calculate_pixels_per_point(
+        backend,
+        screenshot,
+    )
     if region is None:
-        return screenshot.convert("RGB")
-    return screenshot.crop(
-        (
-            region.left,
-            region.top,
-            region.left + region.width,
-            region.top + region.height,
+        return CapturedScreen(
+            image=screenshot,
+            origin_left_pixels=0,
+            origin_top_pixels=0,
+            pixels_per_point_x=pixels_per_point_x,
+            pixels_per_point_y=pixels_per_point_y,
         )
-    ).convert("RGB")
+
+    left = round(region.left * pixels_per_point_x)
+    top = round(region.top * pixels_per_point_y)
+    right = round((region.left + region.width) * pixels_per_point_x)
+    bottom = round((region.top + region.height) * pixels_per_point_y)
+    return CapturedScreen(
+        image=screenshot.crop((left, top, right, bottom)),
+        origin_left_pixels=left,
+        origin_top_pixels=top,
+        pixels_per_point_x=pixels_per_point_x,
+        pixels_per_point_y=pixels_per_point_y,
+    )
+
+
+def _calculate_pixels_per_point(backend: object, screenshot: Image.Image) -> tuple[float, float]:
+    """计算截图像素到鼠标坐标点的缩放比例。"""
+    pointer_width, pointer_height = _read_pointer_size(backend)
+    if pointer_width <= 0 or pointer_height <= 0:
+        raise RuntimeError("screen pointer size must be positive")
+    return screenshot.width / pointer_width, screenshot.height / pointer_height
+
+
+def _read_pointer_size(backend: object) -> tuple[int, int]:
+    """读取 pyautogui 鼠标坐标系尺寸。"""
+    size = backend.size()
+    try:
+        return int(size.width), int(size.height)
+    except AttributeError:
+        width, height = size
+        return int(width), int(height)
 
 
 def _load_template_image(template: ImageTemplate) -> Image.Image:
@@ -99,16 +140,15 @@ def _locate_template(
     *,
     cv2: ModuleType,
     numpy: ModuleType,
-    screenshot: Image.Image,
+    screenshot: CapturedScreen,
     template: Image.Image,
-    region: Rect | None,
     min_confidence: float,
 ) -> ImageMatch | None:
     """用 OpenCV 模板匹配返回满足阈值的最佳匹配。"""
-    if template.width > screenshot.width or template.height > screenshot.height:
+    if template.width > screenshot.image.width or template.height > screenshot.image.height:
         return None
 
-    screenshot_array = numpy.array(screenshot)
+    screenshot_array = numpy.array(screenshot.image)
     template_array = numpy.array(template)
     result = cv2.matchTemplate(screenshot_array, template_array, cv2.TM_CCOEFF_NORMED)
     _, max_score, _, max_location = cv2.minMaxLoc(result)
@@ -116,14 +156,14 @@ def _locate_template(
     if confidence < min_confidence:
         return None
 
-    offset_x = region.left if region is not None else 0
-    offset_y = region.top if region is not None else 0
+    left_pixels = int(max_location[0]) + screenshot.origin_left_pixels
+    top_pixels = int(max_location[1]) + screenshot.origin_top_pixels
     return ImageMatch(
         rect=Rect(
-            left=int(max_location[0]) + offset_x,
-            top=int(max_location[1]) + offset_y,
-            width=template.width,
-            height=template.height,
+            left=round(left_pixels / screenshot.pixels_per_point_x),
+            top=round(top_pixels / screenshot.pixels_per_point_y),
+            width=round(template.width / screenshot.pixels_per_point_x),
+            height=round(template.height / screenshot.pixels_per_point_y),
         ),
         confidence=confidence,
     )
@@ -131,7 +171,10 @@ def _locate_template(
 
 def _is_setup_error(exc: Exception) -> bool:
     """判断异常是否已经是本 adapter 生成的清晰 setup 错误。"""
-    return isinstance(exc, RuntimeError) and "OpenCV-backed screen image matching" in str(exc)
+    return isinstance(exc, RuntimeError) and (
+        "OpenCV-backed screen image matching" in str(exc)
+        or "screen pointer size" in str(exc)
+    )
 
 
 def _validate_min_confidence(min_confidence: float) -> None:

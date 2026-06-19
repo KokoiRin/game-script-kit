@@ -168,7 +168,7 @@ curl -X POST http://127.0.0.1:8765/api/click-image \
 - `ImageExists(template, region=None, min_confidence=1.0)` 表达图片存在条件。
 - `ImageTarget(template, region=None, min_confidence=1.0, offset=Point(0, 0))` 表达按图片匹配中心点点击的目标。
 - `ScreenImageLocator.locate(template, region=None, min_confidence=1.0)` 在当前屏幕或指定区域内查找模板。
-- `PyAutoGuiScreenImageLocator` 是本地桌面 adapter，延迟加载 `pyautogui`、OpenCV 和 numpy，并隐藏截图、模板读取和平台依赖错误。
+- `PyAutoGuiScreenImageLocator` 是本地桌面 adapter，延迟加载 `pyautogui`、OpenCV 和 numpy，并隐藏截图、模板读取和平台依赖错误；在 Retina 屏幕上会把截图物理像素坐标转换成鼠标可点击坐标。
 - `DryRunScreenImageLocator` 可在测试或 dry-run 路径中返回预设匹配结果。
 
 `wait-until-image-demo` 使用 `WaitUntil(ImageExists(ImageTemplate("assets/start.png")), timeout_seconds=1, interval_seconds=0.5)`。默认 dry-run 不配置图片，条件会超时；指定匹配模板路径会立即通过并点击：

@@ -10,13 +10,18 @@ from game_automation.portable.domain import ImageTemplate, Rect
 
 
 class ScreenshotBackend:
-    def __init__(self, image: Image.Image) -> None:
+    def __init__(self, image: Image.Image, pointer_size: tuple[int, int] | None = None) -> None:
         """初始化只提供截图能力的 fake backend。"""
         self.image = image
+        self.pointer_size = pointer_size if pointer_size is not None else image.size
 
     def screenshot(self) -> Image.Image:
         """返回测试构造的屏幕截图。"""
         return self.image
+
+    def size(self) -> tuple[int, int]:
+        """返回 fake 鼠标坐标系尺寸。"""
+        return self.pointer_size
 
 
 class FailingScreenshotBackend:
@@ -59,6 +64,49 @@ def test_screen_image_locator_matches_template_inside_region(tmp_path) -> None:
 
     assert match is not None
     assert match.rect == Rect(left=22, top=13, width=8, height=6)
+
+
+def test_screen_image_locator_converts_retina_screenshot_pixels_to_pointer_coordinates(
+    tmp_path,
+) -> None:
+    """验证 Retina 截图像素会折算为鼠标可点击坐标。"""
+    template = _build_template_image()
+    template_path = tmp_path / "button.png"
+    template.save(template_path)
+    screenshot = Image.new("RGB", (40, 30), "white")
+    screenshot.paste(template, (12, 8))
+
+    match = PyAutoGuiScreenImageLocator(
+        backend=ScreenshotBackend(screenshot, pointer_size=(20, 15))
+    ).locate(
+        ImageTemplate(str(template_path)),
+        min_confidence=0.8,
+    )
+
+    assert match is not None
+    assert match.rect == Rect(left=6, top=4, width=4, height=3)
+
+
+def test_screen_image_locator_interprets_region_as_pointer_coordinates_on_retina(
+    tmp_path,
+) -> None:
+    """验证 Retina 下搜索区域按鼠标坐标解释后再裁剪截图。"""
+    template = _build_template_image()
+    template_path = tmp_path / "button.png"
+    template.save(template_path)
+    screenshot = Image.new("RGB", (80, 60), "white")
+    screenshot.paste(template, (24, 12))
+
+    match = PyAutoGuiScreenImageLocator(
+        backend=ScreenshotBackend(screenshot, pointer_size=(40, 30))
+    ).locate(
+        ImageTemplate(str(template_path)),
+        region=Rect(left=10, top=5, width=20, height=10),
+        min_confidence=0.8,
+    )
+
+    assert match is not None
+    assert match.rect == Rect(left=12, top=6, width=4, height=3)
 
 
 def test_screen_image_locator_returns_none_when_score_is_below_threshold(tmp_path) -> None:
