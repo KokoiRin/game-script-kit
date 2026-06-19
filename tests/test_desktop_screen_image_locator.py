@@ -2,109 +2,102 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-
+from PIL import Image
 import pytest
 
 from game_automation.platform.desktop.adapters import PyAutoGuiScreenImageLocator
-from game_automation.portable.domain import ImageMatch, ImageTemplate, Rect
+from game_automation.portable.domain import ImageTemplate, Rect
 
 
-@dataclass(frozen=True, slots=True)
-class FakeBox:
-    left: int
-    top: int
-    width: int
-    height: int
+class ScreenshotBackend:
+    def __init__(self, image: Image.Image) -> None:
+        """初始化只提供截图能力的 fake backend。"""
+        self.image = image
+
+    def screenshot(self) -> Image.Image:
+        """返回测试构造的屏幕截图。"""
+        return self.image
 
 
-class FakeBackend:
-    def __init__(self, result) -> None:
-        """初始化可记录调用参数的 fake pyautogui backend。"""
-        self.result = result
-        self.calls = []
-
-    def locateOnScreen(self, image_path, **kwargs):
-        """记录模板路径和定位参数，并返回预设结果。"""
-        self.calls.append((image_path, kwargs))
-        return self.result
-
-
-class ConfidenceRejectingBackend:
-    def locateOnScreen(self, image_path, **kwargs):
-        """模拟后端未安装置信度匹配依赖时的 TypeError。"""
-        if "confidence" in kwargs:
-            raise TypeError("confidence requires OpenCV")
-        return FakeBox(1, 2, 3, 4)
-
-
-class FailingBackend:
-    def locateOnScreen(self, image_path, **kwargs):
-        """模拟截图或模板读取失败。"""
+class FailingScreenshotBackend:
+    def screenshot(self) -> Image.Image:
+        """模拟截图权限或平台截图失败。"""
         raise RuntimeError("screen blocked")
 
 
-class ImageNotFoundBackend:
-    class ImageNotFoundException(Exception):
-        """模拟 pyautogui 的未找到异常类型。"""
+def test_screen_image_locator_matches_template_with_opencv_confidence(tmp_path) -> None:
+    """验证 adapter 用 OpenCV 返回实际匹配分数和区域。"""
+    template = _build_template_image()
+    template_path = tmp_path / "button.png"
+    template.save(template_path)
+    screenshot = Image.new("RGB", (40, 30), "white")
+    screenshot.paste(template, (12, 9))
 
-    def locateOnScreen(self, image_path, **kwargs):
-        """模拟后端用异常表示未找到模板。"""
-        raise self.ImageNotFoundException("not found")
-
-
-def test_screen_image_locator_returns_match_from_backend_box() -> None:
-    """验证后端 Box 会转换为 ImageMatch。"""
-    backend = FakeBackend(FakeBox(left=10, top=20, width=30, height=40))
-
-    match = PyAutoGuiScreenImageLocator(backend=backend).locate(
-        ImageTemplate("assets/start.png")
+    match = PyAutoGuiScreenImageLocator(backend=ScreenshotBackend(screenshot)).locate(
+        ImageTemplate(str(template_path)),
+        min_confidence=0.8,
     )
 
-    assert match == ImageMatch(Rect(left=10, top=20, width=30, height=40), confidence=1.0)
-    assert backend.calls == [("assets/start.png", {})]
+    assert match is not None
+    assert match.rect == Rect(left=12, top=9, width=8, height=6)
+    assert match.confidence >= 0.99
 
 
-def test_screen_image_locator_passes_region_to_backend() -> None:
-    """验证指定搜索区域会传给后端。"""
-    backend = FakeBackend(FakeBox(left=10, top=20, width=30, height=40))
+def test_screen_image_locator_matches_template_inside_region(tmp_path) -> None:
+    """验证指定搜索区域会裁剪截图并返回屏幕绝对坐标。"""
+    template = _build_template_image()
+    template_path = tmp_path / "button.png"
+    template.save(template_path)
+    screenshot = Image.new("RGB", (60, 40), "white")
+    screenshot.paste(template, (22, 13))
 
-    PyAutoGuiScreenImageLocator(backend=backend).locate(
-        ImageTemplate("assets/start.png"),
-        region=Rect(left=1, top=2, width=300, height=400),
+    match = PyAutoGuiScreenImageLocator(backend=ScreenshotBackend(screenshot)).locate(
+        ImageTemplate(str(template_path)),
+        region=Rect(left=20, top=10, width=20, height=20),
+        min_confidence=0.8,
     )
 
-    assert backend.calls == [
-        ("assets/start.png", {"region": (1, 2, 300, 400)}),
-    ]
+    assert match is not None
+    assert match.rect == Rect(left=22, top=13, width=8, height=6)
 
 
-def test_screen_image_locator_returns_none_when_backend_returns_none() -> None:
-    """验证后端返回 None 时 adapter 表示未找到。"""
-    backend = FakeBackend(None)
+def test_screen_image_locator_returns_none_when_score_is_below_threshold(tmp_path) -> None:
+    """验证最高匹配分数低于阈值时 adapter 表示未找到。"""
+    template = _build_template_image()
+    template_path = tmp_path / "button.png"
+    template.save(template_path)
+    screenshot = Image.new("RGB", (40, 30), "white")
 
-    assert PyAutoGuiScreenImageLocator(backend=backend).locate(ImageTemplate("x.png")) is None
+    assert (
+        PyAutoGuiScreenImageLocator(backend=ScreenshotBackend(screenshot)).locate(
+            ImageTemplate(str(template_path)),
+            min_confidence=0.99,
+        )
+        is None
+    )
 
 
-def test_screen_image_locator_returns_none_for_backend_not_found_exception() -> None:
-    """验证后端未找到异常会转换为 None。"""
-    assert PyAutoGuiScreenImageLocator(backend=ImageNotFoundBackend()).locate(
-        ImageTemplate("x.png")
-    ) is None
+def test_screen_image_locator_returns_none_when_template_is_larger_than_screen(tmp_path) -> None:
+    """验证模板大于搜索图时 adapter 表示未找到。"""
+    template = _build_template_image()
+    template_path = tmp_path / "button.png"
+    template.save(template_path)
+    screenshot = Image.new("RGB", (4, 4), "white")
+
+    assert (
+        PyAutoGuiScreenImageLocator(backend=ScreenshotBackend(screenshot)).locate(
+            ImageTemplate(str(template_path)),
+            min_confidence=0.8,
+        )
+        is None
+    )
 
 
 def test_screen_image_locator_wraps_backend_errors() -> None:
     """验证截图或模板读取错误会包装为清晰 setup 错误。"""
     with pytest.raises(RuntimeError, match="screen image matching"):
-        PyAutoGuiScreenImageLocator(backend=FailingBackend()).locate(ImageTemplate("x.png"))
-
-
-def test_screen_image_locator_reports_unsupported_confidence_matching() -> None:
-    """验证后端不支持置信度匹配时报告清晰错误。"""
-    with pytest.raises(RuntimeError, match="confidence"):
-        PyAutoGuiScreenImageLocator(backend=ConfidenceRejectingBackend()).locate(
-            ImageTemplate("x.png"),
-            min_confidence=0.8,
+        PyAutoGuiScreenImageLocator(backend=FailingScreenshotBackend()).locate(
+            ImageTemplate("x.png")
         )
 
 
@@ -112,7 +105,15 @@ def test_screen_image_locator_reports_unsupported_confidence_matching() -> None:
 def test_screen_image_locator_rejects_invalid_min_confidence(min_confidence: float) -> None:
     """验证最低匹配置信度必须在有效范围内。"""
     with pytest.raises(ValueError, match="minimum image match confidence"):
-        PyAutoGuiScreenImageLocator(backend=FakeBackend(None)).locate(
+        PyAutoGuiScreenImageLocator(backend=ScreenshotBackend(Image.new("RGB", (1, 1)))).locate(
             ImageTemplate("x.png"),
             min_confidence=min_confidence,
         )
+
+
+def _build_template_image() -> Image.Image:
+    """构造带纹理的测试模板，避免纯色模板导致归一化匹配退化。"""
+    image = Image.new("RGB", (8, 6), "red")
+    image.putpixel((1, 1), (0, 0, 0))
+    image.putpixel((5, 3), (0, 0, 255))
+    return image

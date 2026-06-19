@@ -121,18 +121,30 @@ class LocalControlApplication:
             stderr=stderr.getvalue(),
         )
 
-    def click_image_asset(self, asset_name: str, *, dry_run: bool) -> ControlResult:
+    def click_image_asset(
+        self,
+        asset_name: str,
+        *,
+        dry_run: bool,
+        min_confidence: float = 0.8,
+    ) -> ControlResult:
         """把项目图片资源作为模板目标，运行一次查找并点击脚本。"""
         try:
             asset_path = self._resolve_image_asset(asset_name)
-        except ValueError:
-            return ControlResult(exit_code=2, stderr=f"invalid image asset: {asset_name}\n")
-
-        script = Script(
-            name="click-image-asset",
-            window=ScreenWindow(),
-            steps=(Click(ImageTarget(ImageTemplate(str(asset_path)))),),
-        )
+            script = Script(
+                name="click-image-asset",
+                window=ScreenWindow(),
+                steps=(
+                    Click(
+                        ImageTarget(
+                            ImageTemplate(str(asset_path)),
+                            min_confidence=min_confidence,
+                        )
+                    ),
+                ),
+            )
+        except ValueError as exc:
+            return ControlResult(exit_code=2, stderr=f"invalid image click request: {exc}\n")
 
         stdout = io.StringIO()
         stderr = io.StringIO()

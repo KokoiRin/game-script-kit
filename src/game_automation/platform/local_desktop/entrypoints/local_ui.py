@@ -81,9 +81,20 @@ def create_local_control_server(
                 return
             if self.path == "/api/click-image":
                 payload = self._read_json()
+                min_confidence = _parse_min_confidence(payload)
+                if min_confidence is None:
+                    self._send_json(
+                        {
+                            "exit_code": 2,
+                            "stdout": "",
+                            "stderr": "invalid image click request: min_confidence must be a number\n",
+                        }
+                    )
+                    return
                 result = control_app.click_image_asset(
                     str(payload.get("asset", "")),
                     dry_run=bool(payload.get("dry_run", True)),
+                    min_confidence=min_confidence,
                 )
                 self._send_json(_result_to_payload(result))
                 return
@@ -160,6 +171,14 @@ def _result_to_payload(result) -> dict[str, object]:
     return payload
 
 
+def _parse_min_confidence(payload: dict[str, object]) -> float | None:
+    """把 HTTP payload 中的图片匹配置信度解析为数字。"""
+    try:
+        return float(payload.get("min_confidence", 0.8))
+    except (TypeError, ValueError):
+        return None
+
+
 CONTROL_PAGE_HTML = """<!doctype html>
 <html lang="zh-CN">
 <head>
@@ -208,7 +227,7 @@ CONTROL_PAGE_HTML = """<!doctype html>
     .image-toolbar {
       margin-top: 12px;
       display: grid;
-      grid-template-columns: minmax(180px, 1fr) auto auto auto;
+      grid-template-columns: minmax(180px, 1fr) 120px auto auto auto;
       gap: 10px;
       align-items: end;
       background: #ffffff;
@@ -336,6 +355,10 @@ CONTROL_PAGE_HTML = """<!doctype html>
         目标图片 <span id="image-asset-folder">assets</span>/
         <select id="image-asset-select"></select>
       </label>
+      <label>
+        最低置信度
+        <input id="image-confidence" type="number" min="0.01" max="1" step="0.01" value="0.8">
+      </label>
       <button class="secondary" id="refresh-images" type="button">刷新图片</button>
       <button class="secondary" id="capture-screen" type="button">截屏诊断</button>
       <button id="click-image" type="button">查找并点击图片</button>
@@ -361,6 +384,7 @@ CONTROL_PAGE_HTML = """<!doctype html>
     const refreshImagesButton = document.querySelector("#refresh-images");
     const clickImageButton = document.querySelector("#click-image");
     const captureScreenButton = document.querySelector("#capture-screen");
+    const imageConfidenceInput = document.querySelector("#image-confidence");
     const debugPreview = document.querySelector("#debug-preview");
     const debugScreenshot = document.querySelector("#debug-screenshot");
 
@@ -453,7 +477,8 @@ CONTROL_PAGE_HTML = """<!doctype html>
           headers: {"Content-Type": "application/json"},
           body: JSON.stringify({
             asset: imageAssetSelect.value,
-            dry_run: dryRunCheckbox.checked
+            dry_run: dryRunCheckbox.checked,
+            min_confidence: Number.parseFloat(imageConfidenceInput.value)
           })
         });
         renderResult("图片点击", await response.json());

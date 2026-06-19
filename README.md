@@ -100,7 +100,7 @@ cd /path/to/game-script-kit
 
 打开 `http://127.0.0.1:8765/` 后，可以选择脚本、勾选或取消“模拟运行”、输入模拟颜色并查看输出。“运行测试”按钮只运行项目内置的固定测试任务，不接受任意 shell 命令。
 
-UI 也提供图片点击路径：把 `.png`、`.jpg`、`.jpeg` 或 `.webp` 模板图片放到项目根目录 `assets/` 下，点击“刷新图片”，选择目标图片后点击“查找并点击图片”。模拟运行会把所选图片视为已找到并打印计划点击；真实运行会在当前屏幕中查找该图片并点击匹配区域中心点。
+UI 也提供图片点击路径：把 `.png`、`.jpg`、`.jpeg` 或 `.webp` 模板图片放到项目根目录 `assets/` 下，点击“刷新图片”，选择目标图片和最低置信度后点击“查找并点击图片”。模拟运行会把所选图片视为已找到并打印计划点击；真实运行会使用 OpenCV 在当前屏幕中查找该图片并点击匹配区域中心点。
 
 端到端 smoke 方法：
 
@@ -113,7 +113,7 @@ curl -X POST http://127.0.0.1:8765/api/run-script \
 curl http://127.0.0.1:8765/api/image-assets
 curl -X POST http://127.0.0.1:8765/api/click-image \
   -H 'Content-Type: application/json' \
-  -d '{"asset":"start.png","dry_run":true}'
+  -d '{"asset":"start.png","dry_run":true,"min_confidence":0.8}'
 ```
 
 自动化测试：
@@ -168,7 +168,7 @@ curl -X POST http://127.0.0.1:8765/api/click-image \
 - `ImageExists(template, region=None, min_confidence=1.0)` 表达图片存在条件。
 - `ImageTarget(template, region=None, min_confidence=1.0, offset=Point(0, 0))` 表达按图片匹配中心点点击的目标。
 - `ScreenImageLocator.locate(template, region=None, min_confidence=1.0)` 在当前屏幕或指定区域内查找模板。
-- `PyAutoGuiScreenImageLocator` 是本地桌面 adapter，延迟加载 `pyautogui` 并隐藏截图、模板读取和平台依赖错误。
+- `PyAutoGuiScreenImageLocator` 是本地桌面 adapter，延迟加载 `pyautogui`、OpenCV 和 numpy，并隐藏截图、模板读取和平台依赖错误。
 - `DryRunScreenImageLocator` 可在测试或 dry-run 路径中返回预设匹配结果。
 
 `wait-until-image-demo` 使用 `WaitUntil(ImageExists(ImageTemplate("assets/start.png")), timeout_seconds=1, interval_seconds=0.5)`。默认 dry-run 不配置图片，条件会超时；指定匹配模板路径会立即通过并点击：
@@ -210,7 +210,7 @@ macOS 真实运行前确认：
 - 真实点击还需要终端或 Python 运行时已获得“辅助功能”权限。
 - 模板图片路径存在且适合当前缩放、主题和分辨率。
 - 尽量提供 `region` 缩小搜索范围，避免全屏模板匹配过慢。
-- `min_confidence < 1.0` 需要后端支持置信度匹配；缺少依赖时 adapter 会报告清晰错误。
+- `min_confidence < 1.0` 走 OpenCV 置信度匹配；项目运行依赖已声明 `opencv-python-headless`。
 
 注意：当前只支持把首个匹配区域中心点解析为点击坐标；拖拽图片目标、多匹配选择、截图录制和脚本文件格式仍未接入。
 
