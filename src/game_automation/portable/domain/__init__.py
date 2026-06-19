@@ -19,6 +19,7 @@ from game_automation.portable.domain.point_aliases import (
     UnknownPointNameError,
 )
 from game_automation.portable.domain.script import Script
+from game_automation.portable.domain.target_offsets import OffsetTarget
 from game_automation.portable.domain.targets import ImageTarget
 from game_automation.portable.domain.windows import AreaWindow, ScreenWindow, Window
 
@@ -39,6 +40,7 @@ __all__ = [
     "ImageTarget",
     "NamedImage",
     "NamedPoint",
+    "OffsetTarget",
     "Point",
     "PointRef",
     "PrimitiveAction",

@@ -17,6 +17,7 @@ from game_automation.portable.domain import (
     ImageTarget,
     NamedImage,
     NamedPoint,
+    OffsetTarget,
     Point,
     PointRef,
     Rect,
@@ -146,6 +147,35 @@ def test_runner_reports_unknown_named_point() -> None:
 
     with pytest.raises(UnknownPointNameError, match="unknown point target: 头像"):
         ScriptRunner(device=FakeInputDevice()).run(script)
+
+
+def test_runner_clicks_offset_static_point() -> None:
+    """验证 runner 能点击固定点位偏移后的点。"""
+    device = FakeInputDevice()
+    script = Script(
+        name="offset-static-point-runner",
+        window=ScreenWindow(),
+        steps=(Click(OffsetTarget(Point(10, 20), Point(5, -3))),),
+    )
+
+    ScriptRunner(device=device).run(script)
+
+    assert device.actions[0].target == Point(15, 17)
+
+
+def test_runner_clicks_offset_named_point() -> None:
+    """验证 runner 能点击命名点位偏移后的点。"""
+    device = FakeInputDevice()
+    script = Script(
+        name="offset-named-point-runner",
+        window=ScreenWindow(),
+        steps=(Click(PointRef("头像").offset(x=120, y=0)),),
+        resources=TargetCatalog(points=(NamedPoint("头像", Point(242, 92)),)),
+    )
+
+    ScriptRunner(device=device).run(script)
+
+    assert device.actions[0].target == Point(362, 92)
 
 
 def test_runner_expands_repeat_steps() -> None:
@@ -414,6 +444,29 @@ def test_runner_clicks_image_target_anchor() -> None:
     ScriptRunner(device=device, image_locator=locator).run(script)
 
     assert device.actions[0].target == Point(40, 40)
+
+
+def test_runner_applies_image_target_offset_after_anchor() -> None:
+    """验证图片目标 offset 会在 anchor 点位后应用。"""
+    device = FakeInputDevice()
+    locator = SequenceImageLocator([ImageMatch(Rect(10, 20, 30, 40), confidence=0.9)])
+    script = Script(
+        name="click-image-target-anchor-offset",
+        window=ScreenWindow(),
+        steps=(
+            Click(
+                ImageTarget(
+                    ImageTemplate("assets/start.png"),
+                    anchor="right_center",
+                    offset=Point(24, 0),
+                )
+            ),
+        ),
+    )
+
+    ScriptRunner(device=device, image_locator=locator).run(script)
+
+    assert device.actions[0].target == Point(64, 40)
 
 
 def test_runner_resolves_named_image_target_before_clicking() -> None:

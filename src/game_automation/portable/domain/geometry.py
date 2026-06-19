@@ -13,6 +13,10 @@ class Point:
     x: int
     y: int
 
+    def offset(self, *, x: int = 0, y: int = 0) -> "Point":
+        """返回基于当前点位偏移后的新点位。"""
+        return Point(self.x + x, self.y + y)
+
 
 @dataclass(frozen=True, slots=True)
 class Rect:

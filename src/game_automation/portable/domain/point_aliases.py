@@ -41,6 +41,12 @@ class PointRef:
         """校验点位引用名称必须非空。"""
         _validate_point_name(self.name)
 
+    def offset(self, *, x: int = 0, y: int = 0):
+        """构造基于该命名点位的偏移点击目标。"""
+        from game_automation.portable.domain.target_offsets import OffsetTarget
+
+        return OffsetTarget(self, Point(x, y))
+
 
 @dataclass(frozen=True, slots=True)
 class ImageRef:
