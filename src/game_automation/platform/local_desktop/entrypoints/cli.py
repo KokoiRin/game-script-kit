@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 
 from game_automation.platform.local_desktop.composition import (
@@ -104,7 +105,10 @@ def _run_probe_state(args: argparse.Namespace) -> int:
     except RuntimeError as exc:
         print(f"screen state probe failed: {exc}", file=sys.stderr)
         return 1
-    _print_screen_state_probe_result(result)
+    if args.json:
+        _print_screen_state_probe_json(result)
+    else:
+        _print_screen_state_probe_result(result)
     return 0
 
 
@@ -183,6 +187,32 @@ def _print_screen_state_probe_result(result) -> None:
         print(f"- {_screen_state_candidate_line(candidate)}")
 
 
+def _print_screen_state_probe_json(result) -> None:
+    """把单次界面状态探测结果打印成 JSON。"""
+    print(json.dumps(_screen_state_probe_payload(result), ensure_ascii=False))
+
+
+def _screen_state_probe_payload(result) -> dict[str, object]:
+    """把状态探测结果转换成机器可读 payload。"""
+    return {
+        "current_state": result.current_state,
+        "known": result.known,
+        "elapsed_ms": result.elapsed_ms,
+        "candidates": [_screen_state_candidate_payload(candidate) for candidate in result.candidates],
+    }
+
+
+def _screen_state_candidate_payload(candidate) -> dict[str, object]:
+    """把单个状态候选转换成机器可读 payload。"""
+    return {
+        "name": candidate.candidate.name,
+        "search_name": candidate.candidate.search_name,
+        "status": _candidate_status_value(candidate),
+        "elapsed_ms": candidate.elapsed_ms,
+        "confidence": candidate.confidence,
+    }
+
+
 def _screen_state_candidate_line(candidate) -> str:
     """把单个状态候选结果转换成一行 CLI 文本。"""
     name = candidate.candidate.name
@@ -202,6 +232,15 @@ def _candidate_status_label(candidate) -> str:
     if candidate.found:
         return "命中"
     return "未命中"
+
+
+def _candidate_status_value(candidate) -> str:
+    """把候选命中状态转换成稳定枚举值。"""
+    if candidate.skipped:
+        return "skipped"
+    if candidate.found:
+        return "matched"
+    return "missed"
 
 
 def _run_recorder(args: argparse.Namespace) -> int:
@@ -263,6 +302,7 @@ def main(argv: list[str] | None = None) -> int:
         default=0.8,
         help="Minimum image match confidence for this probe.",
     )
+    probe_parser.add_argument("--json", action="store_true", help="Print machine-readable JSON.")
 
     run_parser = subparsers.add_parser("run", help="Run a named script.")
     run_parser.add_argument("name", help="Script name to run.")
