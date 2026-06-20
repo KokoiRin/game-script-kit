@@ -70,7 +70,7 @@
     .image-toolbar {
       margin-top: 12px;
       display: grid;
-      grid-template-columns: minmax(180px, 1fr) 120px auto auto auto;
+      grid-template-columns: minmax(180px, 1fr) 120px auto auto auto auto;
       gap: 10px;
       align-items: end;
       background: #ffffff;
@@ -138,7 +138,7 @@
       font-weight: 600;
     }
     pre {
-      min-height: 280px;
+      height: 280px;
       margin: 0;
       padding: 14px;
       border-radius: 8px;
@@ -146,6 +146,7 @@
       background: #111827;
       color: #e5e7eb;
       overflow: auto;
+      resize: vertical;
       white-space: pre-wrap;
       font-size: 13px;
       line-height: 1.45;

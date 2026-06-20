@@ -30,14 +30,9 @@ def load_screen_state_candidates(
     supported_suffixes: frozenset[str],
 ) -> tuple[ScreenStateCandidate, ...] | None:
     """读取状态组配置文件，不存在时返回 None。"""
-    if not config_path.exists():
+    data = _load_screen_state_config(config_path)
+    if data is None:
         return None
-    try:
-        data = json.loads(config_path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as exc:
-        raise ValueError(f"invalid screen state config json: {exc.msg}") from exc
-    if not isinstance(data, dict):
-        raise ValueError("screen state config must be an object")
 
     regions = _parse_regions(data.get("regions", {}))
     searches: list[NamedImageSearch] = []
@@ -83,6 +78,27 @@ def load_screen_state_candidates(
         ScreenStateCandidate(state, catalog.resolve_search(SearchRef(search_name)))
         for state, search_name in candidate_refs
     )
+
+
+def load_screen_state_regions(config_path: Path) -> tuple[NamedRegion, ...] | None:
+    """读取状态配置中的命名区域，不存在时返回 None。"""
+    data = _load_screen_state_config(config_path)
+    if data is None:
+        return None
+    return _parse_regions(data.get("regions", {}))
+
+
+def _load_screen_state_config(config_path: Path) -> dict[str, Any] | None:
+    """读取状态配置 JSON object，不存在时返回 None。"""
+    if not config_path.exists():
+        return None
+    try:
+        data = json.loads(config_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"invalid screen state config json: {exc.msg}") from exc
+    if not isinstance(data, dict):
+        raise ValueError("screen state config must be an object")
+    return data
 
 
 def _parse_regions(value: Any) -> tuple[NamedRegion, ...]:

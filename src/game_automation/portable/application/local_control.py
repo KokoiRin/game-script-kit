@@ -23,8 +23,9 @@ from game_automation.portable.application.script_run import (
     run_script,
 )
 from game_automation.portable.application.screen_state_config import load_screen_state_candidates
+from game_automation.portable.application.screen_state_config import load_screen_state_regions
 from game_automation.portable.domain import Click, ImageTarget, ImageTemplate, ScreenWindow, Script
-from game_automation.portable.domain import ScreenStateCandidate, ScreenStateProbeResult
+from game_automation.portable.domain import NamedRegion, Point, Rect, ScreenStateCandidate, ScreenStateProbeResult
 from game_automation.portable.engine.ports import RunLogger, ScreenImageBatchLocator, ScreenImageLocator
 from game_automation.portable.engine.screen_state_probe import probe_screen_state
 from game_automation.portable.scripts_manager import DEFAULT_SCRIPT_CATALOG
@@ -33,12 +34,14 @@ from game_automation.portable.scripts_manager.catalog import ScriptCatalog, Scri
 CommandRunner = Callable[[Sequence[str], Path], subprocess.CompletedProcess[str]]
 ScreenCapture = Callable[[Path], None]
 ScreenCaptureFactory = Callable[[], ScreenCapture]
+ScreenSizeFactory = Callable[[], Point]
 ScreenImageBatchLocatorFactory = Callable[[], ScreenImageBatchLocator]
 
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
 IMAGE_ASSET_FOLDER = "assets"
 IMAGE_ASSET_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".webp"})
 DEBUG_SCREENSHOT_PATH = Path(".star") / "debug" / "screenshots" / "latest-screen.png"
+DEBUG_REGION_SCREENSHOT_PATH = Path(".star") / "debug" / "screenshots" / "latest-screen-regions.png"
 SCREEN_STATE_CONFIG_NAME = "screen-states.json"
 
 
@@ -213,6 +216,7 @@ class LocalControlApplication:
         real_image_locator_factory: ScreenImageLocatorFactory | None = None,
         real_image_batch_locator_factory: ScreenImageBatchLocatorFactory | None = None,
         screen_capture_factory: ScreenCaptureFactory | None = None,
+        screen_size_factory: ScreenSizeFactory | None = None,
     ) -> None:
         """注入 UI 用例需要的脚本 catalog、项目路径和外部能力工厂。"""
         self._catalog = catalog
@@ -223,6 +227,7 @@ class LocalControlApplication:
         self._real_image_locator_factory = real_image_locator_factory
         self._real_image_batch_locator_factory = real_image_batch_locator_factory
         self._screen_capture_factory = screen_capture_factory
+        self._screen_size_factory = screen_size_factory
         self._run_lock = threading.Lock()
         self._current_run: _BackgroundScriptRun | None = None
         self._probe_lock = threading.Lock()
@@ -503,9 +508,56 @@ class LocalControlApplication:
             screenshot_path=str(screenshot_path),
         )
 
+    def capture_screen_region_diagnostics(self) -> ControlResult:
+        """保存一张带状态识别区域框的诊断截图。"""
+        config_path = self._image_asset_root() / SCREEN_STATE_CONFIG_NAME
+        if not config_path.exists():
+            return ControlResult(
+                exit_code=2,
+                stderr="screen state config is required for region diagnostics\n",
+            )
+        try:
+            load_screen_state_candidates(
+                config_path,
+                asset_root=self._image_asset_root(),
+                supported_suffixes=IMAGE_ASSET_SUFFIXES,
+            )
+            regions = load_screen_state_regions(config_path)
+        except ValueError as exc:
+            return ControlResult(exit_code=2, stderr=f"invalid screen state config: {exc}\n")
+        if not regions:
+            return ControlResult(exit_code=2, stderr="screen state config has no named regions\n")
+        if self._screen_capture_factory is None:
+            return ControlResult(exit_code=1, stderr="screen capture is not configured\n")
+        if self._screen_size_factory is None:
+            return ControlResult(exit_code=1, stderr="screen size is not configured\n")
+
+        raw_path = self.latest_screen_screenshot_path()
+        diagnostic_path = self.latest_screen_region_diagnostics_path()
+        raw_path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            self._screen_capture_factory()(raw_path)
+            _draw_region_diagnostics(
+                screenshot_path=raw_path,
+                output_path=diagnostic_path,
+                screen_size=self._screen_size_factory(),
+                regions=regions,
+            )
+        except Exception as exc:
+            return ControlResult(exit_code=1, stderr=f"{exc}\n")
+        return ControlResult(
+            exit_code=0,
+            stdout=f"saved region diagnostics screenshot: {diagnostic_path}\n",
+            screenshot_path=str(diagnostic_path),
+        )
+
     def latest_screen_screenshot_path(self) -> Path:
         """返回最近一次截屏诊断保存的项目内文件路径。"""
         return self._project_root / DEBUG_SCREENSHOT_PATH
+
+    def latest_screen_region_diagnostics_path(self) -> Path:
+        """返回最近一次区域诊断截图保存的项目内文件路径。"""
+        return self._project_root / DEBUG_REGION_SCREENSHOT_PATH
 
     def run_tests(self, task_name: str = "all") -> ControlResult:
         """运行白名单测试任务，并返回 UI 可展示的执行结果。"""
@@ -589,6 +641,84 @@ def _wait_for_next_probe_round(cancellation: _CancellationFlag, interval_seconds
     deadline = time.monotonic() + max(0, interval_seconds)
     while time.monotonic() < deadline and not cancellation.is_cancelled():
         time.sleep(min(0.05, deadline - time.monotonic()))
+
+
+def _draw_region_diagnostics(
+    *,
+    screenshot_path: Path,
+    output_path: Path,
+    screen_size: Point,
+    regions: tuple[NamedRegion, ...],
+) -> None:
+    """把命名区域绘制到截图上并保存诊断图。"""
+    if screen_size.x <= 0 or screen_size.y <= 0:
+        raise ValueError("screen size must be positive")
+
+    from PIL import Image, ImageDraw, ImageFont
+
+    with Image.open(screenshot_path) as image:
+        diagnostic = image.convert("RGB")
+    draw = ImageDraw.Draw(diagnostic)
+    font = _load_region_label_font(ImageFont)
+    scale_x = diagnostic.width / screen_size.x
+    scale_y = diagnostic.height / screen_size.y
+    for index, region in enumerate(regions, start=1):
+        color = _region_color(index)
+        box = _region_box_in_pixels(region.region, scale_x=scale_x, scale_y=scale_y)
+        draw.rectangle(box, outline=color, width=3)
+        _draw_region_label(draw, font, f"{index}. {region.name}", box, color)
+    diagnostic.save(output_path)
+
+
+def _region_box_in_pixels(region: Rect, *, scale_x: float, scale_y: float) -> tuple[int, int, int, int]:
+    """把点坐标矩形换算成截图像素矩形。"""
+    return (
+        round(region.left * scale_x),
+        round(region.top * scale_y),
+        round((region.left + region.width) * scale_x),
+        round((region.top + region.height) * scale_y),
+    )
+
+
+def _draw_region_label(draw, font, label: str, box: tuple[int, int, int, int], color: str) -> None:
+    """在区域框左上角绘制区域名称，字体不支持时使用编号兜底。"""
+    left, top, _, _ = box
+    text = label
+    try:
+        text_box = draw.textbbox((left, top), text, font=font)
+    except UnicodeEncodeError:
+        text = label.split(".", 1)[0]
+        text_box = draw.textbbox((left, top), text, font=font)
+    background = (
+        text_box[0] - 2,
+        text_box[1] - 2,
+        text_box[2] + 2,
+        text_box[3] + 2,
+    )
+    draw.rectangle(background, fill=color)
+    draw.text((left, top), text, fill="#ffffff", font=font)
+
+
+def _load_region_label_font(image_font_module):
+    """加载适合中文区域名的字体，找不到时回退到 Pillow 默认字体。"""
+    candidates = (
+        "/System/Library/Fonts/PingFang.ttc",
+        "/System/Library/Fonts/STHeiti Light.ttc",
+        "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
+        "DejaVuSans.ttf",
+    )
+    for candidate in candidates:
+        try:
+            return image_font_module.truetype(candidate, 14)
+        except OSError:
+            continue
+    return image_font_module.load_default()
+
+
+def _region_color(index: int) -> str:
+    """按区域序号返回稳定的高对比描边颜色。"""
+    colors = ("#ef4444", "#22c55e", "#3b82f6", "#f59e0b", "#a855f7", "#14b8a6")
+    return colors[(index - 1) % len(colors)]
 
 
 def _run_command(command: Sequence[str], cwd: Path) -> subprocess.CompletedProcess[str]:
