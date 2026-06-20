@@ -5,6 +5,7 @@
     const colorInput = document.querySelector("#dry-run-color");
     const dryRunScreenStateInput = document.querySelector("#dry-run-screen-state");
     const screenStateSuggestions = document.querySelector("#screen-state-suggestions");
+    const useProbedScreenStateButton = document.querySelector("#use-probed-screen-state");
     const statusEl = document.querySelector("#status");
     const outputEl = document.querySelector("#output");
     const runScriptButton = document.querySelector("#run-script");
@@ -29,6 +30,7 @@
     let activeScriptRun = false;
     let screenStateProbePollTimer = null;
     let activeScreenStateProbe = false;
+    let latestScreenState = "未知";
 
     function setBusy(isBusy) {
       runScriptButton.disabled = isBusy;
@@ -37,6 +39,7 @@
       captureScreenButton.disabled = isBusy;
       captureRegionDiagnosticsButton.disabled = isBusy;
       clickImageButton.disabled = isBusy || !imageAssetSelect.value;
+      useProbedScreenStateButton.disabled = isBusy;
       stopScriptButton.disabled = !activeScriptRun;
     }
 
@@ -81,6 +84,7 @@
 
     function renderScreenStateStatus(result) {
       const state = result.current_state || "未知";
+      latestScreenState = state;
       if (result.running) {
         screenStateCurrent.textContent = `当前状态：${state}（探测中）`;
       } else if (result.exit_code === null || result.exit_code === undefined) {
@@ -89,6 +93,15 @@
         screenStateCurrent.textContent = `当前状态：${state}，退出码：${result.exit_code}`;
       }
       screenStateLog.textContent = `${result.stdout || ""}${result.stderr || ""}`;
+    }
+
+    function useProbedScreenState() {
+      if (!latestScreenState || latestScreenState === "未知") {
+        statusEl.textContent = "没有可用探测状态";
+        return;
+      }
+      dryRunScreenStateInput.value = latestScreenState;
+      statusEl.textContent = `已使用探测状态：${latestScreenState}`;
     }
 
     function scheduleScriptRunPoll() {
@@ -329,6 +342,7 @@
     setupTabs();
     runScriptButton.addEventListener("click", runScript);
     stopScriptButton.addEventListener("click", stopScript);
+    useProbedScreenStateButton.addEventListener("click", useProbedScreenState);
     runTestsButton.addEventListener("click", runTests);
     refreshImagesButton.addEventListener("click", loadImageAssets);
     captureScreenButton.addEventListener("click", captureScreen);
