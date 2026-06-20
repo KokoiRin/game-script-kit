@@ -129,6 +129,7 @@ def test_local_ui_serves_static_assets() -> None:
     assert "scriptStateDependencies" in script
     assert "payload.state_dependencies" in script
     assert "payload.state_decisions" in script
+    assert "payload.state_waits" in script
     assert "scriptImageDependencies" in script
     assert "payload.image_dependencies" in script
     assert "dry_run_images: scriptImageDependencies" in script
@@ -136,6 +137,10 @@ def test_local_ui_serves_static_assets() -> None:
     assert "当前脚本没有状态依赖" in script
     assert "状态决策：" in script
     assert "没有状态决策" in script
+    assert "状态等待：" in script
+    assert "没有状态等待" in script
+    assert "renderStateWaitPreview" in script
+    assert "当前：已满足" in script
     assert "currentScriptDetailsPayload" in script
     assert "renderStateDecisionPreview" in script
     assert "当前：命中" in script
@@ -257,9 +262,14 @@ def test_local_ui_gets_script_details_over_http() -> None:
     assert payload == {
         "exit_code": 0,
         "name": "conditional-color-demo",
-        "steps": ['If ScreenStateIs("主页")', "  then Click Point(x=100, y=200)"],
+        "steps": [
+            'If ScreenStateIs("主页")',
+            "  then Click Point(x=100, y=200)",
+            'WaitUntil ScreenStateIs("主页") timeout=1s interval=0.5s',
+        ],
         "dependencies": ["状态: 主页"],
         "state_dependencies": ["主页"],
+        "state_waits": ["主页"],
         "state_decisions": [
             {
                 "state": "主页",
@@ -775,9 +785,14 @@ class FakeControlApplication:
         return ScriptDetailsResult(
             exit_code=0,
             name=name,
-            steps=('If ScreenStateIs("主页")', "  then Click Point(x=100, y=200)"),
+            steps=(
+                'If ScreenStateIs("主页")',
+                "  then Click Point(x=100, y=200)",
+                'WaitUntil ScreenStateIs("主页") timeout=1s interval=0.5s',
+            ),
             dependencies=("状态: 主页",),
             state_dependencies=("主页",),
+            state_waits=("主页",),
             state_decisions=(
                 ("主页", ("Click Point(x=100, y=200)",), ("Wait 0.5s",)),
             ),

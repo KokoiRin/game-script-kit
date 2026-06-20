@@ -290,6 +290,15 @@
           lines.push(`  未命中：${renderDecisionSteps(decision.unmatched_steps)}`);
         }
       }
+      lines.push("状态等待：");
+      if ((payload.state_waits || []).length === 0) {
+        lines.push("- 没有状态等待");
+      } else {
+        for (const state of payload.state_waits || []) {
+          lines.push(`- 等待状态: ${state}`);
+          lines.push(`  ${renderStateWaitPreview(state)}`);
+        }
+      }
       lines.push("依赖：");
       if ((payload.dependencies || []).length === 0) {
         lines.push("- 无");
@@ -317,6 +326,16 @@
         return "当前：命中";
       }
       return "当前：未命中";
+    }
+
+    function renderStateWaitPreview(state) {
+      if (!latestScreenState || latestScreenState === "未知") {
+        return "当前：未知";
+      }
+      if (latestScreenState === state) {
+        return "当前：已满足";
+      }
+      return "当前：未满足";
     }
 
     function renderDecisionSteps(steps) {

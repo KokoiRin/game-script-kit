@@ -298,6 +298,7 @@ def _script_details_to_payload(details) -> dict[str, object]:
         "steps": list(details.steps),
         "dependencies": list(details.dependencies),
         "state_dependencies": list(details.state_dependencies),
+        "state_waits": list(details.state_waits),
         "state_decisions": [
             {
                 "state": state,
