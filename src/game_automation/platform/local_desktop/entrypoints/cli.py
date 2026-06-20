@@ -35,6 +35,9 @@ def _run_list() -> int:
 
 def _run_script(args: argparse.Namespace) -> int:
     """按名称运行脚本。"""
+    if args.dry_run_script_images and not args.dry_run:
+        print("--dry-run-script-images requires --dry-run", file=sys.stderr)
+        return 2
     try:
         script = DEFAULT_SCRIPT_CATALOG.get(args.name)
     except ScriptNotFoundError as exc:
@@ -46,11 +49,22 @@ def _run_script(args: argparse.Namespace) -> int:
         print(f"script resource configuration failed: {exc}", file=sys.stderr)
         return 2
 
+    dry_run_images = tuple(args.dry_run_image)
+    if args.dry_run_script_images:
+        try:
+            dry_run_images = _merge_dry_run_images(
+                dry_run_images,
+                _describe_script(script).image_dependencies,
+            )
+        except (LookupError, ValueError) as exc:
+            print(f"script details configuration failed: {exc}", file=sys.stderr)
+            return 2
+
     result = run_script_on_local_desktop(
         script,
         dry_run=args.dry_run,
         dry_run_color=args.dry_run_color,
-        dry_run_images=tuple(args.dry_run_image),
+        dry_run_images=dry_run_images,
         dry_run_screen_state=args.dry_run_screen_state,
     )
     if result.error_message is not None:
@@ -67,17 +81,30 @@ def _run_details(args: argparse.Namespace) -> int:
         return 1
     try:
         script = script_with_shared_resources(script, load_shared_script_resources(PROJECT_ROOT))
-        details = describe_script_details(
-            script,
-            asset_root=image_asset_root(PROJECT_ROOT),
-            supported_image_suffixes=IMAGE_ASSET_SUFFIXES,
-            state_names=_configured_screen_state_names(),
-        )
+        details = _describe_script(script)
     except (LookupError, ValueError) as exc:
         print(f"script details configuration failed: {exc}", file=sys.stderr)
         return 2
     _print_script_details(details)
     return details.exit_code
+
+
+def _describe_script(script) -> ScriptDetailsResult:
+    """生成 CLI 复用的脚本详情。"""
+    return describe_script_details(
+        script,
+        asset_root=image_asset_root(PROJECT_ROOT),
+        supported_image_suffixes=IMAGE_ASSET_SUFFIXES,
+        state_names=_configured_screen_state_names(),
+    )
+
+
+def _merge_dry_run_images(
+    explicit_images: tuple[str, ...],
+    script_images: tuple[str, ...],
+) -> tuple[str, ...]:
+    """合并用户显式 dry-run 图片和脚本解析出的图片依赖。"""
+    return tuple(dict.fromkeys((*explicit_images, *script_images)))
 
 
 def _configured_screen_state_names() -> tuple[str, ...] | None:
@@ -192,6 +219,11 @@ def main(argv: list[str] | None = None) -> int:
         action="append",
         default=[],
         help="Template path treated as found when dry-running image conditions. Can be repeated.",
+    )
+    run_parser.add_argument(
+        "--dry-run-script-images",
+        action="store_true",
+        help="Treat resolved script image dependencies as found when dry-running.",
     )
     run_parser.add_argument(
         "--dry-run-screen-state",

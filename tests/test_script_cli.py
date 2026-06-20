@@ -400,6 +400,16 @@ def test_star_cli_runs_click_image_demo_with_dry_run_image(capsys) -> None:
     ]
 
 
+def test_star_cli_runs_click_image_demo_with_script_images(capsys) -> None:
+    """验证 CLI 可自动用脚本图片依赖作为 dry-run 命中图片。"""
+    assert main(["run", "click-image-demo", "--dry-run", "--dry-run-script-images"]) == 0
+
+    output = capsys.readouterr().out.splitlines()
+    assert output == [
+        "click Point(x=0, y=0)",
+    ]
+
+
 def test_star_cli_uses_screen_state_search_ref_for_dry_run(monkeypatch, tmp_path, capsys) -> None:
     """验证 CLI dry-run 可复用状态配置里的搜索别名。"""
     assets = tmp_path / "assets"
@@ -442,6 +452,44 @@ def test_star_cli_uses_screen_state_search_ref_for_dry_run(monkeypatch, tmp_path
             str(assets / "离开.png"),
         ]
     ) == 0
+
+    captured = capsys.readouterr()
+    assert captured.err == ""
+    assert captured.out.splitlines() == ["click Point(x=0, y=0)"]
+
+
+def test_star_cli_uses_screen_state_search_ref_with_script_images(
+    monkeypatch,
+    tmp_path,
+    capsys,
+) -> None:
+    """验证自动图片依赖会解析状态配置搜索别名。"""
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    (assets / "离开.png").write_bytes(b"fake")
+    (assets / "screen-states.json").write_text(
+        json.dumps(
+            {
+                "groups": [
+                    {
+                        "state": "战斗失败",
+                        "searches": [{"name": "离开按钮", "image": "离开.png"}],
+                    },
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    script = Script(
+        name="shared-search-auto-images",
+        window=ScreenWindow(),
+        steps=(Click(ImageTarget(SearchRef("离开按钮"))),),
+    )
+    monkeypatch.setattr(cli, "DEFAULT_SCRIPT_CATALOG", ScriptCatalog((script,)))
+    monkeypatch.setattr(cli, "PROJECT_ROOT", tmp_path)
+
+    assert main(["run", "shared-search-auto-images", "--dry-run", "--dry-run-script-images"]) == 0
 
     captured = capsys.readouterr()
     assert captured.err == ""
@@ -497,6 +545,15 @@ def test_star_cli_local_search_ref_overrides_screen_state_config(monkeypatch, tm
     captured = capsys.readouterr()
     assert captured.err == ""
     assert captured.out.splitlines() == ["click Point(x=0, y=0)"]
+
+
+def test_star_cli_rejects_script_images_without_dry_run(capsys) -> None:
+    """验证自动 dry-run 图片依赖开关不能用于真实运行。"""
+    assert main(["run", "click-image-demo", "--dry-run-script-images"]) == 2
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "--dry-run-script-images requires --dry-run" in captured.err
 
 
 def test_star_cli_reports_click_image_demo_missing_target(capsys) -> None:
