@@ -41,6 +41,17 @@ class PixelColorReader(Protocol):
         ...
 
 
+class ScreenStateReader(Protocol):
+    def read_current_state(
+        self,
+        *,
+        min_confidence: float = 0.8,
+        logger: RunLogger | None = None,
+    ) -> str:
+        """读取当前识别到的界面状态名称。"""
+        ...
+
+
 class RunLogger(Protocol):
     def log(self, message: str) -> None:
         """记录一条脚本运行诊断日志。"""

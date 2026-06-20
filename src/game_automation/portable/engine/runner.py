@@ -32,6 +32,7 @@ from game_automation.portable.engine.ports import (
     PixelColorReader,
     RunLogger,
     ScreenImageLocator,
+    ScreenStateReader,
 )
 
 
@@ -44,6 +45,7 @@ class ScriptRunner:
     device: InputDevice
     color_reader: PixelColorReader | None = None
     image_locator: ScreenImageLocator | None = None
+    screen_state_reader: ScreenStateReader | None = None
     cancellation_token: CancellationToken | None = None
     logger: RunLogger | None = None
 
@@ -101,6 +103,7 @@ class ScriptRunner:
             window=script.window,
             color_reader=self.color_reader,
             image_locator=self.image_locator,
+            screen_state_reader=self.screen_state_reader,
             resources=script.resources,
             logger=self.logger,
         ):
@@ -118,6 +121,7 @@ class ScriptRunner:
                 window=script.window,
                 color_reader=self.color_reader,
                 image_locator=self.image_locator,
+                screen_state_reader=self.screen_state_reader,
                 resources=script.resources,
                 logger=self.logger,
             ):

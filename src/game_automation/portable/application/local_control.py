@@ -26,7 +26,12 @@ from game_automation.portable.application.screen_state_config import load_screen
 from game_automation.portable.application.screen_state_config import load_screen_state_regions
 from game_automation.portable.domain import Click, ImageTarget, ImageTemplate, ScreenWindow, Script
 from game_automation.portable.domain import NamedRegion, Point, Rect, ScreenStateCandidate, ScreenStateProbeResult
-from game_automation.portable.engine.ports import RunLogger, ScreenImageBatchLocator, ScreenImageLocator
+from game_automation.portable.engine.ports import (
+    RunLogger,
+    ScreenImageBatchLocator,
+    ScreenImageLocator,
+    ScreenStateReader,
+)
 from game_automation.portable.engine.screen_state_probe import probe_screen_state
 from game_automation.portable.scripts_manager import DEFAULT_SCRIPT_CATALOG
 from game_automation.portable.scripts_manager.catalog import ScriptCatalog, ScriptNotFoundError
@@ -141,6 +146,27 @@ class _StringRunLogger:
     def log(self, message: str) -> None:
         """把运行诊断日志写入同步 stdout 捕获流。"""
         self._stream.write(f"{message}\n")
+
+
+class _LocalScreenStateReader(ScreenStateReader):
+    def __init__(self, app: "LocalControlApplication") -> None:
+        """保存本地控制用例，用现有状态探测能力读取当前状态。"""
+        self._app = app
+
+    def read_current_state(
+        self,
+        *,
+        min_confidence: float = 0.8,
+        logger: RunLogger | None = None,
+    ) -> str:
+        """执行一轮状态探测并返回当前状态名称。"""
+        result = self._app.probe_screen_state_once(
+            min_confidence=min_confidence,
+            logger=logger,
+        )
+        if logger is not None:
+            _log_screen_state_probe_result(logger, result)
+        return result.current_state
 
 
 class _BackgroundScriptRun:
@@ -280,6 +306,7 @@ class LocalControlApplication:
                 real_device_factory=self._real_device_factory,
                 real_color_reader_factory=self._real_color_reader_factory,
                 real_image_locator_factory=self._real_image_locator_factory,
+                real_screen_state_reader_factory=self._build_screen_state_reader,
                 logger=_StringRunLogger(stdout),
             )
 
@@ -373,6 +400,7 @@ class LocalControlApplication:
                 dry_run_images=(str(asset_path),) if dry_run else (),
                 real_device_factory=self._real_device_factory,
                 real_image_locator_factory=self._real_image_locator_factory,
+                real_screen_state_reader_factory=self._build_screen_state_reader,
                 logger=_StringRunLogger(stdout),
             )
 
@@ -463,6 +491,7 @@ class LocalControlApplication:
                 real_device_factory=self._real_device_factory,
                 real_color_reader_factory=self._real_color_reader_factory,
                 real_image_locator_factory=self._real_image_locator_factory,
+                real_screen_state_reader_factory=self._build_screen_state_reader,
                 cancellation_token=session.cancellation,
                 logger=session.log,
             )
@@ -617,6 +646,10 @@ class LocalControlApplication:
         if self._real_image_batch_locator_factory is None:
             return None
         return self._real_image_batch_locator_factory()
+
+    def _build_screen_state_reader(self) -> ScreenStateReader:
+        """创建基于当前本地控制配置的界面状态 reader。"""
+        return _LocalScreenStateReader(self)
 
 
 def _log_screen_state_probe_result(logger: RunLogger, result: ScreenStateProbeResult) -> None:

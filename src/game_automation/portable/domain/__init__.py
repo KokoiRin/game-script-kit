@@ -6,7 +6,7 @@
 
 from game_automation.portable.domain.actions import Click, ClickTarget, Drag, If, PrimitiveAction, Repeat, Step, Wait, WaitUntil
 from game_automation.portable.domain.color import Color
-from game_automation.portable.domain.conditions import ColorIs, Condition, ImageExists
+from game_automation.portable.domain.conditions import ColorIs, Condition, ImageExists, ScreenStateIs
 from game_automation.portable.domain.geometry import Point, Rect
 from game_automation.portable.domain.image_matching import (
     ImageBatchMatchResult,
@@ -71,6 +71,7 @@ __all__ = [
     "Rect",
     "Repeat",
     "ScreenWindow",
+    "ScreenStateIs",
     "ScreenStateCandidate",
     "ScreenStateCandidateResult",
     "ScreenStateProbeResult",

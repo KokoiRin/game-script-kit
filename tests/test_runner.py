@@ -23,6 +23,7 @@ from game_automation.portable.domain import (
     Rect,
     Repeat,
     ScreenWindow,
+    ScreenStateIs,
     Script,
     TargetCatalog,
     Wait,
@@ -82,6 +83,21 @@ class SequenceImageLocator:
         self.calls.append((template, region, min_confidence))
         index = min(len(self.calls) - 1, len(self.matches) - 1)
         return self.matches[index]
+
+
+class SequenceScreenStateReader:
+    """按序返回界面状态，序列耗尽后保持最后一个状态。"""
+
+    def __init__(self, states: list[str]) -> None:
+        """保存状态序列并记录读取参数。"""
+        self.states = states
+        self.calls = []
+
+    def read_current_state(self, *, min_confidence: float = 0.8, logger=None) -> str:
+        """返回下一个状态并记录最低置信度。"""
+        self.calls.append(min_confidence)
+        index = min(len(self.calls) - 1, len(self.states) - 1)
+        return self.states[index]
 
 
 def test_runner_maps_steps_to_device_with_script_window() -> None:
@@ -396,6 +412,45 @@ def test_runner_requires_color_reader_for_color_condition() -> None:
         ScriptRunner(device=FakeInputDevice()).run(script)
 
 
+def test_runner_executes_then_branch_when_screen_state_matches() -> None:
+    """验证界面状态条件为真时 runner 执行 then 分支。"""
+    device = FakeInputDevice()
+    state_reader = SequenceScreenStateReader(["主页"])
+    script = Script(
+        name="if-screen-state-runner",
+        window=ScreenWindow(),
+        steps=(
+            If(
+                condition=ScreenStateIs("主页", min_confidence=0.7),
+                then_steps=(Click(Point(3, 4)),),
+                else_steps=(Wait(0.5),),
+            ),
+        ),
+    )
+
+    ScriptRunner(device=device, screen_state_reader=state_reader).run(script)
+
+    assert [action.name for action in device.actions] == ["click"]
+    assert state_reader.calls == [0.7]
+
+
+def test_runner_requires_screen_state_reader_for_screen_state_condition() -> None:
+    """验证执行界面状态条件时必须注入界面状态读取端口。"""
+    script = Script(
+        name="if-missing-state-reader-runner",
+        window=ScreenWindow(),
+        steps=(
+            If(
+                condition=ScreenStateIs("主页"),
+                then_steps=(Click(Point(3, 4)),),
+            ),
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="screen state reader"):
+        ScriptRunner(device=FakeInputDevice()).run(script)
+
+
 def test_runner_executes_then_branch_when_image_exists() -> None:
     """验证图片存在条件为真时 runner 执行 then 分支。"""
     device = FakeInputDevice()
@@ -669,6 +724,29 @@ def test_runner_wait_until_waits_until_image_exists() -> None:
         (ImageTemplate("assets/start.png"), None, 1.0),
         (ImageTemplate("assets/start.png"), None, 1.0),
     ]
+
+
+def test_runner_wait_until_waits_until_screen_state_matches() -> None:
+    """验证 WaitUntil 可以轮询界面状态条件直到满足。"""
+    device = FakeInputDevice()
+    state_reader = SequenceScreenStateReader(["人物", "主页"])
+    script = Script(
+        name="wait-until-screen-state",
+        window=ScreenWindow(),
+        steps=(
+            WaitUntil(
+                condition=ScreenStateIs("主页", min_confidence=0.6),
+                timeout_seconds=5,
+                interval_seconds=0.5,
+            ),
+            Click(Point(3, 4)),
+        ),
+    )
+
+    ScriptRunner(device=device, screen_state_reader=state_reader).run(script)
+
+    assert [action.name for action in device.actions] == ["wait", "click"]
+    assert state_reader.calls == [0.6, 0.6]
 
 
 def test_runner_wait_until_times_out_and_stops_following_steps() -> None:

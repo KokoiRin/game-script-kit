@@ -16,6 +16,7 @@ from game_automation.portable.domain import (
     Rect,
     Repeat,
     ScreenWindow,
+    ScreenStateIs,
     Script,
     Wait,
     WaitUntil,
@@ -244,6 +245,40 @@ def test_image_exists_condition_rejects_invalid_min_confidence(
             template=ImageTemplate("assets/start.png"),
             min_confidence=min_confidence,
         )
+
+
+def test_screen_state_condition_preserves_state_and_defaults() -> None:
+    """验证界面状态条件会保留期望状态并默认使用 0.8 置信度。"""
+    condition = ScreenStateIs("主页")
+
+    assert condition.state == "主页"
+    assert condition.min_confidence == 0.8
+
+
+def test_screen_state_condition_preserves_min_confidence() -> None:
+    """验证界面状态条件会保留最低识别置信度。"""
+    condition = ScreenStateIs("战斗失败", min_confidence=0.65)
+
+    assert condition.state == "战斗失败"
+    assert condition.min_confidence == 0.65
+
+
+def test_screen_state_condition_rejects_empty_state() -> None:
+    """验证界面状态条件拒绝空状态名称。"""
+    with pytest.raises(ValueError, match="screen state condition state"):
+        ScreenStateIs("")
+
+    with pytest.raises(ValueError, match="screen state condition state"):
+        ScreenStateIs("   ")
+
+
+@pytest.mark.parametrize("min_confidence", [0.0, -0.1, 1.1])
+def test_screen_state_condition_rejects_invalid_min_confidence(
+    min_confidence: float,
+) -> None:
+    """验证界面状态条件拒绝非法最低置信度。"""
+    with pytest.raises(ValueError, match="screen state condition min_confidence"):
+        ScreenStateIs("主页", min_confidence=min_confidence)
 
 
 def test_if_preserves_condition_and_branch_steps() -> None:

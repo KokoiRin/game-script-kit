@@ -18,6 +18,7 @@ def run_script_on_local_desktop(
     dry_run: bool,
     dry_run_color: str = "#000000",
     dry_run_images: tuple[str, ...] = (),
+    dry_run_screen_state: str = "未知",
 ) -> ScriptRunResult:
     """用本机桌面 adapter 运行脚本。"""
     return run_script(
@@ -25,6 +26,7 @@ def run_script_on_local_desktop(
         dry_run=dry_run,
         dry_run_color=dry_run_color,
         dry_run_images=dry_run_images,
+        dry_run_screen_state=dry_run_screen_state,
         real_device_factory=build_real_input_device,
         real_color_reader_factory=build_real_color_reader,
         real_image_locator_factory=build_real_screen_image_locator,
