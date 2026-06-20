@@ -1,0 +1,3 @@
+- [x] 扩展脚本详情图片依赖收集逻辑，使用 `Script.resources` 解析 `ImageRef`。
+- [x] 补充命名图片脚本详情和 UI dry-run 相关测试。
+- [x] 运行 OpenSpec change 校验、全量测试和格式检查。

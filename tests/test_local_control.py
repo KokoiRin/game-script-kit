@@ -15,15 +15,18 @@ from game_automation.portable.domain import (
     If,
     ImageBatchMatchResult,
     ImageExists,
+    ImageRef,
     ImageMatch,
     ImageTarget,
     ImageTemplate,
+    NamedImage,
     Point,
     Rect,
     Repeat,
     ScreenStateIs,
     ScreenWindow,
     Script,
+    TargetCatalog,
     Wait,
     WaitUntil,
 )
@@ -103,6 +106,28 @@ def test_local_control_runs_image_script_with_dry_run_images() -> None:
     assert result.stdout.splitlines()[-1] == "click Point(x=0, y=0)"
 
 
+def test_local_control_runs_named_image_script_with_dry_run_images() -> None:
+    """验证 UI 用例可用解析后的图片路径 dry-run 命名图片脚本。"""
+    script = Script(
+        name="named-image-click",
+        window=ScreenWindow(),
+        resources=TargetCatalog(images=(NamedImage("离开", ImageTemplate("assets/离开.png")),)),
+        steps=(Click(ImageTarget(ImageRef("离开"))),),
+    )
+    app = LocalControlApplication(catalog=ScriptCatalog((script,)))
+
+    result = app.run_named_script(
+        "named-image-click",
+        dry_run=True,
+        dry_run_images=("assets/离开.png",),
+    )
+
+    assert result.exit_code == 0
+    assert result.stderr == ""
+    assert "image match template=assets/离开.png" in result.stdout
+    assert result.stdout.splitlines()[-1] == "click Point(x=0, y=0)"
+
+
 def test_local_control_describes_state_script_dependencies(tmp_path) -> None:
     """验证 UI 用例可以生成状态驱动脚本详情和可用依赖检查。"""
     assets = tmp_path / "assets"
@@ -138,6 +163,45 @@ def test_local_control_describes_state_script_dependencies(tmp_path) -> None:
         ("状态: 主页", "ok", "状态已配置"),
         ("图片: assets/start.png", "ok", "图片文件可用"),
     )
+
+
+def test_local_control_describes_named_image_dependencies() -> None:
+    """验证 UI 用例会把命名图片依赖解析成 dry-run 可用图片路径。"""
+    script = Script(
+        name="named-image-branch",
+        window=ScreenWindow(),
+        resources=TargetCatalog(
+            images=(
+                NamedImage("离开", ImageTemplate("assets/离开.png")),
+                NamedImage("重来", ImageTemplate("assets/重来.png")),
+            ),
+        ),
+        steps=(
+            If(
+                condition=ImageExists(ImageRef("离开")),
+                then_steps=(Click(ImageTarget(ImageRef("重来"))),),
+            ),
+        ),
+    )
+    app = LocalControlApplication(catalog=ScriptCatalog((script,)))
+
+    details = app.describe_script("named-image-branch")
+
+    assert details.image_dependencies == ("assets/离开.png", "assets/重来.png")
+
+
+def test_local_control_ignores_unknown_named_image_dependency() -> None:
+    """验证未知命名图片不会被伪造成 dry-run 图片路径。"""
+    script = Script(
+        name="unknown-named-image",
+        window=ScreenWindow(),
+        steps=(Click(ImageTarget(ImageRef("缺失"))),),
+    )
+    app = LocalControlApplication(catalog=ScriptCatalog((script,)))
+
+    details = app.describe_script("unknown-named-image")
+
+    assert details.image_dependencies == ()
 
 
 def test_local_control_describes_missing_script_dependencies(tmp_path) -> None:

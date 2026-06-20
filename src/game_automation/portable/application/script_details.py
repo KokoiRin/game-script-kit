@@ -25,6 +25,7 @@ from game_automation.portable.domain import (
     ScreenStateIs,
     Script,
     Step,
+    TargetCatalog,
     Wait,
     WaitUntil,
 )
@@ -56,7 +57,7 @@ def describe_script_details(
         steps=_describe_steps(script.steps),
         dependencies=_describe_dependencies(script.steps),
         state_dependencies=_collect_state_dependencies(script.steps),
-        image_dependencies=_collect_image_dependencies(script.steps),
+        image_dependencies=_collect_image_dependencies(script.steps, resources=script.resources),
         readiness=_describe_readiness(
             script.steps,
             asset_root=asset_root,
@@ -192,45 +193,77 @@ def _collect_condition_state_dependencies(condition, states: list[str]) -> None:
         states.append(condition.state)
 
 
-def _collect_image_dependencies(steps: tuple[Step, ...]) -> tuple[str, ...]:
+def _collect_image_dependencies(
+    steps: tuple[Step, ...],
+    *,
+    resources: TargetCatalog,
+) -> tuple[str, ...]:
     """按脚本阅读顺序收集可直接传给 dry-run 的图片模板路径。"""
     images: list[str] = []
     for step in steps:
-        _collect_step_image_dependencies(step, images)
+        _collect_step_image_dependencies(step, images, resources=resources)
     return tuple(dict.fromkeys(images))
 
 
-def _collect_step_image_dependencies(step: Step, images: list[str]) -> None:
+def _collect_step_image_dependencies(
+    step: Step,
+    images: list[str],
+    *,
+    resources: TargetCatalog,
+) -> None:
     """收集单个步骤内直接或嵌套引用的图片模板路径。"""
     if isinstance(step, Click):
-        _collect_target_image_dependencies(step.point, images)
+        _collect_target_image_dependencies(step.point, images, resources=resources)
         return
     if isinstance(step, If):
-        _collect_condition_image_dependencies(step.condition, images)
+        _collect_condition_image_dependencies(step.condition, images, resources=resources)
         for child in (*step.then_steps, *step.else_steps):
-            _collect_step_image_dependencies(child, images)
+            _collect_step_image_dependencies(child, images, resources=resources)
         return
     if isinstance(step, Repeat):
         for child in step.steps:
-            _collect_step_image_dependencies(child, images)
+            _collect_step_image_dependencies(child, images, resources=resources)
         return
     if isinstance(step, WaitUntil):
-        _collect_condition_image_dependencies(step.condition, images)
+        _collect_condition_image_dependencies(step.condition, images, resources=resources)
 
 
-def _collect_condition_image_dependencies(condition, images: list[str]) -> None:
-    """收集条件中的直接图片模板路径。"""
-    if isinstance(condition, ImageExists) and isinstance(condition.template, ImageTemplate):
-        images.append(condition.template.path)
+def _collect_condition_image_dependencies(
+    condition,
+    images: list[str],
+    *,
+    resources: TargetCatalog,
+) -> None:
+    """收集条件中的图片模板路径。"""
+    if isinstance(condition, ImageExists):
+        _append_resolved_image_dependency(condition.template, images, resources=resources)
 
 
-def _collect_target_image_dependencies(target, images: list[str]) -> None:
-    """收集点击目标中的直接图片模板路径。"""
-    if isinstance(target, ImageTarget) and isinstance(target.template, ImageTemplate):
-        images.append(target.template.path)
+def _collect_target_image_dependencies(
+    target,
+    images: list[str],
+    *,
+    resources: TargetCatalog,
+) -> None:
+    """收集点击目标中的图片模板路径。"""
+    if isinstance(target, ImageTarget):
+        _append_resolved_image_dependency(target.template, images, resources=resources)
         return
     if isinstance(target, OffsetTarget):
-        _collect_target_image_dependencies(target.base, images)
+        _collect_target_image_dependencies(target.base, images, resources=resources)
+
+
+def _append_resolved_image_dependency(
+    image: ImageTemplate | ImageRef,
+    images: list[str],
+    *,
+    resources: TargetCatalog,
+) -> None:
+    """把直接模板或可解析命名图片追加为 dry-run 可用路径。"""
+    try:
+        images.append(resources.resolve_image(image).path)
+    except LookupError:
+        return
 
 
 def _screen_state_readiness(
