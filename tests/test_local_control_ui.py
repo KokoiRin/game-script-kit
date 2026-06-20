@@ -128,6 +128,11 @@ def test_local_ui_serves_static_assets() -> None:
     assert "当前脚本没有状态依赖" in script
     assert "状态决策：" in script
     assert "没有状态决策" in script
+    assert "currentScriptDetailsPayload" in script
+    assert "renderStateDecisionPreview" in script
+    assert "当前：命中" in script
+    assert "当前：未命中" in script
+    assert "当前：未知" in script
     assert "依赖检查：" in script
     assert 'fetch("/api/screen-state-names"' in script
     assert 'fetch("/api/screen-state-config"' in script
