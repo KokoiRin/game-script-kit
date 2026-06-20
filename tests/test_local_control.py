@@ -1251,6 +1251,96 @@ def test_local_control_warns_when_screen_debug_screenshot_is_black(tmp_path) -> 
     assert "captured screenshot appears all black" in result.stderr
 
 
+def test_local_control_diagnoses_screen_setup_with_probe_summary(tmp_path) -> None:
+    """验证屏幕诊断用例会先截图再执行一轮状态探测。"""
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    (assets / "screen-states.json").write_text(
+        """
+        {
+          "groups": [
+            {
+              "state": "主页",
+              "searches": [
+                {"name": "主页标题", "image": "home.png"}
+              ]
+            }
+          ]
+        }
+        """,
+        encoding="utf-8",
+    )
+    Image.new("RGB", (4, 4), "black").save(assets / "home.png")
+    captured_paths = []
+    batch_requests = []
+
+    def screen_capture(path):
+        """保存一张非黑测试截图。"""
+        captured_paths.append(path)
+        Image.new("RGB", (20, 10), "white").save(path)
+
+    class FakeBatchLocator:
+        def locate_requests(self, requests, *, logger=None, stop_on_first_match=False):
+            """记录探测请求并返回主页命中。"""
+            batch_requests.append((tuple(requests), stop_on_first_match))
+            return (
+                ImageBatchMatchResult(
+                    requests[0].template,
+                    ImageMatch(Rect(10, 20, 30, 40), confidence=0.91),
+                    elapsed_ms=4.0,
+                ),
+            )
+
+    app = LocalControlApplication(
+        project_root=tmp_path,
+        screen_capture_factory=lambda: screen_capture,
+        real_image_batch_locator_factory=FakeBatchLocator,
+    )
+
+    result = app.diagnose_screen_setup(min_confidence=0.75)
+
+    screenshot_path = tmp_path / ".star" / "debug" / "screenshots" / "latest-screen.png"
+    assert result.exit_code == 0
+    assert result.stderr == ""
+    assert result.screenshot_path == str(screenshot_path)
+    assert captured_paths == [screenshot_path]
+    assert batch_requests[0][0][0].min_confidence == 0.75
+    assert batch_requests[0][1] is True
+    lines = result.stdout.splitlines()
+    assert lines[0:2] == [
+        f"saved screenshot: {screenshot_path}",
+        "current_state=主页",
+    ]
+    assert lines[2].startswith("elapsed_ms=")
+    assert lines[3] == (
+        "candidate=主页/主页标题 status=matched elapsed_ms=4.00 "
+        "confidence=0.910 best_confidence=0.910 best_rect=x=10,y=20,w=30,h=40"
+    )
+
+
+def test_local_control_diagnose_screen_setup_stops_when_capture_fails(tmp_path) -> None:
+    """验证屏幕诊断截图失败时不会继续执行状态探测。"""
+    probe_calls = []
+
+    class FakeBatchLocator:
+        def locate_requests(self, requests, *, logger=None, stop_on_first_match=False):
+            """记录不应发生的状态探测调用。"""
+            probe_calls.append(requests)
+            return ()
+
+    app = LocalControlApplication(
+        project_root=tmp_path,
+        real_image_batch_locator_factory=FakeBatchLocator,
+    )
+
+    result = app.diagnose_screen_setup()
+
+    assert result.exit_code == 1
+    assert result.stdout == ""
+    assert "screen capture is not configured" in result.stderr
+    assert probe_calls == []
+
+
 def test_local_control_captures_screen_region_diagnostics(tmp_path) -> None:
     """验证 UI 用例可生成带状态区域框的诊断截图。"""
     assets = tmp_path / "assets"

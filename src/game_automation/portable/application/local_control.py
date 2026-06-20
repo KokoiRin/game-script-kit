@@ -701,6 +701,36 @@ class LocalControlApplication:
             screenshot_path=str(screenshot_path),
         )
 
+    def diagnose_screen_setup(self, *, min_confidence: float = 0.8) -> ControlResult:
+        """组合截图诊断和单轮状态探测，帮助用户判断屏幕识别环境。"""
+        capture_result = self.capture_screen_screenshot()
+        if capture_result.exit_code != 0:
+            return capture_result
+
+        try:
+            probe_result = self.probe_screen_state_once(min_confidence=min_confidence)
+        except ValueError as exc:
+            return ControlResult(
+                exit_code=2,
+                stdout=capture_result.stdout,
+                stderr=capture_result.stderr + f"screen state probe configuration failed: {exc}\n",
+                screenshot_path=capture_result.screenshot_path,
+            )
+        except RuntimeError as exc:
+            return ControlResult(
+                exit_code=1,
+                stdout=capture_result.stdout,
+                stderr=capture_result.stderr + f"screen state probe failed: {exc}\n",
+                screenshot_path=capture_result.screenshot_path,
+            )
+
+        return ControlResult(
+            exit_code=0,
+            stdout=capture_result.stdout + _screen_diagnosis_probe_stdout(probe_result),
+            stderr=capture_result.stderr,
+            screenshot_path=capture_result.screenshot_path,
+        )
+
     def capture_screen_region_diagnostics(self) -> ControlResult:
         """保存一张带状态识别区域框的诊断截图。"""
         context = self._screen_region_capture_context()
@@ -1022,6 +1052,53 @@ def _probe_candidate_summary(candidate) -> ScreenStateProbeCandidateSummary:
         best_confidence=candidate.best_confidence,
         best_rect=candidate.best_rect,
     )
+
+
+def _screen_diagnosis_probe_stdout(result: ScreenStateProbeResult) -> str:
+    """把单轮状态探测结果格式化为屏幕诊断摘要。"""
+    lines = [
+        f"current_state={result.current_state}",
+        f"elapsed_ms={result.elapsed_ms:.2f}",
+    ]
+    lines.extend(_screen_diagnosis_candidate_line(candidate) for candidate in result.candidates)
+    lines.extend(f"hint={hint}" for hint in result.hints)
+    return "".join(f"{line}\n" for line in lines)
+
+
+def _screen_diagnosis_candidate_line(candidate) -> str:
+    """把单个状态候选格式化为屏幕诊断摘要行。"""
+    name = candidate.candidate.name
+    if candidate.candidate.search_name:
+        name = f"{name}/{candidate.candidate.search_name}"
+    return (
+        f"candidate={name} "
+        f"status={_screen_diagnosis_candidate_status(candidate)} "
+        f"elapsed_ms={candidate.elapsed_ms:.2f} "
+        f"confidence={_screen_diagnosis_optional_confidence(candidate.confidence)} "
+        f"best_confidence={_screen_diagnosis_optional_confidence(candidate.best_confidence)} "
+        f"best_rect={_screen_diagnosis_optional_rect(candidate.best_rect)}"
+    )
+
+
+def _screen_diagnosis_candidate_status(candidate) -> str:
+    """返回屏幕诊断摘要使用的候选状态枚举。"""
+    if candidate.skipped:
+        return "skipped"
+    if candidate.found:
+        return "matched"
+    return "missed"
+
+
+def _screen_diagnosis_optional_confidence(confidence: float | None) -> str:
+    """把可空置信度格式化为屏幕诊断摘要文本。"""
+    return "None" if confidence is None else f"{confidence:.3f}"
+
+
+def _screen_diagnosis_optional_rect(rect: Rect | None) -> str:
+    """把可空矩形格式化为屏幕诊断摘要文本。"""
+    if rect is None:
+        return "None"
+    return f"x={rect.left},y={rect.top},w={rect.width},h={rect.height}"
 
 
 def _wait_for_next_probe_round(cancellation: _CancellationFlag, interval_seconds: float) -> None:

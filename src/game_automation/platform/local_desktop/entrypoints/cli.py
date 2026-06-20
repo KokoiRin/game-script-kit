@@ -151,6 +151,15 @@ def _run_capture_screen() -> int:
     return _print_control_result(build_local_control_application().capture_screen_screenshot())
 
 
+def _run_diagnose_screen(args: argparse.Namespace) -> int:
+    """执行一次屏幕截图和界面状态组合诊断。"""
+    return _print_control_result(
+        build_local_control_application().diagnose_screen_setup(
+            min_confidence=args.min_confidence,
+        )
+    )
+
+
 def _run_capture_region_diagnostics() -> int:
     """保存一张带状态识别区域框的诊断截图。"""
     return _print_control_result(build_local_control_application().capture_screen_region_diagnostics())
@@ -409,6 +418,16 @@ def main(argv: list[str] | None = None) -> int:
     probe_parser.add_argument("--json", action="store_true", help="Print machine-readable JSON.")
 
     subparsers.add_parser("capture-screen", help="Capture the current screen for diagnostics.")
+    diagnose_parser = subparsers.add_parser(
+        "diagnose-screen",
+        help="Capture the screen and probe screen state for setup diagnostics.",
+    )
+    diagnose_parser.add_argument(
+        "--min-confidence",
+        type=float,
+        default=0.8,
+        help="Minimum image match confidence for the screen-state probe.",
+    )
     subparsers.add_parser(
         "capture-region-diagnostics",
         help="Capture the current screen with configured screen-state regions drawn.",
@@ -489,6 +508,8 @@ def main(argv: list[str] | None = None) -> int:
         return _run_probe_state(args)
     elif args.command == "capture-screen":
         return _run_capture_screen()
+    elif args.command == "diagnose-screen":
+        return _run_diagnose_screen(args)
     elif args.command == "capture-region-diagnostics":
         return _run_capture_region_diagnostics()
     elif args.command == "capture-probe-diagnostics":
