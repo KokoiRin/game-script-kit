@@ -141,8 +141,15 @@
         const confidence = candidate.confidence === null || candidate.confidence === undefined
           ? "无"
           : Number(candidate.confidence).toFixed(3);
-        return `${candidate.name}：${renderCandidateStatus(candidate.status)}；耗时 ${elapsed}；置信度 ${confidence}`;
+        return `${renderCandidateName(candidate)}：${renderCandidateStatus(candidate.status)}；耗时 ${elapsed}；置信度 ${confidence}`;
       }).join("\n");
+    }
+
+    function renderCandidateName(candidate) {
+      if (candidate.search_name) {
+        return `${candidate.name} / ${candidate.search_name}`;
+      }
+      return candidate.name;
     }
 
     function renderCandidateStatus(status) {

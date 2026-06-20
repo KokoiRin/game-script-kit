@@ -632,8 +632,8 @@ def test_local_control_background_probe_status_includes_latest_candidates(tmp_pa
     app.stop_screen_state_probe()
 
     assert status.candidates == (
-        ScreenStateProbeCandidateSummary("主页", "matched", 4.0, 0.91),
-        ScreenStateProbeCandidateSummary("人物", "skipped", 0.0, None),
+        ScreenStateProbeCandidateSummary("主页", "matched", 4.0, 0.91, search_name="主页标题"),
+        ScreenStateProbeCandidateSummary("人物", "skipped", 0.0, None, search_name="人物标题"),
     )
 
 

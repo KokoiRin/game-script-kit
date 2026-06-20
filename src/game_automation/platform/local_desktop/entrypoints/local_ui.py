@@ -327,6 +327,7 @@ def _probe_candidates_to_payload(candidates) -> list[dict[str, object]]:
     return [
         {
             "name": candidate.name,
+            "search_name": candidate.search_name,
             "status": candidate.status,
             "elapsed_ms": candidate.elapsed_ms,
             "confidence": candidate.confidence,

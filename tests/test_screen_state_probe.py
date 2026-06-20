@@ -29,7 +29,11 @@ def test_screen_state_probe_result_uses_found_candidate_as_current_state() -> No
     result = ScreenStateProbeResult(
         candidates=(
             ScreenStateCandidateResult(
-                candidate=ScreenStateCandidate("装备", ImageTemplate("assets/equipment.png")),
+                candidate=ScreenStateCandidate(
+                    "装备",
+                    ImageTemplate("assets/equipment.png"),
+                    search_name="装备标题",
+                ),
                 match=ImageMatch(Rect(10, 20, 30, 40), confidence=0.88),
                 elapsed_ms=12.5,
             ),
@@ -38,6 +42,7 @@ def test_screen_state_probe_result_uses_found_candidate_as_current_state() -> No
     )
 
     assert result.current_state == "装备"
+    assert result.candidates[0].candidate.search_name == "装备标题"
     assert result.known is True
 
 
@@ -239,6 +244,11 @@ def test_local_control_probes_screen_state_from_configured_groups(tmp_path) -> N
         "战斗失败",
         "战斗失败",
         "主页",
+    ]
+    assert [candidate.candidate.search_name for candidate in result.candidates] == [
+        "离开按钮",
+        "重来按钮",
+        "主页标题",
     ]
     requests, stop_on_first_match = captured_requests[0]
     assert stop_on_first_match is True

@@ -103,6 +103,7 @@ class ScreenStateProbeCandidateSummary:
     status: str
     elapsed_ms: float
     confidence: float | None = None
+    search_name: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -825,6 +826,7 @@ def _probe_candidate_summary(candidate) -> ScreenStateProbeCandidateSummary:
         status=status,
         elapsed_ms=candidate.elapsed_ms,
         confidence=candidate.confidence,
+        search_name=candidate.candidate.search_name,
     )
 
 
