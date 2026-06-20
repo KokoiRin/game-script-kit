@@ -10,6 +10,7 @@ import time
 import pytest
 
 from game_automation.portable.application.local_control import LocalControlApplication
+from game_automation.portable.application.screen_state_config import load_screen_state_target_catalog
 from game_automation.portable.domain import (
     ImageMatch,
     ImageBatchMatchResult,
@@ -17,6 +18,7 @@ from game_automation.portable.domain import (
     ImageSearchSpec,
     ImageTemplate,
     Rect,
+    SearchRef,
     ScreenStateCandidate,
     ScreenStateCandidateResult,
     ScreenStateProbeResult,
@@ -258,6 +260,49 @@ def test_local_control_probes_screen_state_from_configured_groups(tmp_path) -> N
         Rect(0, 0, 200, 80),
     ]
     assert [request.min_confidence for request in requests] == [0.75, 0.8, 0.8]
+
+
+def test_screen_state_config_loads_shared_target_catalog(tmp_path) -> None:
+    """验证状态配置可转换成脚本可复用的共享资源目录。"""
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    (assets / "离开.png").write_bytes(b"fake")
+    (assets / "screen-states.json").write_text(
+        json.dumps(
+            {
+                "regions": {
+                    "右上弹窗": {"left": 100, "top": 20, "width": 300, "height": 120},
+                },
+                "groups": [
+                    {
+                        "state": "战斗失败",
+                        "searches": [
+                            {
+                                "name": "离开按钮",
+                                "image": "离开.png",
+                                "region": "右上弹窗",
+                                "min_confidence": 0.75,
+                            },
+                        ],
+                    },
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    catalog = load_screen_state_target_catalog(
+        assets / "screen-states.json",
+        asset_root=assets,
+        supported_suffixes=frozenset({".png"}),
+    )
+
+    assert catalog is not None
+    search = catalog.resolve_search(SearchRef("离开按钮"))
+    assert search.image == ImageTemplate(str(assets / "离开.png"))
+    assert search.region == Rect(100, 20, 300, 120)
+    assert search.min_confidence == 0.75
 
 
 def test_local_control_rejects_invalid_screen_state_config(tmp_path) -> None:

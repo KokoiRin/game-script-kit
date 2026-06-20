@@ -168,13 +168,62 @@ def test_local_control_runs_named_image_search_script_with_dry_run_images() -> N
     assert result.stdout.splitlines()[-1] == "click Point(x=0, y=0)"
 
 
+def test_local_control_runs_screen_state_search_ref_script_with_dry_run_images(tmp_path) -> None:
+    """验证 UI 用例可用状态配置搜索别名 dry-run 脚本。"""
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    (assets / "离开.png").write_bytes(b"fake")
+    (assets / "screen-states.json").write_text(
+        json.dumps(
+            {
+                "groups": [
+                    {
+                        "state": "战斗失败",
+                        "searches": [
+                            {
+                                "name": "离开按钮",
+                                "image": "离开.png",
+                                "min_confidence": 0.75,
+                            },
+                        ],
+                    },
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    script = Script(
+        name="shared-search-click",
+        window=ScreenWindow(),
+        steps=(Click(ImageTarget(SearchRef("离开按钮"))),),
+    )
+    app = LocalControlApplication(catalog=ScriptCatalog((script,)), project_root=tmp_path)
+
+    result = app.run_named_script(
+        "shared-search-click",
+        dry_run=True,
+        dry_run_images=(str(assets / "离开.png"),),
+    )
+
+    assert result.exit_code == 0
+    assert result.stderr == ""
+    assert "image match template=" in result.stdout
+    assert str(assets / "离开.png") in result.stdout
+    assert "min_confidence=0.75" in result.stdout
+    assert result.stdout.splitlines()[-1] == "click Point(x=0, y=0)"
+
+
 def test_local_control_describes_state_script_dependencies(tmp_path) -> None:
     """验证 UI 用例可以生成状态驱动脚本详情和可用依赖检查。"""
     assets = tmp_path / "assets"
     assets.mkdir()
     (assets / "start.png").write_bytes(b"fake")
     (assets / "screen-states.json").write_text(
-        json.dumps({"groups": [{"state": "主页", "searches": []}]}, ensure_ascii=False),
+        json.dumps(
+            {"groups": [{"state": "主页", "searches": [{"name": "主页标题", "image": "start.png"}]}]},
+            ensure_ascii=False,
+        ),
         encoding="utf-8",
     )
     script = Script(
@@ -264,6 +313,85 @@ def test_local_control_describes_named_image_search_dependencies() -> None:
 
     assert details.dependencies == ('图片: SearchRef("离开按钮")',)
     assert details.image_dependencies == ("assets/离开.png",)
+
+
+def test_local_control_describes_screen_state_search_ref_dependencies(tmp_path) -> None:
+    """验证脚本详情可解析状态配置里的搜索别名。"""
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    (assets / "离开.png").write_bytes(b"fake")
+    (assets / "screen-states.json").write_text(
+        json.dumps(
+            {
+                "groups": [
+                    {
+                        "state": "战斗失败",
+                        "searches": [{"name": "离开按钮", "image": "离开.png"}],
+                    },
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    script = Script(
+        name="shared-search-details",
+        window=ScreenWindow(),
+        steps=(Click(ImageTarget(SearchRef("离开按钮"))),),
+    )
+    app = LocalControlApplication(catalog=ScriptCatalog((script,)), project_root=tmp_path)
+
+    details = app.describe_script("shared-search-details")
+
+    assert details.exit_code == 0
+    assert details.image_dependencies == (str(assets / "离开.png"),)
+    assert details.readiness == (
+        (
+            '图片: SearchRef("离开按钮")',
+            "ok",
+            f"命名搜索已配置，图片文件可用：{assets / '离开.png'}",
+        ),
+    )
+
+
+def test_local_control_script_resources_override_screen_state_search_ref(tmp_path) -> None:
+    """验证脚本自身搜索别名覆盖状态配置中的同名搜索。"""
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    (assets / "配置.png").write_bytes(b"fake")
+    (assets / "脚本.png").write_bytes(b"fake")
+    (assets / "screen-states.json").write_text(
+        json.dumps(
+            {
+                "groups": [
+                    {
+                        "state": "战斗失败",
+                        "searches": [{"name": "离开按钮", "image": "配置.png"}],
+                    },
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    script = Script(
+        name="local-search-override",
+        window=ScreenWindow(),
+        resources=TargetCatalog(
+            searches=(
+                NamedImageSearch(
+                    "离开按钮",
+                    ImageSearchSpec(ImageTemplate("assets/脚本.png")),
+                ),
+            ),
+        ),
+        steps=(Click(ImageTarget(SearchRef("离开按钮"))),),
+    )
+    app = LocalControlApplication(catalog=ScriptCatalog((script,)), project_root=tmp_path)
+
+    details = app.describe_script("local-search-override")
+
+    assert details.image_dependencies == ("assets/脚本.png",)
 
 
 def test_local_control_checks_named_image_readiness(tmp_path) -> None:
@@ -445,6 +573,52 @@ def test_local_control_background_state_script_uses_dry_run_screen_state() -> No
         "screen state condition expected=主页 actual=主页 min_confidence=0.8 matched=True\n"
         "click Point(x=100, y=200)\n"
     )
+
+
+def test_local_control_background_run_uses_screen_state_search_ref(tmp_path) -> None:
+    """验证后台脚本运行也会合并状态配置搜索别名。"""
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    (assets / "离开.png").write_bytes(b"fake")
+    (assets / "screen-states.json").write_text(
+        json.dumps(
+            {
+                "groups": [
+                    {
+                        "state": "战斗失败",
+                        "searches": [
+                            {
+                                "name": "离开按钮",
+                                "image": "离开.png",
+                                "min_confidence": 0.75,
+                            },
+                        ],
+                    },
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    script = Script(
+        name="shared-search-background",
+        window=ScreenWindow(),
+        steps=(Click(ImageTarget(SearchRef("离开按钮"))),),
+    )
+    app = LocalControlApplication(catalog=ScriptCatalog((script,)), project_root=tmp_path)
+
+    app.start_named_script(
+        "shared-search-background",
+        dry_run=True,
+        dry_run_images=(str(assets / "离开.png"),),
+    )
+    final = _wait_until_finished(app)
+
+    assert final.exit_code == 0
+    assert final.stderr == ""
+    assert str(assets / "离开.png") in final.stdout
+    assert "min_confidence=0.75" in final.stdout
+    assert final.stdout.splitlines()[-1] == "click Point(x=0, y=0)"
 
 
 def test_local_control_can_stop_background_script_run() -> None:
