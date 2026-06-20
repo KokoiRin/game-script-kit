@@ -3,6 +3,7 @@
     const scriptSelect = document.querySelector("#script-select");
     const dryRunCheckbox = document.querySelector("#dry-run-enabled");
     const colorInput = document.querySelector("#dry-run-color");
+    const dryRunScreenStateInput = document.querySelector("#dry-run-screen-state");
     const statusEl = document.querySelector("#status");
     const outputEl = document.querySelector("#output");
     const runScriptButton = document.querySelector("#run-script");
@@ -163,7 +164,8 @@
           body: JSON.stringify({
             name: scriptSelect.value,
             dry_run: dryRunCheckbox.checked,
-            dry_run_color: colorInput.value
+            dry_run_color: colorInput.value,
+            dry_run_screen_state: dryRunScreenStateInput.value
           })
         });
         const result = await response.json();

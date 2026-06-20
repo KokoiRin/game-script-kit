@@ -55,6 +55,59 @@ def test_local_control_runs_named_script_and_captures_dry_run_output() -> None:
     ]
 
 
+def test_local_control_runs_state_script_with_dry_run_screen_state() -> None:
+    """验证 UI 用例会把 dry-run 模拟状态传给状态条件脚本。"""
+    script = Script(
+        name="state-branch",
+        window=ScreenWindow(),
+        steps=(
+            If(
+                condition=ScreenStateIs("主页"),
+                then_steps=(Click(Point(100, 200)),),
+                else_steps=(Wait(0.5),),
+            ),
+        ),
+    )
+    app = LocalControlApplication(catalog=ScriptCatalog((script,)))
+
+    result = app.run_named_script(
+        "state-branch",
+        dry_run=True,
+        dry_run_screen_state="主页",
+    )
+
+    assert result.exit_code == 0
+    assert result.stderr == ""
+    assert result.stdout == "click Point(x=100, y=200)\n"
+
+
+def test_local_control_background_state_script_uses_dry_run_screen_state() -> None:
+    """验证后台脚本运行也会使用 dry-run 模拟状态。"""
+    script = Script(
+        name="state-branch",
+        window=ScreenWindow(),
+        steps=(
+            If(
+                condition=ScreenStateIs("主页"),
+                then_steps=(Click(Point(100, 200)),),
+                else_steps=(Wait(0.5),),
+            ),
+        ),
+    )
+    app = LocalControlApplication(catalog=ScriptCatalog((script,)))
+
+    app.start_named_script(
+        "state-branch",
+        dry_run=True,
+        dry_run_screen_state="主页",
+    )
+    final = _wait_until_finished(app)
+
+    assert final.exit_code == 0
+    assert final.stderr == ""
+    assert final.stdout == "click Point(x=100, y=200)\n"
+
+
 def test_local_control_can_stop_background_script_run() -> None:
     """验证 UI application 可以取消后台运行中的脚本。"""
     script = Script(

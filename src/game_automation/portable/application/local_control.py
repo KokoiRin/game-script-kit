@@ -289,6 +289,7 @@ class LocalControlApplication:
         *,
         dry_run: bool,
         dry_run_color: str = "#000000",
+        dry_run_screen_state: str = "未知",
     ) -> ControlResult:
         """按名称运行脚本，并捕获入口层可展示的输出。"""
         try:
@@ -303,6 +304,7 @@ class LocalControlApplication:
                 script,
                 dry_run=dry_run,
                 dry_run_color=dry_run_color,
+                dry_run_screen_state=dry_run_screen_state,
                 real_device_factory=self._real_device_factory,
                 real_color_reader_factory=self._real_color_reader_factory,
                 real_image_locator_factory=self._real_image_locator_factory,
@@ -325,6 +327,7 @@ class LocalControlApplication:
         *,
         dry_run: bool,
         dry_run_color: str = "#000000",
+        dry_run_screen_state: str = "未知",
     ) -> ScriptRunStatus:
         """启动一个后台脚本运行会话。"""
         with self._run_lock:
@@ -345,7 +348,7 @@ class LocalControlApplication:
             self._current_run = session
             thread = threading.Thread(
                 target=self._run_script_session,
-                args=(script, dry_run, dry_run_color, session),
+                args=(script, dry_run, dry_run_color, dry_run_screen_state, session),
                 daemon=True,
             )
             thread.start()
@@ -480,6 +483,7 @@ class LocalControlApplication:
         script: Script,
         dry_run: bool,
         dry_run_color: str,
+        dry_run_screen_state: str,
         session: _BackgroundScriptRun,
     ) -> None:
         """在后台线程中运行脚本并写入会话状态。"""
@@ -488,6 +492,7 @@ class LocalControlApplication:
                 script,
                 dry_run=dry_run,
                 dry_run_color=dry_run_color,
+                dry_run_screen_state=dry_run_screen_state,
                 real_device_factory=self._real_device_factory,
                 real_color_reader_factory=self._real_color_reader_factory,
                 real_image_locator_factory=self._real_image_locator_factory,
