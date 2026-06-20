@@ -259,6 +259,14 @@ def _script_details_to_payload(details) -> dict[str, object]:
         "steps": list(details.steps),
         "dependencies": list(details.dependencies),
         "state_dependencies": list(details.state_dependencies),
+        "state_decisions": [
+            {
+                "state": state,
+                "matched_steps": list(matched_steps),
+                "unmatched_steps": list(unmatched_steps),
+            }
+            for state, matched_steps, unmatched_steps in details.state_decisions
+        ],
         "image_dependencies": list(details.image_dependencies),
         "readiness": [
             {"label": label, "status": status, "message": message}

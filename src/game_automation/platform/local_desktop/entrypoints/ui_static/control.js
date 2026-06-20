@@ -215,6 +215,16 @@
       for (const step of payload.steps || []) {
         lines.push(`- ${step}`);
       }
+      lines.push("状态决策：");
+      if ((payload.state_decisions || []).length === 0) {
+        lines.push("- 没有状态决策");
+      } else {
+        for (const decision of payload.state_decisions || []) {
+          lines.push(`- 当状态为 ${decision.state}`);
+          lines.push(`  命中：${renderDecisionSteps(decision.matched_steps)}`);
+          lines.push(`  未命中：${renderDecisionSteps(decision.unmatched_steps)}`);
+        }
+      }
       lines.push("依赖：");
       if ((payload.dependencies || []).length === 0) {
         lines.push("- 无");
@@ -232,6 +242,13 @@
         }
       }
       scriptDetails.textContent = lines.join("\n");
+    }
+
+    function renderDecisionSteps(steps) {
+      if (!steps || steps.length === 0) {
+        return "无";
+      }
+      return steps.join("；");
     }
 
     function renderReadinessStatus(status) {
