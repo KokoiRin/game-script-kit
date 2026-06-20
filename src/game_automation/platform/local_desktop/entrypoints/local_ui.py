@@ -58,7 +58,14 @@ def create_local_control_server(
                 self._send_ui_asset(path.removeprefix("/static/"))
                 return
             if path == "/api/scripts":
-                self._send_json({"scripts": list(control_app.list_scripts())})
+                self._send_json(
+                    {
+                        "scripts": list(control_app.list_scripts()),
+                        "script_config_errors": _script_config_errors_to_payload(
+                            control_app.list_script_config_errors()
+                        ),
+                    }
+                )
                 return
             if path == "/api/script-details":
                 query = parse_qs(parsed_url.query)
@@ -335,6 +342,11 @@ def _script_details_to_payload(details) -> dict[str, object]:
         ],
         "stderr": details.stderr,
     }
+
+
+def _script_config_errors_to_payload(errors) -> list[dict[str, str]]:
+    """把文件脚本配置错误转换成 HTTP JSON payload。"""
+    return [{"file": error.file, "message": error.message} for error in errors]
 
 
 def _probe_status_to_payload(status) -> dict[str, object]:

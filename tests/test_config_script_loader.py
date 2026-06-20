@@ -10,7 +10,11 @@ import json
 
 import pytest
 
-from game_automation.portable.application.config_script_loader import load_config_scripts
+from game_automation.portable.application.config_script_loader import (
+    ScriptConfigError,
+    load_config_scripts,
+    load_config_scripts_with_errors,
+)
 from game_automation.portable.domain import (
     Click,
     ImageRef,
@@ -143,3 +147,24 @@ def test_load_config_script_rejects_unknown_step(tmp_path) -> None:
 
     with pytest.raises(ValueError, match="bad.json: unsupported step type: drag"):
         load_config_scripts(script_dir, asset_root=tmp_path / "assets")
+
+
+def test_load_config_scripts_with_errors_isolates_bad_file(tmp_path) -> None:
+    """验证 tolerant loader 会跳过坏文件并保留可用脚本。"""
+    script_dir = tmp_path / "scripts"
+    script_dir.mkdir()
+    (script_dir / "good.json").write_text(
+        '{"name": "good", "steps": [{"wait": 1}]}',
+        encoding="utf-8",
+    )
+    (script_dir / "bad.json").write_text(
+        json.dumps({"name": "bad", "steps": [{"drag": {}}]}),
+        encoding="utf-8",
+    )
+
+    result = load_config_scripts_with_errors(script_dir, asset_root=tmp_path / "assets")
+
+    assert [entry.script.name for entry in result.entries] == ["good"]
+    assert result.errors == (
+        ScriptConfigError("bad.json", "bad.json: unsupported step type: drag"),
+    )

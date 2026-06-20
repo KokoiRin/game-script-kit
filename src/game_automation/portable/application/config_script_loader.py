@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -37,6 +38,24 @@ from game_automation.portable.domain import (
 from game_automation.portable.domain.actions import Step
 
 
+@dataclass(frozen=True, slots=True)
+class ScriptConfigError:
+    file: str
+    message: str
+
+
+@dataclass(frozen=True, slots=True)
+class ConfigScriptEntry:
+    file: str
+    script: Script
+
+
+@dataclass(frozen=True, slots=True)
+class ConfigScriptLoadResult:
+    entries: tuple[ConfigScriptEntry, ...] = ()
+    errors: tuple[ScriptConfigError, ...] = ()
+
+
 def load_config_scripts(script_dir: Path, *, asset_root: Path) -> tuple[Script, ...]:
     """读取目录中的 JSON 脚本文件，目录不存在时返回空集合。"""
     if not script_dir.exists():
@@ -44,6 +63,24 @@ def load_config_scripts(script_dir: Path, *, asset_root: Path) -> tuple[Script, 
     if not script_dir.is_dir():
         raise ValueError(f"script path is not a directory: {script_dir}")
     return tuple(_load_config_script(path, asset_root=asset_root) for path in sorted(script_dir.glob("*.json")))
+
+
+def load_config_scripts_with_errors(script_dir: Path, *, asset_root: Path) -> ConfigScriptLoadResult:
+    """读取 JSON 脚本文件，隔离单文件错误并返回可用脚本。"""
+    if not script_dir.exists():
+        return ConfigScriptLoadResult()
+    if not script_dir.is_dir():
+        return ConfigScriptLoadResult(
+            errors=(ScriptConfigError(script_dir.name, f"script path is not a directory: {script_dir}"),)
+        )
+    entries: list[ConfigScriptEntry] = []
+    errors: list[ScriptConfigError] = []
+    for path in sorted(script_dir.glob("*.json")):
+        try:
+            entries.append(ConfigScriptEntry(path.name, _load_config_script(path, asset_root=asset_root)))
+        except ValueError as exc:
+            errors.append(ScriptConfigError(path.name, str(exc)))
+    return ConfigScriptLoadResult(entries=tuple(entries), errors=tuple(errors))
 
 
 def _load_config_script(path: Path, *, asset_root: Path) -> Script:

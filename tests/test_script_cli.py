@@ -67,6 +67,29 @@ def test_star_cli_lists_file_backed_scripts(monkeypatch, tmp_path, capsys) -> No
     assert output == ["builtin", "用户脚本"]
 
 
+def test_star_cli_lists_good_scripts_and_reports_bad_file(monkeypatch, tmp_path, capsys) -> None:
+    """验证 list 子命令隔离坏脚本并把配置错误写入 stderr。"""
+    script_dir = tmp_path / SCRIPT_FOLDER
+    script_dir.mkdir()
+    (script_dir / "good.json").write_text(
+        '{"name": "good", "steps": [{"wait": 1}]}',
+        encoding="utf-8",
+    )
+    (script_dir / "bad.json").write_text(
+        '{"name": "bad", "steps": [{"drag": {}}]}',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(cli, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(cli, "DEFAULT_SCRIPT_CATALOG", ScriptCatalog((Script("builtin", ScreenWindow(), (Click(Point(1, 2)),)),)))
+
+    assert main(["list"]) == 0
+
+    captured = capsys.readouterr()
+    assert captured.out.splitlines() == ["builtin", "good"]
+    assert "脚本配置错误：" in captured.err
+    assert "bad.json: unsupported step type: drag" in captured.err
+
+
 def test_star_cli_details_describes_file_backed_script(monkeypatch, tmp_path, capsys) -> None:
     """验证 details 子命令可以展示文件脚本步骤和依赖。"""
     script_dir = tmp_path / SCRIPT_FOLDER

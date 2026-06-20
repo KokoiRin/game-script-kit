@@ -20,8 +20,12 @@ from game_automation.portable.application.local_control import (
     ScriptDetailsResult,
     ScriptRunStatus,
 )
+from game_automation.portable.application.config_script_loader import ScriptConfigError
 from game_automation.portable.application.project_assets import SCRIPT_FOLDER
-from game_automation.portable.application.project_scripts import load_project_script_catalog
+from game_automation.portable.application.project_scripts import (
+    load_project_script_catalog,
+    load_project_script_catalog_result,
+)
 from game_automation.portable.application.screen_state_config import (
     ScreenStateConfigGroupSummary,
     ScreenStateConfigSearchSummary,
@@ -90,6 +94,43 @@ def test_local_ui_uses_file_backed_scripts_over_http(tmp_path) -> None:
     assert run_payload["exit_code"] == 0
 
 
+def test_local_ui_reports_bad_file_scripts_over_http(tmp_path) -> None:
+    """验证 UI 脚本列表接口返回可用脚本和坏脚本配置错误。"""
+    script_dir = tmp_path / SCRIPT_FOLDER
+    script_dir.mkdir()
+    (script_dir / "good.json").write_text(
+        '{"name": "good", "steps": [{"wait": 0}]}',
+        encoding="utf-8",
+    )
+    (script_dir / "bad.json").write_text(
+        '{"name": "bad", "steps": [{"drag": {}}]}',
+        encoding="utf-8",
+    )
+    catalog_result = load_project_script_catalog_result(tmp_path, base_catalog=ScriptCatalog(()))
+    app = LocalControlApplication(
+        catalog=catalog_result.catalog,
+        script_config_errors=catalog_result.script_config_errors,
+        project_root=tmp_path,
+    )
+    server = create_local_control_server(host="127.0.0.1", port=0, app=app)
+    thread = threading.Thread(target=server.serve_forever)
+    thread.start()
+    try:
+        payload = _request_json(server.server_address, "GET", "/api/scripts")
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+    assert payload["scripts"] == ["good"]
+    assert payload["script_config_errors"] == [
+        {
+            "file": "bad.json",
+            "message": "bad.json: unsupported step type: drag",
+        }
+    ]
+
+
 def test_local_ui_serves_control_page() -> None:
     """验证根路径返回可操作的控制页面。"""
     server = create_local_control_server(host="127.0.0.1", port=0)
@@ -106,6 +147,7 @@ def test_local_ui_serves_control_page() -> None:
     assert 'href="/static/control.css"' in html
     assert 'src="/static/control.js"' in html
     assert 'id="script-select"' in html
+    assert 'id="script-config-errors"' in html
     assert 'id="script-details"' in html
     assert 'id="dry-run-enabled" type="checkbox" checked' in html
     assert 'id="dry-run-screen-state"' in html
@@ -170,6 +212,7 @@ def test_local_ui_serves_static_assets() -> None:
     assert 'document.querySelector("#screen-state-candidates")' in script
     assert 'document.querySelector("#screen-state-hints")' in script
     assert 'document.querySelector("#script-details")' in script
+    assert 'document.querySelector("#script-config-errors")' in script
     assert 'document.querySelector("#dry-run-screen-state")' in script
     assert 'document.querySelector("#screen-state-suggestions")' in script
     assert 'document.querySelector("#use-probed-screen-state")' in script
@@ -205,6 +248,8 @@ def test_local_ui_serves_static_assets() -> None:
     assert 'fetch("/api/screen-state-names"' in script
     assert 'fetch("/api/screen-state-config"' in script
     assert 'fetch(`/api/script-details?name=${encodeURIComponent(scriptSelect.value)}`)' in script
+    assert "payload.script_config_errors" in script
+    assert "脚本配置错误：" in script
     assert 'fetch("/api/start-screen-state-probe"' in script
     assert 'fetch("/api/capture-region-diagnostics"' in script
     assert 'fetch("/api/diagnose-screen"' in script
@@ -903,6 +948,10 @@ class FakeControlApplication:
     def list_scripts(self) -> tuple[str, ...]:
         """返回 fake 脚本列表。"""
         return ("conditional-color-demo",)
+
+    def list_script_config_errors(self) -> tuple[ScriptConfigError, ...]:
+        """返回 fake 脚本配置错误。"""
+        return ()
 
     def image_asset_folder_label(self) -> str:
         """返回 fake 图片目录展示名。"""

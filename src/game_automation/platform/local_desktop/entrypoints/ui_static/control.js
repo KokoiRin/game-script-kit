@@ -1,6 +1,7 @@
     const tabButtons = document.querySelectorAll(".tab-button");
     const tabPanels = document.querySelectorAll(".tab-panel");
     const scriptSelect = document.querySelector("#script-select");
+    const scriptConfigErrors = document.querySelector("#script-config-errors");
     const scriptDetails = document.querySelector("#script-details");
     const dryRunCheckbox = document.querySelector("#dry-run-enabled");
     const colorInput = document.querySelector("#dry-run-color");
@@ -267,7 +268,21 @@
         option.textContent = name;
         scriptSelect.appendChild(option);
       }
+      renderScriptConfigErrors(payload.script_config_errors);
       await loadScriptDetails();
+    }
+
+    function renderScriptConfigErrors(errors) {
+      const items = errors || [];
+      if (items.length === 0) {
+        scriptConfigErrors.textContent = "";
+        return;
+      }
+      const lines = ["脚本配置错误："];
+      for (const item of items) {
+        lines.push(`- ${item.message || item.file}`);
+      }
+      scriptConfigErrors.textContent = lines.join("\n");
     }
 
     async function loadScriptDetails() {
