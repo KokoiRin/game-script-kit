@@ -101,13 +101,20 @@ def _evaluate_screen_state_is(
     if screen_state_reader is None:
         raise RuntimeError("screen state reader is required for screen state conditions")
 
-    return (
-        screen_state_reader.read_current_state(
-            min_confidence=condition.min_confidence,
-            logger=logger,
-        )
-        == condition.state
+    actual_state = screen_state_reader.read_current_state(
+        min_confidence=condition.min_confidence,
+        logger=logger,
     )
+    matched = actual_state == condition.state
+    if logger is not None:
+        logger.log(
+            "screen state condition "
+            f"expected={condition.state} "
+            f"actual={actual_state} "
+            f"min_confidence={condition.min_confidence} "
+            f"matched={matched}"
+        )
+    return matched
 
 
 def _resolve_region(window: Window, region: Rect | None) -> Rect | None:
