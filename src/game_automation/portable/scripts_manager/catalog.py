@@ -26,6 +26,9 @@ from game_automation.portable.scripts_manager.wait_until_color_demo import (
 from game_automation.portable.scripts_manager.wait_until_image_demo import (
     build_wait_until_image_demo_script,
 )
+from game_automation.portable.scripts_manager.wait_until_screen_state_demo import (
+    build_wait_until_screen_state_demo_script,
+)
 
 
 class ScriptNotFoundError(LookupError):
@@ -60,6 +63,7 @@ DEFAULT_SCRIPT_CATALOG = ScriptCatalog(
         build_conditional_screen_state_demo_script(),
         build_wait_until_color_demo_script(),
         build_wait_until_image_demo_script(),
+        build_wait_until_screen_state_demo_script(),
         build_click_image_demo_script(),
         build_leave_retry_loop_script(),
     )
