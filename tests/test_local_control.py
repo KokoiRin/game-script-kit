@@ -190,6 +190,44 @@ def test_local_control_describes_named_image_dependencies() -> None:
     assert details.image_dependencies == ("assets/离开.png", "assets/重来.png")
 
 
+def test_local_control_checks_named_image_readiness(tmp_path) -> None:
+    """验证命名图片依赖会按解析后的 assets 路径检查可用性。"""
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    (assets / "离开.png").write_bytes(b"fake")
+    script = Script(
+        name="named-image-ready",
+        window=ScreenWindow(),
+        resources=TargetCatalog(images=(NamedImage("离开", ImageTemplate("assets/离开.png")),)),
+        steps=(Click(ImageTarget(ImageRef("离开"))),),
+    )
+    app = LocalControlApplication(catalog=ScriptCatalog((script,)), project_root=tmp_path)
+
+    details = app.describe_script("named-image-ready")
+
+    assert details.readiness == (
+        ('图片: ImageRef("离开")', "ok", "命名图片已配置，图片文件可用：assets/离开.png"),
+    )
+
+
+def test_local_control_reports_missing_named_image_file(tmp_path) -> None:
+    """验证命名图片已配置但文件缺失时会报告缺失。"""
+    (tmp_path / "assets").mkdir()
+    script = Script(
+        name="named-image-missing-file",
+        window=ScreenWindow(),
+        resources=TargetCatalog(images=(NamedImage("离开", ImageTemplate("assets/离开.png")),)),
+        steps=(Click(ImageTarget(ImageRef("离开"))),),
+    )
+    app = LocalControlApplication(catalog=ScriptCatalog((script,)), project_root=tmp_path)
+
+    details = app.describe_script("named-image-missing-file")
+
+    assert details.readiness == (
+        ('图片: ImageRef("离开")', "missing", "命名图片已配置，但图片文件不存在或后缀不受支持：assets/离开.png"),
+    )
+
+
 def test_local_control_ignores_unknown_named_image_dependency() -> None:
     """验证未知命名图片不会被伪造成 dry-run 图片路径。"""
     script = Script(
@@ -202,6 +240,22 @@ def test_local_control_ignores_unknown_named_image_dependency() -> None:
     details = app.describe_script("unknown-named-image")
 
     assert details.image_dependencies == ()
+
+
+def test_local_control_reports_unknown_named_image_readiness() -> None:
+    """验证未知命名图片依赖会报告命名图片未配置。"""
+    script = Script(
+        name="unknown-named-image",
+        window=ScreenWindow(),
+        steps=(Click(ImageTarget(ImageRef("缺失"))),),
+    )
+    app = LocalControlApplication(catalog=ScriptCatalog((script,)))
+
+    details = app.describe_script("unknown-named-image")
+
+    assert details.readiness == (
+        ('图片: ImageRef("缺失")', "missing", "命名图片未配置"),
+    )
 
 
 def test_local_control_describes_missing_script_dependencies(tmp_path) -> None:

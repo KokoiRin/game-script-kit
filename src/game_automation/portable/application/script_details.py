@@ -60,6 +60,7 @@ def describe_script_details(
         image_dependencies=_collect_image_dependencies(script.steps, resources=script.resources),
         readiness=_describe_readiness(
             script.steps,
+            resources=script.resources,
             asset_root=asset_root,
             supported_image_suffixes=supported_image_suffixes,
             state_names=state_names,
@@ -144,6 +145,7 @@ def _describe_dependencies(steps: tuple[Step, ...]) -> tuple[str, ...]:
 def _describe_readiness(
     steps: tuple[Step, ...],
     *,
+    resources: TargetCatalog,
     asset_root: Path,
     supported_image_suffixes: frozenset[str],
     state_names: tuple[str, ...] | None,
@@ -153,14 +155,14 @@ def _describe_readiness(
     for dependency in _describe_dependencies(steps):
         if dependency.startswith("状态: "):
             checks.append(_screen_state_readiness(dependency, state_names=state_names))
-        elif dependency.startswith("图片: "):
-            checks.append(
-                _image_readiness(
-                    dependency,
-                    asset_root=asset_root,
-                    supported_image_suffixes=supported_image_suffixes,
-                )
-            )
+    checks.extend(
+        _image_readiness(
+            dependency,
+            asset_root=asset_root,
+            supported_image_suffixes=supported_image_suffixes,
+        )
+        for dependency in _collect_image_readiness_dependencies(steps, resources=resources)
+    )
     return tuple(dict.fromkeys(checks))
 
 
@@ -266,6 +268,92 @@ def _append_resolved_image_dependency(
         return
 
 
+@dataclass(frozen=True, slots=True)
+class _ImageReadinessDependency:
+    label: str
+    template: ImageTemplate | None
+    named: bool = False
+
+
+def _collect_image_readiness_dependencies(
+    steps: tuple[Step, ...],
+    *,
+    resources: TargetCatalog,
+) -> tuple[_ImageReadinessDependency, ...]:
+    """按脚本阅读顺序收集图片依赖检查项。"""
+    dependencies: list[_ImageReadinessDependency] = []
+    for step in steps:
+        _collect_step_image_readiness_dependencies(step, dependencies, resources=resources)
+    return tuple(dict.fromkeys(dependencies))
+
+
+def _collect_step_image_readiness_dependencies(
+    step: Step,
+    dependencies: list[_ImageReadinessDependency],
+    *,
+    resources: TargetCatalog,
+) -> None:
+    """收集单个步骤内图片依赖检查项。"""
+    if isinstance(step, Click):
+        _collect_target_image_readiness_dependencies(step.point, dependencies, resources=resources)
+        return
+    if isinstance(step, If):
+        _collect_condition_image_readiness_dependencies(step.condition, dependencies, resources=resources)
+        for child in (*step.then_steps, *step.else_steps):
+            _collect_step_image_readiness_dependencies(child, dependencies, resources=resources)
+        return
+    if isinstance(step, Repeat):
+        for child in step.steps:
+            _collect_step_image_readiness_dependencies(child, dependencies, resources=resources)
+        return
+    if isinstance(step, WaitUntil):
+        _collect_condition_image_readiness_dependencies(step.condition, dependencies, resources=resources)
+
+
+def _collect_condition_image_readiness_dependencies(
+    condition,
+    dependencies: list[_ImageReadinessDependency],
+    *,
+    resources: TargetCatalog,
+) -> None:
+    """收集条件中的图片依赖检查项。"""
+    if isinstance(condition, ImageExists):
+        dependencies.append(_image_readiness_dependency(condition.template, resources=resources))
+
+
+def _collect_target_image_readiness_dependencies(
+    target,
+    dependencies: list[_ImageReadinessDependency],
+    *,
+    resources: TargetCatalog,
+) -> None:
+    """收集点击目标中的图片依赖检查项。"""
+    if isinstance(target, ImageTarget):
+        dependencies.append(_image_readiness_dependency(target.template, resources=resources))
+        return
+    if isinstance(target, OffsetTarget):
+        _collect_target_image_readiness_dependencies(target.base, dependencies, resources=resources)
+
+
+def _image_readiness_dependency(
+    image: ImageTemplate | ImageRef,
+    *,
+    resources: TargetCatalog,
+) -> _ImageReadinessDependency:
+    """把图片引用转换成依赖检查项。"""
+    label = f"图片: {_describe_image(image)}"
+    if isinstance(image, ImageRef):
+        try:
+            return _ImageReadinessDependency(
+                label=label,
+                template=resources.resolve_image(image),
+                named=True,
+            )
+        except LookupError:
+            return _ImageReadinessDependency(label=label, template=None, named=True)
+    return _ImageReadinessDependency(label=label, template=image)
+
+
 def _screen_state_readiness(
     dependency: str,
     *,
@@ -281,29 +369,34 @@ def _screen_state_readiness(
 
 
 def _image_readiness(
-    dependency: str,
+    dependency: _ImageReadinessDependency,
     *,
     asset_root: Path,
     supported_image_suffixes: frozenset[str],
 ) -> tuple[str, str, str]:
     """检查脚本引用的 assets 图片是否存在。"""
-    image = dependency.removeprefix("图片: ")
-    image_path = Path(image)
+    if dependency.template is None:
+        return dependency.label, "missing", "命名图片未配置"
+    image_path = Path(dependency.template.path)
     if (
         image_path.is_absolute()
         or image_path.parts[:1] != (asset_root.name,)
         or ".." in image_path.parts
     ):
-        return dependency, "unknown", "图片不在项目 assets 目录，无法确认"
+        return dependency.label, "unknown", "图片不在项目 assets 目录，无法确认"
     candidate = (asset_root.parent / image_path).resolve()
     resolved_asset_root = asset_root.resolve()
     try:
         candidate.relative_to(resolved_asset_root)
     except ValueError:
-        return dependency, "unknown", "图片不在项目 assets 目录，无法确认"
+        return dependency.label, "unknown", "图片不在项目 assets 目录，无法确认"
     if candidate.is_file() and candidate.suffix.lower() in supported_image_suffixes:
-        return dependency, "ok", "图片文件可用"
-    return dependency, "missing", "图片文件不存在或后缀不受支持"
+        if dependency.named:
+            return dependency.label, "ok", f"命名图片已配置，图片文件可用：{dependency.template.path}"
+        return dependency.label, "ok", "图片文件可用"
+    if dependency.named:
+        return dependency.label, "missing", f"命名图片已配置，但图片文件不存在或后缀不受支持：{dependency.template.path}"
+    return dependency.label, "missing", "图片文件不存在或后缀不受支持"
 
 
 def _collect_step_dependencies(step: Step, dependencies: list[str]) -> None:
