@@ -316,6 +316,46 @@ def test_local_control_lists_image_assets_from_project_assets_folder(tmp_path) -
     assert app.list_image_assets() == ("button.jpg", "start.png")
 
 
+def test_local_control_lists_screen_state_names_from_config(tmp_path) -> None:
+    """验证 UI 用例按配置顺序列出界面状态并去重。"""
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    (assets / "screen-states.json").write_text(
+        """
+        {
+          "groups": [
+            {"state": "主页", "searches": []},
+            {"state": "人物", "searches": []},
+            {"state": "主页", "searches": []}
+          ]
+        }
+        """,
+        encoding="utf-8",
+    )
+
+    app = LocalControlApplication(project_root=tmp_path)
+
+    assert app.list_screen_state_names() == ("主页", "人物")
+
+
+def test_local_control_lists_no_screen_state_names_without_config(tmp_path) -> None:
+    """验证缺少状态配置时 UI 状态候选为空。"""
+    (tmp_path / "assets").mkdir()
+    app = LocalControlApplication(project_root=tmp_path)
+
+    assert app.list_screen_state_names() == ()
+
+
+def test_local_control_lists_no_screen_state_names_for_invalid_config(tmp_path) -> None:
+    """验证非法状态配置不会阻断 UI 初始化。"""
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    (assets / "screen-states.json").write_text('{"groups": "bad"}', encoding="utf-8")
+    app = LocalControlApplication(project_root=tmp_path)
+
+    assert app.list_screen_state_names() == ()
+
+
 def test_local_control_clicks_selected_image_asset_in_dry_run(tmp_path) -> None:
     """验证 UI 用例可把 assets 里的图片作为目标执行查找并点击脚本。"""
     assets = tmp_path / "assets"

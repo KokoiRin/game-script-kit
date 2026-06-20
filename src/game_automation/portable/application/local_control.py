@@ -23,6 +23,7 @@ from game_automation.portable.application.script_run import (
     run_script,
 )
 from game_automation.portable.application.screen_state_config import load_screen_state_candidates
+from game_automation.portable.application.screen_state_config import load_screen_state_names
 from game_automation.portable.application.screen_state_config import load_screen_state_regions
 from game_automation.portable.domain import Click, ImageTarget, ImageTemplate, ScreenWindow, Script
 from game_automation.portable.domain import NamedRegion, Point, Rect, ScreenStateCandidate, ScreenStateProbeResult
@@ -282,6 +283,14 @@ class LocalControlApplication:
                 if path.is_file() and path.suffix.lower() in IMAGE_ASSET_SUFFIXES
             )
         )
+
+    def list_screen_state_names(self) -> tuple[str, ...]:
+        """列出状态配置中的界面状态名称，配置不可用时返回空列表。"""
+        try:
+            names = load_screen_state_names(self._image_asset_root() / SCREEN_STATE_CONFIG_NAME)
+        except ValueError:
+            return ()
+        return () if names is None else names
 
     def run_named_script(
         self,

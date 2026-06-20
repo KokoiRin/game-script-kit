@@ -4,6 +4,7 @@
     const dryRunCheckbox = document.querySelector("#dry-run-enabled");
     const colorInput = document.querySelector("#dry-run-color");
     const dryRunScreenStateInput = document.querySelector("#dry-run-screen-state");
+    const screenStateSuggestions = document.querySelector("#screen-state-suggestions");
     const statusEl = document.querySelector("#status");
     const outputEl = document.querySelector("#output");
     const runScriptButton = document.querySelector("#run-script");
@@ -150,6 +151,17 @@
         imageAssetSelect.appendChild(option);
       }
       setBusy(false);
+    }
+
+    async function loadScreenStateNames() {
+      const response = await fetch("/api/screen-state-names");
+      const payload = await response.json();
+      screenStateSuggestions.innerHTML = "";
+      for (const state of payload.states || []) {
+        const option = document.createElement("option");
+        option.value = state;
+        screenStateSuggestions.appendChild(option);
+      }
     }
 
     async function runScript() {
@@ -326,3 +338,4 @@
     stopScreenStateProbeButton.addEventListener("click", stopScreenStateProbe);
     loadScripts();
     loadImageAssets();
+    loadScreenStateNames();

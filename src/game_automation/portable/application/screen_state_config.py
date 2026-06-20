@@ -88,6 +88,28 @@ def load_screen_state_regions(config_path: Path) -> tuple[NamedRegion, ...] | No
     return _parse_regions(data.get("regions", {}))
 
 
+def load_screen_state_names(config_path: Path) -> tuple[str, ...] | None:
+    """读取状态配置中的状态名称并按首次出现顺序去重。"""
+    data = _load_screen_state_config(config_path)
+    if data is None:
+        return None
+
+    groups = data.get("groups")
+    if not isinstance(groups, list) or not groups:
+        raise ValueError("screen state config groups must be a non-empty list")
+
+    names = []
+    seen = set()
+    for group in groups:
+        if not isinstance(group, dict):
+            raise ValueError("screen state group must be an object")
+        state = _required_text(group, "state", "screen state group state")
+        if state not in seen:
+            seen.add(state)
+            names.append(state)
+    return tuple(names)
+
+
 def _load_screen_state_config(config_path: Path) -> dict[str, Any] | None:
     """读取状态配置 JSON object，不存在时返回 None。"""
     if not config_path.exists():

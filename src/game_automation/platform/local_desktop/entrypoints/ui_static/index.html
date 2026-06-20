@@ -32,7 +32,8 @@
         </label>
         <label>
           模拟状态
-          <input id="dry-run-screen-state" value="未知">
+          <input id="dry-run-screen-state" value="未知" list="screen-state-suggestions">
+          <datalist id="screen-state-suggestions"></datalist>
         </label>
         <button id="run-script" type="button">运行脚本</button>
         <button class="secondary" id="stop-script" type="button" disabled>停止</button>

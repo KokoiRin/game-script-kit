@@ -48,6 +48,8 @@ def test_local_ui_serves_control_page() -> None:
     assert 'id="script-select"' in html
     assert 'id="dry-run-enabled" type="checkbox" checked' in html
     assert 'id="dry-run-screen-state"' in html
+    assert 'list="screen-state-suggestions"' in html
+    assert 'id="screen-state-suggestions"' in html
     assert 'id="run-script"' in html
     assert 'id="stop-script"' in html
     assert 'id="image-asset-select"' in html
@@ -89,6 +91,8 @@ def test_local_ui_serves_static_assets() -> None:
     assert "resize: vertical" in css
     assert 'document.querySelector("#screen-state-confidence")' in script
     assert 'document.querySelector("#dry-run-screen-state")' in script
+    assert 'document.querySelector("#screen-state-suggestions")' in script
+    assert 'fetch("/api/screen-state-names"' in script
     assert 'fetch("/api/start-screen-state-probe"' in script
     assert 'fetch("/api/capture-region-diagnostics"' in script
 
@@ -110,6 +114,22 @@ def test_local_ui_lists_image_assets_over_http() -> None:
         "asset_folder": "assets",
         "assets": ["start.png", "confirm.webp"],
     }
+
+
+def test_local_ui_lists_screen_state_names_over_http() -> None:
+    """验证 UI HTTP 接口可以返回界面状态候选。"""
+    app = FakeControlApplication()
+    server = create_local_control_server(host="127.0.0.1", port=0, app=app)
+    thread = threading.Thread(target=server.serve_forever)
+    thread.start()
+    try:
+        payload = _request_json(server.server_address, "GET", "/api/screen-state-names")
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+    assert payload == {"states": ["主页", "人物"]}
 
 
 def test_local_ui_runs_script_over_http() -> None:
@@ -440,6 +460,7 @@ class FakeControlApplication:
         self.probe_stop_requests = 0
 
     def list_scripts(self) -> tuple[str, ...]:
+        """返回 fake 脚本列表。"""
         return ("conditional-color-demo",)
 
     def image_asset_folder_label(self) -> str:
@@ -449,6 +470,10 @@ class FakeControlApplication:
     def list_image_assets(self) -> tuple[str, ...]:
         """返回 fake 图片资源列表。"""
         return ("start.png", "confirm.webp")
+
+    def list_screen_state_names(self) -> tuple[str, ...]:
+        """返回 fake 界面状态候选。"""
+        return ("主页", "人物")
 
     def start_named_script(
         self,
