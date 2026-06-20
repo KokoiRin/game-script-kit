@@ -50,6 +50,7 @@ def test_local_ui_serves_control_page() -> None:
     assert 'id="dry-run-screen-state"' in html
     assert 'list="screen-state-suggestions"' in html
     assert 'id="screen-state-suggestions"' in html
+    assert 'id="use-probed-screen-state"' in html
     assert 'id="run-script"' in html
     assert 'id="stop-script"' in html
     assert 'id="image-asset-select"' in html
@@ -87,11 +88,16 @@ def test_local_ui_serves_static_assets() -> None:
         server.server_close()
 
     assert ".screen-state-toolbar" in css
+    assert "grid-template-columns: minmax(180px, 1fr) 120px 140px 140px auto auto auto" in css
     assert "height: 280px" in css
     assert "resize: vertical" in css
     assert 'document.querySelector("#screen-state-confidence")' in script
     assert 'document.querySelector("#dry-run-screen-state")' in script
     assert 'document.querySelector("#screen-state-suggestions")' in script
+    assert 'document.querySelector("#use-probed-screen-state")' in script
+    assert 'latestScreenState = state' in script
+    assert 'dryRunScreenStateInput.value = latestScreenState' in script
+    assert "没有可用探测状态" in script
     assert 'fetch("/api/screen-state-names"' in script
     assert 'fetch("/api/start-screen-state-probe"' in script
     assert 'fetch("/api/capture-region-diagnostics"' in script
