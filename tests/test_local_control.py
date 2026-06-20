@@ -23,6 +23,7 @@ from game_automation.portable.domain import (
     NamedImage,
     NamedImageSearch,
     Point,
+    PointRef,
     Rect,
     SearchRef,
     Repeat,
@@ -293,6 +294,24 @@ def test_local_control_describes_screen_state_waits(tmp_path) -> None:
     assert details.state_waits == ("主页",)
     assert details.state_dependencies == ("主页",)
     assert details.state_decisions == ()
+
+
+def test_local_control_describes_point_dependencies() -> None:
+    """验证脚本详情会结构化收集命名点位依赖并忽略裸坐标。"""
+    script = Script(
+        name="point-alias-script",
+        window=ScreenWindow(),
+        steps=(
+            Click(PointRef("头像")),
+            Repeat(times=2, steps=(Click(PointRef("头像")), Click(Point(100, 200)))),
+        ),
+    )
+    app = LocalControlApplication(catalog=ScriptCatalog((script,)))
+
+    details = app.describe_script("point-alias-script")
+
+    assert details.dependencies == ("点位: 头像",)
+    assert details.point_dependencies == ("头像",)
 
 
 def test_local_control_describes_named_image_dependencies() -> None:

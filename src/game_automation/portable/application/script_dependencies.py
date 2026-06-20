@@ -41,6 +41,7 @@ ImageDependencySource = ImageTemplate | ImageRef | ImageSearchSpec | SearchRef
 class ScriptDependencyDetails:
     dependencies: tuple[str, ...] = ()
     state_dependencies: tuple[str, ...] = ()
+    point_dependencies: tuple[str, ...] = ()
     image_dependencies: tuple[str, ...] = ()
     readiness: tuple[tuple[str, str, str], ...] = ()
 
@@ -57,6 +58,7 @@ def describe_script_dependencies(
     return ScriptDependencyDetails(
         dependencies=dependencies,
         state_dependencies=_collect_state_dependencies(script.steps),
+        point_dependencies=_collect_point_dependencies(script.steps),
         image_dependencies=_collect_image_dependencies(script.steps, resources=script.resources),
         readiness=_describe_readiness(
             script.steps,
@@ -129,6 +131,37 @@ def _collect_condition_state_dependencies(condition, states: list[str]) -> None:
     """收集条件中的界面状态依赖。"""
     if isinstance(condition, ScreenStateIs):
         states.append(condition.state)
+
+
+def _collect_point_dependencies(steps: tuple[Step, ...]) -> tuple[str, ...]:
+    """按脚本阅读顺序收集去重后的命名点位依赖。"""
+    points: list[str] = []
+    for step in steps:
+        _collect_step_point_dependencies(step, points)
+    return tuple(dict.fromkeys(points))
+
+
+def _collect_step_point_dependencies(step: Step, points: list[str]) -> None:
+    """收集单个步骤内直接或嵌套点击目标引用的命名点位。"""
+    if isinstance(step, Click):
+        _collect_target_point_dependencies(step.point, points)
+        return
+    if isinstance(step, If):
+        for child in (*step.then_steps, *step.else_steps):
+            _collect_step_point_dependencies(child, points)
+        return
+    if isinstance(step, Repeat):
+        for child in step.steps:
+            _collect_step_point_dependencies(child, points)
+
+
+def _collect_target_point_dependencies(target, points: list[str]) -> None:
+    """收集点击目标中的命名点位依赖。"""
+    if isinstance(target, PointRef):
+        points.append(target.name)
+        return
+    if isinstance(target, OffsetTarget):
+        _collect_target_point_dependencies(target.base, points)
 
 
 def _collect_image_dependencies(

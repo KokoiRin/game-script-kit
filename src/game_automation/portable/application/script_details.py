@@ -40,6 +40,7 @@ class ScriptDetailsResult:
     steps: tuple[str, ...] = ()
     dependencies: tuple[str, ...] = ()
     state_dependencies: tuple[str, ...] = ()
+    point_dependencies: tuple[str, ...] = ()
     state_waits: tuple[str, ...] = ()
     state_decisions: tuple[tuple[str, tuple[str, ...], tuple[str, ...]], ...] = ()
     image_dependencies: tuple[str, ...] = ()
@@ -67,6 +68,7 @@ def describe_script_details(
         steps=_describe_steps(script.steps),
         dependencies=dependency_details.dependencies,
         state_dependencies=dependency_details.state_dependencies,
+        point_dependencies=dependency_details.point_dependencies,
         state_waits=_describe_state_waits(script.steps),
         state_decisions=_describe_state_decisions(script.steps),
         image_dependencies=dependency_details.image_dependencies,

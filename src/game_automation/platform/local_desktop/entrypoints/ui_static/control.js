@@ -317,6 +317,14 @@
           lines.push(`  ${renderStateWaitPreview(state)}`);
         }
       }
+      lines.push("点位依赖：");
+      if ((payload.point_dependencies || []).length === 0) {
+        lines.push("- 没有点位依赖");
+      } else {
+        for (const point of payload.point_dependencies || []) {
+          lines.push(`- ${point}`);
+        }
+      }
       lines.push("依赖：");
       if ((payload.dependencies || []).length === 0) {
         lines.push("- 无");
