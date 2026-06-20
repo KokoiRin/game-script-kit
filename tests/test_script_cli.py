@@ -183,6 +183,133 @@ def test_star_cli_runs_conditional_screen_state_demo_with_custom_dry_run_state(c
     assert output == ["click Point(x=100, y=200)"]
 
 
+def test_star_cli_runs_dry_run_with_probed_screen_state(monkeypatch, capsys) -> None:
+    """验证 CLI dry-run 可先探测当前状态再运行状态条件脚本。"""
+    calls = []
+
+    class FakeApp:
+        def probe_screen_state_once(self, *, min_confidence=0.8, logger=None):
+            """返回固定当前状态。"""
+            calls.append(min_confidence)
+            return ScreenStateProbeResult(
+                candidates=(
+                    ScreenStateCandidateResult(
+                        candidate=ScreenStateCandidate("主页", ImageTemplate("assets/主页.png")),
+                        match=ImageMatch(Rect(0, 0, 10, 10), confidence=0.9),
+                        elapsed_ms=1.0,
+                    ),
+                ),
+                elapsed_ms=1.0,
+            )
+
+    monkeypatch.setattr(cli, "build_local_control_application", lambda: FakeApp())
+
+    assert main(["run", "conditional-screen-state-demo", "--dry-run", "--dry-run-probed-screen-state"]) == 0
+
+    captured = capsys.readouterr()
+    assert captured.err == ""
+    assert calls == [0.8]
+    assert captured.out.splitlines() == ["click Point(x=100, y=200)"]
+
+
+def test_star_cli_rejects_probed_screen_state_without_dry_run(monkeypatch, capsys) -> None:
+    """验证探测状态 dry-run 开关不能用于真实运行。"""
+    calls = []
+    monkeypatch.setattr(cli, "run_script_on_local_desktop", lambda *args, **kwargs: calls.append("run"))
+
+    assert main(["run", "conditional-screen-state-demo", "--dry-run-probed-screen-state"]) == 2
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "--dry-run-probed-screen-state requires --dry-run" in captured.err
+    assert calls == []
+
+
+def test_star_cli_rejects_conflicting_dry_run_screen_state_sources(monkeypatch, capsys) -> None:
+    """验证手工状态和探测状态不能同时作为 dry-run 状态来源。"""
+    calls = []
+    monkeypatch.setattr(cli, "run_script_on_local_desktop", lambda *args, **kwargs: calls.append("run"))
+
+    assert (
+        main(
+            [
+                "run",
+                "conditional-screen-state-demo",
+                "--dry-run",
+                "--dry-run-screen-state",
+                "主页",
+                "--dry-run-probed-screen-state",
+            ]
+        )
+        == 2
+    )
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "--dry-run-probed-screen-state conflicts with --dry-run-screen-state" in captured.err
+    assert calls == []
+
+
+def test_star_cli_reports_probed_screen_state_configuration_error(monkeypatch, capsys) -> None:
+    """验证探测状态配置错误会阻止 dry-run 脚本执行。"""
+    calls = []
+
+    class FakeApp:
+        def probe_screen_state_once(self, *, min_confidence=0.8, logger=None):
+            """模拟状态配置非法。"""
+            raise ValueError("bad screen state config")
+
+    monkeypatch.setattr(cli, "build_local_control_application", lambda: FakeApp())
+    monkeypatch.setattr(cli, "run_script_on_local_desktop", lambda *args, **kwargs: calls.append("run"))
+
+    assert main(["run", "conditional-screen-state-demo", "--dry-run", "--dry-run-probed-screen-state"]) == 2
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "screen state probe configuration failed: bad screen state config" in captured.err
+    assert calls == []
+
+
+def test_star_cli_reports_probed_screen_state_runtime_error(monkeypatch, capsys) -> None:
+    """验证探测状态运行错误会阻止 dry-run 脚本执行。"""
+    calls = []
+
+    class FakeApp:
+        def probe_screen_state_once(self, *, min_confidence=0.8, logger=None):
+            """模拟截图或图像定位失败。"""
+            raise RuntimeError("image locator unavailable")
+
+    monkeypatch.setattr(cli, "build_local_control_application", lambda: FakeApp())
+    monkeypatch.setattr(cli, "run_script_on_local_desktop", lambda *args, **kwargs: calls.append("run"))
+
+    assert main(["run", "conditional-screen-state-demo", "--dry-run", "--dry-run-probed-screen-state"]) == 1
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "screen state probe failed: image locator unavailable" in captured.err
+    assert calls == []
+
+
+def test_star_cli_does_not_probe_screen_state_for_unknown_script(monkeypatch, capsys) -> None:
+    """验证未知脚本不会先触发真实界面状态探测。"""
+    calls = []
+
+    class FakeApp:
+        def probe_screen_state_once(self, *, min_confidence=0.8, logger=None):
+            """记录不应该发生的探测调用。"""
+            calls.append("probe")
+            return ScreenStateProbeResult(candidates=(), elapsed_ms=1.0)
+
+    monkeypatch.setattr(cli, "build_local_control_application", lambda: FakeApp())
+
+    assert main(["run", "missing", "--dry-run", "--dry-run-probed-screen-state"]) == 1
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "unknown script: missing" in captured.err
+    assert calls == []
+
+
 def test_star_cli_reports_invalid_dry_run_color(capsys) -> None:
     """验证非法 dry-run 颜色会作为运行配置错误报告。"""
     assert main(["run", "conditional-color-demo", "--dry-run", "--dry-run-color", "bad"]) == 2
