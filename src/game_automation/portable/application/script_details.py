@@ -37,6 +37,7 @@ class ScriptDetailsResult:
     steps: tuple[str, ...] = ()
     dependencies: tuple[str, ...] = ()
     state_dependencies: tuple[str, ...] = ()
+    image_dependencies: tuple[str, ...] = ()
     readiness: tuple[tuple[str, str, str], ...] = ()
     stderr: str = ""
 
@@ -55,6 +56,7 @@ def describe_script_details(
         steps=_describe_steps(script.steps),
         dependencies=_describe_dependencies(script.steps),
         state_dependencies=_collect_state_dependencies(script.steps),
+        image_dependencies=_collect_image_dependencies(script.steps),
         readiness=_describe_readiness(
             script.steps,
             asset_root=asset_root,
@@ -188,6 +190,47 @@ def _collect_condition_state_dependencies(condition, states: list[str]) -> None:
     """收集条件中的界面状态依赖。"""
     if isinstance(condition, ScreenStateIs):
         states.append(condition.state)
+
+
+def _collect_image_dependencies(steps: tuple[Step, ...]) -> tuple[str, ...]:
+    """按脚本阅读顺序收集可直接传给 dry-run 的图片模板路径。"""
+    images: list[str] = []
+    for step in steps:
+        _collect_step_image_dependencies(step, images)
+    return tuple(dict.fromkeys(images))
+
+
+def _collect_step_image_dependencies(step: Step, images: list[str]) -> None:
+    """收集单个步骤内直接或嵌套引用的图片模板路径。"""
+    if isinstance(step, Click):
+        _collect_target_image_dependencies(step.point, images)
+        return
+    if isinstance(step, If):
+        _collect_condition_image_dependencies(step.condition, images)
+        for child in (*step.then_steps, *step.else_steps):
+            _collect_step_image_dependencies(child, images)
+        return
+    if isinstance(step, Repeat):
+        for child in step.steps:
+            _collect_step_image_dependencies(child, images)
+        return
+    if isinstance(step, WaitUntil):
+        _collect_condition_image_dependencies(step.condition, images)
+
+
+def _collect_condition_image_dependencies(condition, images: list[str]) -> None:
+    """收集条件中的直接图片模板路径。"""
+    if isinstance(condition, ImageExists) and isinstance(condition.template, ImageTemplate):
+        images.append(condition.template.path)
+
+
+def _collect_target_image_dependencies(target, images: list[str]) -> None:
+    """收集点击目标中的直接图片模板路径。"""
+    if isinstance(target, ImageTarget) and isinstance(target.template, ImageTemplate):
+        images.append(target.template.path)
+        return
+    if isinstance(target, OffsetTarget):
+        _collect_target_image_dependencies(target.base, images)
 
 
 def _screen_state_readiness(

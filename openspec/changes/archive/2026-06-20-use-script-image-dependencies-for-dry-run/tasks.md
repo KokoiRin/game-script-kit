@@ -1,0 +1,4 @@
+- [x] 扩展脚本详情 application 结果，收集并返回去重后的 `ImageTemplate` 图片依赖路径。
+- [x] 扩展本地 UI application 与 HTTP payload，使脚本运行请求支持 `dry_run_images` 并仅在 dry-run 下传递。
+- [x] 扩展前端脚本详情缓存和运行请求，自动提交当前脚本图片依赖。
+- [x] 补充 application、HTTP adapter、静态 UI 测试，并运行 OpenSpec change 校验。

@@ -34,6 +34,7 @@
     let activeScreenStateProbe = false;
     let latestScreenState = "未知";
     let scriptStateDependencies = [];
+    let scriptImageDependencies = [];
 
     function setBusy(isBusy) {
       runScriptButton.disabled = isBusy;
@@ -170,6 +171,7 @@
       if (!scriptSelect.value) {
         scriptDetails.textContent = "";
         scriptStateDependencies = [];
+        scriptImageDependencies = [];
         return;
       }
       const response = await fetch(`/api/script-details?name=${encodeURIComponent(scriptSelect.value)}`);
@@ -179,11 +181,13 @@
 
     function renderScriptDetails(payload) {
       scriptStateDependencies = [];
+      scriptImageDependencies = [];
       if (payload.exit_code !== 0) {
         scriptDetails.textContent = payload.stderr || "脚本详情读取失败";
         return;
       }
       scriptStateDependencies = payload.state_dependencies || [];
+      scriptImageDependencies = payload.image_dependencies || [];
       const lines = [`脚本：${payload.name}`, "步骤："];
       for (const step of payload.steps || []) {
         lines.push(`- ${step}`);
@@ -255,7 +259,8 @@
             name: scriptSelect.value,
             dry_run: dryRunCheckbox.checked,
             dry_run_color: colorInput.value,
-            dry_run_screen_state: dryRunScreenStateInput.value
+            dry_run_screen_state: dryRunScreenStateInput.value,
+            dry_run_images: scriptImageDependencies
           })
         });
         const result = await response.json();
