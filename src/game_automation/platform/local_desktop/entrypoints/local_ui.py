@@ -66,6 +66,9 @@ def create_local_control_server(
                     }
                 )
                 return
+            if path == "/api/screen-state-names":
+                self._send_json({"states": list(control_app.list_screen_state_names())})
+                return
             if path == "/api/script-run":
                 self._send_json(_status_to_payload(control_app.current_script_run()))
                 return
