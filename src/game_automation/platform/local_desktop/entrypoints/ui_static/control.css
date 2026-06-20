@@ -158,6 +158,13 @@
       font-size: 13px;
       line-height: 1.45;
     }
+    .screen-state-candidates {
+      min-height: 22px;
+      color: #15171a;
+      font-size: 13px;
+      line-height: 1.5;
+      white-space: pre-wrap;
+    }
     pre {
       height: 280px;
       margin: 0;

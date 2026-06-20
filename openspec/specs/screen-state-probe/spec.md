@@ -125,3 +125,16 @@ TBD - created by archiving change add-screen-state-probe-ui. Update Purpose afte
 - **WHEN** `assets/screen-states.json` 引用不存在图片或非法区域
 - **THEN** 系统返回非零摘要结果和清晰错误消息
 
+### Requirement: 界面状态循环探测保留最近候选结果
+系统 SHALL 在后台界面状态循环探测会话中保留最近一轮候选结果摘要。摘要 MUST 至少包含候选名称、结果状态、耗时毫秒和命中置信度；没有完成探测轮次时，候选结果摘要 MUST 为空。
+
+#### Scenario: 完成探测后快照包含候选结果
+- **WHEN** 后台界面状态探测完成一轮，候选 `主页` 命中且候选 `人物` 被早停跳过
+- **THEN** 会话状态快照包含 `主页` 和 `人物` 的最近候选结果
+- **AND** `主页` 的结果状态为命中
+- **AND** `人物` 的结果状态为跳过
+
+#### Scenario: 尚未完成探测时候选结果为空
+- **WHEN** 后台界面状态探测会话刚启动但还没有完成任何一轮
+- **THEN** 会话状态快照中的最近候选结果为空
+

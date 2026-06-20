@@ -13,6 +13,7 @@ import threading
 from game_automation.portable.application.local_control import (
     ControlResult,
     ScreenStateConfigSummaryResult,
+    ScreenStateProbeCandidateSummary,
     ScreenStateProbeStats,
     ScreenStateProbeStatus,
     ScriptDetailsResult,
@@ -80,6 +81,7 @@ def test_local_ui_serves_control_page() -> None:
     assert 'id="screen-state-current"' in html
     assert 'id="screen-state-config-summary"' in html
     assert 'id="screen-state-stats"' in html
+    assert 'id="screen-state-candidates"' in html
     assert 'id="screen-state-log"' in html
     assert "运行测试" in html
     assert "模拟状态" in html
@@ -110,6 +112,7 @@ def test_local_ui_serves_static_assets() -> None:
     assert 'document.querySelector("#screen-state-confidence")' in script
     assert 'document.querySelector("#screen-state-config-summary")' in script
     assert 'document.querySelector("#screen-state-stats")' in script
+    assert 'document.querySelector("#screen-state-candidates")' in script
     assert 'document.querySelector("#script-details")' in script
     assert 'document.querySelector("#dry-run-screen-state")' in script
     assert 'document.querySelector("#screen-state-suggestions")' in script
@@ -140,6 +143,11 @@ def test_local_ui_serves_static_assets() -> None:
     assert 'fetch("/api/start-screen-state-probe"' in script
     assert 'fetch("/api/capture-region-diagnostics"' in script
     assert "renderScreenStateStats" in script
+    assert "renderScreenStateCandidates" in script
+    assert "暂无候选结果" in script
+    assert "命中" in script
+    assert "跳过" in script
+    assert "未命中" in script
     assert "renderScreenStateConfigSummary" in script
     assert "未配置状态识别" in script
     assert "命中次数：" in script
@@ -376,6 +384,7 @@ def test_local_ui_starts_screen_state_probe_over_http() -> None:
             "matched_counts": {},
             "skipped_counts": {},
         },
+        "candidates": [],
     }
 
 
@@ -405,6 +414,20 @@ def test_local_ui_gets_screen_state_probe_status_over_http() -> None:
             "matched_counts": {"主页": 2, "人物": 1},
             "skipped_counts": {"技能": 2},
         },
+        "candidates": [
+            {
+                "name": "主页",
+                "status": "matched",
+                "elapsed_ms": 4.0,
+                "confidence": 0.91,
+            },
+            {
+                "name": "人物",
+                "status": "skipped",
+                "elapsed_ms": 0.0,
+                "confidence": None,
+            },
+        ],
     }
 
 
@@ -434,6 +457,7 @@ def test_local_ui_stops_screen_state_probe_over_http() -> None:
             "matched_counts": {},
             "skipped_counts": {},
         },
+        "candidates": [],
     }
 
 
@@ -712,6 +736,10 @@ class FakeControlApplication:
                 last_elapsed_ms=18.5,
                 matched_counts=(("主页", 2), ("人物", 1)),
                 skipped_counts=(("技能", 2),),
+            ),
+            candidates=(
+                ScreenStateProbeCandidateSummary("主页", "matched", 4.0, 0.91),
+                ScreenStateProbeCandidateSummary("人物", "skipped", 0.0, None),
             ),
         )
 
