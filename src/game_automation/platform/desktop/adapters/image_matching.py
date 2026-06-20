@@ -14,7 +14,7 @@ from types import ModuleType
 
 from PIL import Image
 
-from game_automation.portable.domain import ImageBatchMatchResult, ImageMatch, ImageTemplate, Rect
+from game_automation.portable.domain import ImageBatchMatchResult, ImageMatch, ImageSearchRequest, ImageTemplate, Rect
 from game_automation.portable.engine.ports import RunLogger, ScreenImageLocator
 
 
@@ -86,13 +86,34 @@ class PyAutoGuiScreenImageLocator(ScreenImageLocator):
     ) -> tuple[ImageBatchMatchResult, ...]:
         """在一次截图中查找多张模板图片。"""
         _validate_min_confidence(min_confidence)
+        return self.locate_requests(
+            tuple(
+                ImageSearchRequest(
+                    template=template,
+                    region=region,
+                    min_confidence=min_confidence,
+                )
+                for template in templates
+            ),
+            logger=logger,
+            stop_on_first_match=stop_on_first_match,
+        )
+
+    def locate_requests(
+        self,
+        requests: tuple[ImageSearchRequest, ...],
+        *,
+        logger: RunLogger | None = None,
+        stop_on_first_match: bool = False,
+    ) -> tuple[ImageBatchMatchResult, ...]:
+        """在一次截图中查找多条图片搜索请求。"""
         try:
             total_started_at = perf_counter()
             cv_started_at = perf_counter()
             cv2, numpy = _load_cv_modules()
             cv_load_ms = _elapsed_ms(cv_started_at)
             screenshot_started_at = perf_counter()
-            screenshot = _capture_screen(self._backend, region=region)
+            screenshot = _capture_screen(self._backend, region=None)
             screenshot_ms = _elapsed_ms(screenshot_started_at)
             results: list[ImageBatchMatchResult] = []
             template_load_ms = 0.0
@@ -100,18 +121,25 @@ class PyAutoGuiScreenImageLocator(ScreenImageLocator):
             screenshot_array_started_at = perf_counter()
             screenshot_array = numpy.array(screenshot.image)
             match_ms += _elapsed_ms(screenshot_array_started_at)
-            for template in templates:
+            for request in requests:
                 template_started_at = perf_counter()
+                template = request.template
                 template_image = self._load_template_image(template, numpy)
                 template_load_ms += _elapsed_ms(template_started_at)
+                search_screen = (
+                    screenshot
+                    if request.region is None
+                    else _crop_captured_screen(screenshot, region=request.region)
+                )
+                search_array = screenshot_array if request.region is None else numpy.array(search_screen.image)
                 match_started_at = perf_counter()
                 match = _locate_template(
                     cv2=cv2,
                     numpy=numpy,
-                    screenshot=screenshot,
-                    screenshot_array=screenshot_array,
+                    screenshot=search_screen,
+                    screenshot_array=search_array,
                     template=template_image,
-                    min_confidence=min_confidence,
+                    min_confidence=request.min_confidence,
                 )
                 one_match_ms = _elapsed_ms(match_started_at)
                 match_ms += one_match_ms
@@ -124,15 +152,14 @@ class PyAutoGuiScreenImageLocator(ScreenImageLocator):
                 )
                 if stop_on_first_match and match is not None:
                     results.extend(
-                        ImageBatchMatchResult.skipped_result(skipped_template)
-                        for skipped_template in templates[len(results) :]
+                        ImageBatchMatchResult.skipped_result(skipped_request.template)
+                        for skipped_request in requests[len(results) :]
                     )
                     break
             batch_results = tuple(results)
             _log_batch_match_stages(
                 logger,
-                templates=templates,
-                region=region,
+                requests=requests,
                 screenshot=screenshot,
                 cv_load_ms=cv_load_ms,
                 screenshot_ms=screenshot_ms,
@@ -255,6 +282,21 @@ def _capture_screen(backend: object, *, region: Rect | None) -> CapturedScreen:
     )
 
 
+def _crop_captured_screen(screenshot: CapturedScreen, *, region: Rect) -> CapturedScreen:
+    """在已截取的全屏图上按鼠标坐标系区域裁剪搜索图。"""
+    left = round(region.left * screenshot.pixels_per_point_x)
+    top = round(region.top * screenshot.pixels_per_point_y)
+    right = round((region.left + region.width) * screenshot.pixels_per_point_x)
+    bottom = round((region.top + region.height) * screenshot.pixels_per_point_y)
+    return CapturedScreen(
+        image=screenshot.image.crop((left, top, right, bottom)),
+        origin_left_pixels=left,
+        origin_top_pixels=top,
+        pixels_per_point_x=screenshot.pixels_per_point_x,
+        pixels_per_point_y=screenshot.pixels_per_point_y,
+    )
+
+
 def _calculate_pixels_per_point(backend: object, screenshot: Image.Image) -> tuple[float, float]:
     """计算截图像素到鼠标坐标点的缩放比例。"""
     pointer_width, pointer_height = _read_pointer_size(backend)
@@ -350,8 +392,7 @@ def _log_match_stages(
 def _log_batch_match_stages(
     logger: RunLogger | None,
     *,
-    templates: tuple[ImageTemplate, ...],
-    region: Rect | None,
+    requests: tuple[ImageSearchRequest, ...],
     screenshot: CapturedScreen,
     cv_load_ms: float,
     screenshot_ms: float,
@@ -365,8 +406,8 @@ def _log_batch_match_stages(
         return
     logger.log(
         "image batch match stages "
-        f"template_count={len(templates)} "
-        f"region={region} "
+        f"template_count={len(requests)} "
+        f"region_count={sum(1 for request in requests if request.region is not None)} "
         f"screenshot_size={screenshot.image.width}x{screenshot.image.height} "
         f"cv_load_ms={cv_load_ms:.2f} "
         f"screenshot_ms={screenshot_ms:.2f} "

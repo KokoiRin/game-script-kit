@@ -11,6 +11,8 @@ from time import perf_counter
 
 from game_automation.portable.domain import (
     ImageBatchMatchResult,
+    ImageSearchRequest,
+    ImageTemplate,
     ScreenStateCandidate,
     ScreenStateCandidateResult,
     ScreenStateProbeResult,
@@ -32,9 +34,8 @@ def probe_screen_state(
         raise RuntimeError("image locator is required for screen state probe")
     total_started_at = clock()
     if batch_image_locator is not None:
-        batch_results = batch_image_locator.locate_many(
-            tuple(candidate.template for candidate in candidates),
-            min_confidence=min_confidence,
+        batch_results = batch_image_locator.locate_requests(
+            tuple(_search_request_from_candidate(candidate, min_confidence) for candidate in candidates),
             logger=logger,
             stop_on_first_match=True,
         )
@@ -48,7 +49,8 @@ def probe_screen_state(
         candidate_started_at = clock()
         match = image_locator.locate(
             candidate.template,
-            min_confidence=min_confidence,
+            region=candidate.search.region,
+            min_confidence=candidate.search.min_confidence or min_confidence,
             logger=logger,
         )
         results.append(
@@ -91,4 +93,18 @@ def _screen_state_results_from_batch(
             skipped=batch_result.skipped,
         )
         for candidate, batch_result in zip(candidates, batch_results, strict=True)
+    )
+
+
+def _search_request_from_candidate(
+    candidate: ScreenStateCandidate,
+    default_min_confidence: float,
+) -> ImageSearchRequest:
+    """把状态候选的搜索规格转换为批量图片定位请求。"""
+    if not isinstance(candidate.search.image, ImageTemplate):
+        raise RuntimeError("screen state candidate image must be resolved before probing")
+    return ImageSearchRequest(
+        template=candidate.search.image,
+        region=candidate.search.region,
+        min_confidence=candidate.search.min_confidence or default_min_confidence,
     )

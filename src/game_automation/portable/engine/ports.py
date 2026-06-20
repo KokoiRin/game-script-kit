@@ -8,7 +8,15 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from game_automation.portable.domain import Color, ImageBatchMatchResult, ImageMatch, ImageTemplate, Point, Rect
+from game_automation.portable.domain import (
+    Color,
+    ImageBatchMatchResult,
+    ImageMatch,
+    ImageSearchRequest,
+    ImageTemplate,
+    Point,
+    Rect,
+)
 
 
 class InputDevice(Protocol):
@@ -53,6 +61,16 @@ class ScreenImageLocator(Protocol):
 
 
 class ScreenImageBatchLocator(Protocol):
+    def locate_requests(
+        self,
+        requests: tuple[ImageSearchRequest, ...],
+        *,
+        logger: RunLogger | None = None,
+        stop_on_first_match: bool = False,
+    ) -> tuple[ImageBatchMatchResult, ...]:
+        """在同一张屏幕截图内查找多条图片搜索请求。"""
+        ...
+
     def locate_many(
         self,
         templates: tuple[ImageTemplate, ...],
