@@ -25,6 +25,7 @@
     const screenStateConfidenceInput = document.querySelector("#screen-state-confidence");
     const screenStateIntervalInput = document.querySelector("#screen-state-interval");
     const screenStateCurrent = document.querySelector("#screen-state-current");
+    const screenStateStats = document.querySelector("#screen-state-stats");
     const screenStateLog = document.querySelector("#screen-state-log");
     const startScreenStateProbeButton = document.querySelector("#start-screen-state-probe");
     const stopScreenStateProbeButton = document.querySelector("#stop-screen-state-probe");
@@ -97,7 +98,28 @@
       } else {
         screenStateCurrent.textContent = `当前状态：${state}，退出码：${result.exit_code}`;
       }
+      screenStateStats.textContent = renderScreenStateStats(result.stats);
       screenStateLog.textContent = `${result.stdout || ""}${result.stderr || ""}`;
+    }
+
+    function renderScreenStateStats(stats) {
+      const probeStats = stats || {};
+      const rounds = probeStats.rounds || 0;
+      const elapsed = probeStats.last_elapsed_ms === null || probeStats.last_elapsed_ms === undefined
+        ? "无"
+        : `${Number(probeStats.last_elapsed_ms).toFixed(2)}ms`;
+      const matched = renderCountMap(probeStats.matched_counts);
+      const skipped = renderCountMap(probeStats.skipped_counts);
+      return `轮数：${rounds}；最近耗时：${elapsed}；命中次数：${matched}；跳过次数：${skipped}`;
+    }
+
+    function renderCountMap(counts) {
+      if (!counts || Object.keys(counts).length === 0) {
+        return "无";
+      }
+      return Object.entries(counts)
+        .map(([name, count]) => `${name} ${count}`)
+        .join("，");
     }
 
     function useProbedScreenState() {
@@ -367,6 +389,7 @@
       activeScreenStateProbe = true;
       setScreenStateBusy(true);
       screenStateCurrent.textContent = "当前状态：启动中";
+      screenStateStats.textContent = "";
       screenStateLog.textContent = "";
       try {
         const response = await fetch("/api/start-screen-state-probe", {

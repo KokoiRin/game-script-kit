@@ -273,6 +273,17 @@ def _probe_status_to_payload(status) -> dict[str, object]:
         "exit_code": status.exit_code,
         "stdout": status.stdout,
         "stderr": status.stderr,
+        "stats": _probe_stats_to_payload(status.stats),
+    }
+
+
+def _probe_stats_to_payload(stats) -> dict[str, object]:
+    """把后台界面探测统计转换成 HTTP JSON payload。"""
+    return {
+        "rounds": stats.rounds,
+        "last_elapsed_ms": stats.last_elapsed_ms,
+        "matched_counts": dict(stats.matched_counts),
+        "skipped_counts": dict(stats.skipped_counts),
     }
 
 

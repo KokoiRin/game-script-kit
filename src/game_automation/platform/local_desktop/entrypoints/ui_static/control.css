@@ -140,6 +140,12 @@
       min-height: 24px;
       font-weight: 600;
     }
+    .screen-state-stats {
+      min-height: 22px;
+      color: #4e5661;
+      font-size: 13px;
+      line-height: 1.45;
+    }
     pre {
       height: 280px;
       margin: 0;

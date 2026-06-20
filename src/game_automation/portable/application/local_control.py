@@ -79,12 +79,21 @@ class ScriptRunStatus:
 
 
 @dataclass(frozen=True, slots=True)
+class ScreenStateProbeStats:
+    rounds: int = 0
+    last_elapsed_ms: float | None = None
+    matched_counts: tuple[tuple[str, int], ...] = ()
+    skipped_counts: tuple[tuple[str, int], ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
 class ScreenStateProbeStatus:
     running: bool
     current_state: str = "未知"
     exit_code: int | None = None
     stdout: str = ""
     stderr: str = ""
+    stats: ScreenStateProbeStats = ScreenStateProbeStats()
 
 
 class _CancellationFlag:
@@ -226,11 +235,25 @@ class _BackgroundScreenStateProbe:
         self._running = True
         self._current_state = "未知"
         self._exit_code: int | None = None
+        self._rounds = 0
+        self._last_elapsed_ms: float | None = None
+        self._matched_counts: dict[str, int] = {}
+        self._skipped_counts: dict[str, int] = {}
 
     def record_result(self, result: ScreenStateProbeResult) -> None:
-        """记录最近一轮界面状态探测结果。"""
+        """记录最近一轮界面状态探测结果并累计会话统计。"""
         with self._lock:
             self._current_state = result.current_state
+            self._rounds += 1
+            self._last_elapsed_ms = result.elapsed_ms
+            if result.known:
+                self._matched_counts[result.current_state] = (
+                    self._matched_counts.get(result.current_state, 0) + 1
+                )
+            for candidate in result.candidates:
+                if candidate.skipped:
+                    name = candidate.candidate.name
+                    self._skipped_counts[name] = self._skipped_counts.get(name, 0) + 1
 
     def finish(self, exit_code: int) -> None:
         """记录后台界面状态探测结束状态。"""
@@ -248,6 +271,12 @@ class _BackgroundScreenStateProbe:
                 exit_code=self._exit_code,
                 stdout=stdout,
                 stderr=stderr,
+                stats=ScreenStateProbeStats(
+                    rounds=self._rounds,
+                    last_elapsed_ms=self._last_elapsed_ms,
+                    matched_counts=tuple(self._matched_counts.items()),
+                    skipped_counts=tuple(self._skipped_counts.items()),
+                ),
             )
 
 
