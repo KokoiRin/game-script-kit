@@ -1181,8 +1181,9 @@ def test_local_control_captures_screen_debug_screenshot(tmp_path) -> None:
     captured_paths = []
 
     def screen_capture(path):
+        """保存一张非黑测试截图。"""
         captured_paths.append(path)
-        path.write_bytes(b"png")
+        Image.new("RGB", (20, 10), "white").save(path)
 
     app = LocalControlApplication(project_root=tmp_path, screen_capture_factory=lambda: screen_capture)
 
@@ -1193,8 +1194,27 @@ def test_local_control_captures_screen_debug_screenshot(tmp_path) -> None:
     assert result.stderr == ""
     assert result.stdout == f"saved screenshot: {screenshot_path}\n"
     assert result.screenshot_path == str(screenshot_path)
-    assert screenshot_path.read_bytes() == b"png"
+    with Image.open(screenshot_path) as screenshot:
+        assert screenshot.size == (20, 10)
     assert captured_paths == [screenshot_path]
+
+
+def test_local_control_warns_when_screen_debug_screenshot_is_black(tmp_path) -> None:
+    """验证普通截图疑似全黑时返回用户可见警告。"""
+
+    def screen_capture(path):
+        """保存一张纯黑测试截图。"""
+        Image.new("RGB", (20, 10), "black").save(path)
+
+    app = LocalControlApplication(project_root=tmp_path, screen_capture_factory=lambda: screen_capture)
+
+    result = app.capture_screen_screenshot()
+
+    screenshot_path = tmp_path / ".star" / "debug" / "screenshots" / "latest-screen.png"
+    assert result.exit_code == 0
+    assert result.stdout == f"saved screenshot: {screenshot_path}\n"
+    assert result.screenshot_path == str(screenshot_path)
+    assert "captured screenshot appears all black" in result.stderr
 
 
 def test_local_control_captures_screen_region_diagnostics(tmp_path) -> None:
@@ -1306,6 +1326,58 @@ def test_local_control_captures_screen_probe_diagnostics(tmp_path) -> None:
         assert diagnostic.getpixel((20, 10)) != (255, 255, 255)
 
 
+def test_local_control_probe_diagnostics_warns_when_raw_screenshot_is_black(tmp_path) -> None:
+    """验证探测诊断复用原始截图全黑警告。"""
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    (assets / "screen-states.json").write_text(
+        """
+        {
+          "groups": [
+            {
+              "state": "主页",
+              "searches": [
+                {"name": "主页标题", "image": "home.png"}
+              ]
+            }
+          ]
+        }
+        """,
+        encoding="utf-8",
+    )
+    Image.new("RGB", (4, 4), "black").save(assets / "home.png")
+
+    class FakeBatchLocator:
+        def locate_requests(self, requests, *, logger=None, stop_on_first_match=False):
+            """返回未命中候选的最佳位置。"""
+            return (
+                ImageBatchMatchResult(
+                    requests[0].template,
+                    None,
+                    elapsed_ms=4.0,
+                    best_confidence=0.7,
+                    best_rect=Rect(10, 5, 20, 10),
+                ),
+            )
+
+    def screen_capture(path):
+        """保存一张纯黑测试截图。"""
+        Image.new("RGB", (200, 100), "black").save(path)
+
+    app = LocalControlApplication(
+        project_root=tmp_path,
+        screen_capture_factory=lambda: screen_capture,
+        screen_size_factory=lambda: Point(100, 50),
+        real_image_batch_locator_factory=FakeBatchLocator,
+    )
+
+    result = app.capture_screen_probe_diagnostics()
+
+    assert result.exit_code == 0
+    assert "saved probe diagnostics screenshot:" in result.stdout
+    assert "captured screenshot appears all black" in result.stderr
+
+
 def test_local_control_probe_diagnostics_requires_screen_capture(tmp_path) -> None:
     """验证探测诊断缺少截图能力时返回清晰错误。"""
     (tmp_path / "assets").mkdir()
@@ -1376,6 +1448,58 @@ def test_local_control_captures_screen_probe_crops(tmp_path) -> None:
     assert batch_requests[0][0].min_confidence == 0.75
     with Image.open(crop_path) as crop:
         assert crop.size == (40, 20)
+
+
+def test_local_control_probe_crops_warns_when_raw_screenshot_is_black(tmp_path) -> None:
+    """验证候选裁剪导出复用原始截图全黑警告。"""
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    (assets / "screen-states.json").write_text(
+        """
+        {
+          "groups": [
+            {
+              "state": "主页",
+              "searches": [
+                {"name": "主页标题", "image": "home.png"}
+              ]
+            }
+          ]
+        }
+        """,
+        encoding="utf-8",
+    )
+    Image.new("RGB", (4, 4), "black").save(assets / "home.png")
+
+    class FakeBatchLocator:
+        def locate_requests(self, requests, *, logger=None, stop_on_first_match=False):
+            """返回候选最佳位置。"""
+            return (
+                ImageBatchMatchResult(
+                    requests[0].template,
+                    None,
+                    elapsed_ms=4.0,
+                    best_confidence=0.7,
+                    best_rect=Rect(10, 5, 20, 10),
+                ),
+            )
+
+    def screen_capture(path):
+        """保存一张纯黑测试截图。"""
+        Image.new("RGB", (200, 100), "black").save(path)
+
+    app = LocalControlApplication(
+        project_root=tmp_path,
+        screen_capture_factory=lambda: screen_capture,
+        screen_size_factory=lambda: Point(100, 50),
+        real_image_batch_locator_factory=FakeBatchLocator,
+    )
+
+    result = app.capture_screen_probe_crops()
+
+    assert result.exit_code == 0
+    assert "saved probe crop:" in result.stdout
+    assert "captured screenshot appears all black" in result.stderr
 
 
 def test_local_control_probe_crops_reports_no_saved_candidates(tmp_path) -> None:
