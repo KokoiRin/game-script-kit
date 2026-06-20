@@ -169,6 +169,46 @@ def test_star_cli_capture_probe_diagnostics_reports_application_error(monkeypatc
     assert captured.err == "screen capture is not configured\n"
 
 
+def test_star_cli_capture_probe_crops_outputs_application_result(monkeypatch, capsys) -> None:
+    """验证 capture-probe-crops 子命令复用 application 候选裁剪结果。"""
+    calls = []
+
+    class FakeApp:
+        def capture_screen_probe_crops(self, *, min_confidence=0.8):
+            """记录最低置信度并返回固定候选裁剪结果。"""
+            calls.append(min_confidence)
+            return ControlResult(
+                exit_code=0,
+                stdout="saved probe crop: .star/debug/screenshots/probe-crops/01_主页.png\n",
+            )
+
+    monkeypatch.setattr(cli, "build_local_control_application", lambda: FakeApp())
+
+    assert main(["capture-probe-crops", "--min-confidence", "0.75"]) == 0
+
+    captured = capsys.readouterr()
+    assert captured.out == "saved probe crop: .star/debug/screenshots/probe-crops/01_主页.png\n"
+    assert captured.err == ""
+    assert calls == [0.75]
+
+
+def test_star_cli_capture_probe_crops_reports_application_error(monkeypatch, capsys) -> None:
+    """验证 capture-probe-crops 会把 application 错误写入 stderr。"""
+
+    class FakeApp:
+        def capture_screen_probe_crops(self, *, min_confidence=0.8):
+            """返回固定候选裁剪失败结果。"""
+            return ControlResult(exit_code=1, stderr="screen capture is not configured\n")
+
+    monkeypatch.setattr(cli, "build_local_control_application", lambda: FakeApp())
+
+    assert main(["capture-probe-crops"]) == 1
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == "screen capture is not configured\n"
+
+
 def test_star_cli_capture_region_crops_outputs_application_result(monkeypatch, capsys) -> None:
     """验证 capture-region-crops 子命令复用 application 区域裁剪结果。"""
     calls = []

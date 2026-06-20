@@ -165,6 +165,15 @@ def _run_capture_probe_diagnostics(args: argparse.Namespace) -> int:
     )
 
 
+def _run_capture_probe_crops(args: argparse.Namespace) -> int:
+    """保存一轮状态探测候选最佳位置裁剪图。"""
+    return _print_control_result(
+        build_local_control_application().capture_screen_probe_crops(
+            min_confidence=args.min_confidence,
+        )
+    )
+
+
 def _run_capture_region_crops() -> int:
     """保存当前屏幕中每个状态识别命名区域的裁剪图。"""
     return _print_control_result(build_local_control_application().capture_screen_region_crops())
@@ -414,6 +423,16 @@ def main(argv: list[str] | None = None) -> int:
         "capture-region-crops",
         help="Capture each configured screen-state region as a separate image.",
     )
+    probe_crops_parser = subparsers.add_parser(
+        "capture-probe-crops",
+        help="Capture screen-state probe best-match crops.",
+    )
+    probe_crops_parser.add_argument(
+        "--min-confidence",
+        type=float,
+        default=0.8,
+        help="Minimum image match confidence for this probe.",
+    )
 
     run_parser = subparsers.add_parser("run", help="Run a named script.")
     run_parser.add_argument("name", help="Script name to run.")
@@ -472,6 +491,8 @@ def main(argv: list[str] | None = None) -> int:
         return _run_capture_probe_diagnostics(args)
     elif args.command == "capture-region-crops":
         return _run_capture_region_crops()
+    elif args.command == "capture-probe-crops":
+        return _run_capture_probe_crops(args)
     elif args.command == "run":
         return _run_script(args)
     elif args.command == "recorder":
