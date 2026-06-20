@@ -109,6 +109,9 @@ def test_local_ui_serves_static_assets() -> None:
     assert "没有可用探测状态" in script
     assert "scriptStateDependencies" in script
     assert "payload.state_dependencies" in script
+    assert "scriptImageDependencies" in script
+    assert "payload.image_dependencies" in script
+    assert "dry_run_images: scriptImageDependencies" in script
     assert "已使用脚本状态" in script
     assert "当前脚本没有状态依赖" in script
     assert "依赖检查：" in script
@@ -177,6 +180,7 @@ def test_local_ui_gets_script_details_over_http() -> None:
         "steps": ['If ScreenStateIs("主页")', "  then Click Point(x=100, y=200)"],
         "dependencies": ["状态: 主页"],
         "state_dependencies": ["主页"],
+        "image_dependencies": ["assets/start.png"],
         "readiness": [
             {"label": "状态: 主页", "status": "ok", "message": "状态已配置"},
         ],
@@ -200,6 +204,7 @@ def test_local_ui_runs_script_over_http() -> None:
                 "dry_run": True,
                 "dry_run_color": "#102030",
                 "dry_run_screen_state": "主页",
+                "dry_run_images": ["assets/start.png"],
             },
         )
     finally:
@@ -213,6 +218,7 @@ def test_local_ui_runs_script_over_http() -> None:
             "dry_run": True,
             "dry_run_color": "#102030",
             "dry_run_screen_state": "主页",
+            "dry_run_images": ("assets/start.png",),
         }
     ]
     assert payload == {
@@ -537,6 +543,7 @@ class FakeControlApplication:
             steps=('If ScreenStateIs("主页")', "  then Click Point(x=100, y=200)"),
             dependencies=("状态: 主页",),
             state_dependencies=("主页",),
+            image_dependencies=("assets/start.png",),
             readiness=(("状态: 主页", "ok", "状态已配置"),),
         )
 
@@ -547,6 +554,7 @@ class FakeControlApplication:
         dry_run: bool,
         dry_run_color: str,
         dry_run_screen_state: str = "未知",
+        dry_run_images: tuple[str, ...] = (),
     ) -> ScriptRunStatus:
         """记录 fake 后台脚本启动请求。"""
         self.start_requests.append(
@@ -555,6 +563,7 @@ class FakeControlApplication:
                 "dry_run": dry_run,
                 "dry_run_color": dry_run_color,
                 "dry_run_screen_state": dry_run_screen_state,
+                "dry_run_images": dry_run_images,
             }
         )
         return ScriptRunStatus(running=True, stdout="started\n")

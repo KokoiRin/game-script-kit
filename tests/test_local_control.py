@@ -82,6 +82,27 @@ def test_local_control_runs_state_script_with_dry_run_screen_state() -> None:
     assert result.stdout == "click Point(x=100, y=200)\n"
 
 
+def test_local_control_runs_image_script_with_dry_run_images() -> None:
+    """验证 UI 用例可给 dry-run 图片脚本提供模拟命中模板。"""
+    script = Script(
+        name="image-click",
+        window=ScreenWindow(),
+        steps=(Click(ImageTarget(ImageTemplate("assets/start.png"))),),
+    )
+    app = LocalControlApplication(catalog=ScriptCatalog((script,)))
+
+    result = app.run_named_script(
+        "image-click",
+        dry_run=True,
+        dry_run_images=("assets/start.png",),
+    )
+
+    assert result.exit_code == 0
+    assert result.stderr == ""
+    assert "image match template=assets/start.png" in result.stdout
+    assert result.stdout.splitlines()[-1] == "click Point(x=0, y=0)"
+
+
 def test_local_control_describes_state_script_dependencies(tmp_path) -> None:
     """验证 UI 用例可以生成状态驱动脚本详情和可用依赖检查。"""
     assets = tmp_path / "assets"
@@ -112,6 +133,7 @@ def test_local_control_describes_state_script_dependencies(tmp_path) -> None:
     assert any('If ScreenStateIs("主页")' in step for step in details.steps)
     assert details.dependencies == ("状态: 主页", "图片: assets/start.png")
     assert details.state_dependencies == ("主页",)
+    assert details.image_dependencies == ("assets/start.png",)
     assert details.readiness == (
         ("状态: 主页", "ok", "状态已配置"),
         ("图片: assets/start.png", "ok", "图片文件可用"),
@@ -152,6 +174,7 @@ def test_local_control_describes_unknown_script() -> None:
     assert details.steps == ()
     assert details.dependencies == ()
     assert details.state_dependencies == ()
+    assert details.image_dependencies == ()
     assert details.readiness == ()
     assert details.stderr == "unknown script: missing"
 

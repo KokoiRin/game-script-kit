@@ -97,6 +97,7 @@ def create_local_control_server(
                     dry_run=bool(payload.get("dry_run", True)),
                     dry_run_color=str(payload.get("dry_run_color", "#000000")),
                     dry_run_screen_state=str(payload.get("dry_run_screen_state", "未知")),
+                    dry_run_images=_parse_dry_run_images(payload),
                 )
                 self._send_json(_status_to_payload(status))
                 return
@@ -255,6 +256,7 @@ def _script_details_to_payload(details) -> dict[str, object]:
         "steps": list(details.steps),
         "dependencies": list(details.dependencies),
         "state_dependencies": list(details.state_dependencies),
+        "image_dependencies": list(details.image_dependencies),
         "readiness": [
             {"label": label, "status": status, "message": message}
             for label, status, message in details.readiness
@@ -288,3 +290,11 @@ def _parse_interval_seconds(payload: dict[str, object]) -> float | None:
         return float(payload.get("interval_seconds", 1.0))
     except (TypeError, ValueError):
         return None
+
+
+def _parse_dry_run_images(payload: dict[str, object]) -> tuple[str, ...]:
+    """把 HTTP payload 中的 dry-run 图片列表解析为字符串 tuple。"""
+    value = payload.get("dry_run_images", ())
+    if not isinstance(value, list):
+        return ()
+    return tuple(str(item) for item in value)
