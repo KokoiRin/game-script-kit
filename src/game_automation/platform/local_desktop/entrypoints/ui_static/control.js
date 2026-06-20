@@ -138,11 +138,17 @@
         const elapsed = candidate.elapsed_ms === null || candidate.elapsed_ms === undefined
           ? "无"
           : `${Number(candidate.elapsed_ms).toFixed(2)}ms`;
-        const confidence = candidate.confidence === null || candidate.confidence === undefined
-          ? "无"
-          : Number(candidate.confidence).toFixed(3);
-        return `${renderCandidateName(candidate)}：${renderCandidateStatus(candidate.status)}；耗时 ${elapsed}；置信度 ${confidence}`;
+        const confidence = formatConfidence(candidate.confidence);
+        const bestConfidence = formatConfidence(candidate.best_confidence);
+        return `${renderCandidateName(candidate)}：${renderCandidateStatus(candidate.status)}；耗时 ${elapsed}；置信度 ${confidence}；最佳置信度 ${bestConfidence}`;
       }).join("\n");
+    }
+
+    function formatConfidence(confidence) {
+      if (confidence === null || confidence === undefined) {
+        return "无";
+      }
+      return Number(confidence).toFixed(3);
     }
 
     function renderCandidateName(candidate) {
