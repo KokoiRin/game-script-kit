@@ -30,6 +30,18 @@ from game_automation.portable.scripts_manager import (
 IMAGE_TEMPLATE_PATH = "assets/start.png"
 
 
+class FakeRunLogger:
+    """收集脚本运行测试中的运行日志。"""
+
+    def __init__(self) -> None:
+        """初始化日志列表。"""
+        self.messages: list[str] = []
+
+    def log(self, message: str) -> None:
+        """记录一条运行日志。"""
+        self.messages.append(message)
+
+
 def build_wait_until_image_script() -> Script:
     """构造应用层测试用图片等待脚本。"""
     return Script(
@@ -124,6 +136,24 @@ def test_run_script_dry_run_wait_until_image_with_configured_match(capsys) -> No
     assert result.exit_code == 0
     assert result.error_message is None
     assert captured.out == "click Point(x=100, y=200)\n"
+
+
+def test_run_script_logs_screen_state_condition_when_logger_is_configured() -> None:
+    """验证脚本运行注入 logger 时会记录界面状态条件评估摘要。"""
+    logger = FakeRunLogger()
+
+    result = run_script(
+        build_screen_state_branch_script(),
+        dry_run=True,
+        dry_run_screen_state="主页",
+        logger=logger,
+    )
+
+    assert result.exit_code == 0
+    assert result.error_message is None
+    assert logger.messages == [
+        "screen state condition expected=主页 actual=主页 min_confidence=0.8 matched=True"
+    ]
 
 
 def test_run_script_dry_run_wait_until_image_times_out_by_default(capsys) -> None:

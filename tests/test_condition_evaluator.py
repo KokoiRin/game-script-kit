@@ -69,6 +69,18 @@ class FakeScreenStateReader:
         return self.state
 
 
+class FakeRunLogger:
+    """收集条件评估测试中的运行日志。"""
+
+    def __init__(self) -> None:
+        """初始化日志列表。"""
+        self.messages: list[str] = []
+
+    def log(self, message: str) -> None:
+        """记录一条运行日志。"""
+        self.messages.append(message)
+
+
 def test_condition_evaluator_matches_color_with_tolerance_and_window() -> None:
     """验证颜色条件评估会解析窗口并按每通道容差判断。"""
     reader = FakeColorReader(Color(12, 19, 31))
@@ -215,6 +227,26 @@ def test_condition_evaluator_returns_true_when_screen_state_matches() -> None:
 
     assert result is True
     assert reader.calls == [0.7]
+
+
+def test_condition_evaluator_logs_screen_state_match() -> None:
+    """验证界面状态条件评估会记录实际状态和命中结果。"""
+    reader = FakeScreenStateReader("主页")
+    logger = FakeRunLogger()
+
+    result = evaluate_condition(
+        ScreenStateIs("主页", min_confidence=0.7),
+        window=AreaWindow(Rect(100, 200, 800, 600)),
+        color_reader=None,
+        image_locator=None,
+        screen_state_reader=reader,
+        logger=logger,
+    )
+
+    assert result is True
+    assert logger.messages == [
+        "screen state condition expected=主页 actual=主页 min_confidence=0.7 matched=True"
+    ]
 
 
 def test_condition_evaluator_returns_false_when_screen_state_differs() -> None:

@@ -82,7 +82,10 @@ def test_local_control_runs_state_script_with_dry_run_screen_state() -> None:
 
     assert result.exit_code == 0
     assert result.stderr == ""
-    assert result.stdout == "click Point(x=100, y=200)\n"
+    assert result.stdout == (
+        "screen state condition expected=主页 actual=主页 min_confidence=0.8 matched=True\n"
+        "click Point(x=100, y=200)\n"
+    )
 
 
 def test_local_control_runs_image_script_with_dry_run_images() -> None:
@@ -321,7 +324,10 @@ def test_local_control_background_state_script_uses_dry_run_screen_state() -> No
 
     assert final.exit_code == 0
     assert final.stderr == ""
-    assert final.stdout == "click Point(x=100, y=200)\n"
+    assert final.stdout == (
+        "screen state condition expected=主页 actual=主页 min_confidence=0.8 matched=True\n"
+        "click Point(x=100, y=200)\n"
+    )
 
 
 def test_local_control_can_stop_background_script_run() -> None:
