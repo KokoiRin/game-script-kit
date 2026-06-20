@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from game_automation.portable.application.local_control import LocalControlApplication, ScreenCapture
 from game_automation.portable.application.project_assets import PROJECT_ROOT
-from game_automation.portable.application.project_scripts import load_project_script_catalog
+from game_automation.portable.application.project_scripts import load_project_script_catalog_result
 from game_automation.portable.application.script_run import ScriptRunResult, run_script
 from game_automation.portable.domain import Point, Script
 from game_automation.portable.engine.ports import (
@@ -44,8 +44,10 @@ def run_script_on_local_desktop(
 
 def build_local_control_application() -> LocalControlApplication:
     """创建已接入本机桌面 adapter 的本地控制应用用例。"""
+    catalog_result = load_project_script_catalog_result(PROJECT_ROOT)
     return LocalControlApplication(
-        catalog=load_project_script_catalog(PROJECT_ROOT),
+        catalog=catalog_result.catalog,
+        script_config_errors=catalog_result.script_config_errors,
         real_device_factory=build_real_input_device,
         real_color_reader_factory=build_real_color_reader,
         real_image_locator_factory=build_real_screen_image_locator,

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import game_automation.platform.desktop.adapters as desktop
 from game_automation.platform.local_desktop import composition
+from game_automation.portable.application.config_script_loader import ScriptConfigError
+from game_automation.portable.application.project_scripts import ProjectScriptCatalogResult
 from game_automation.portable.domain import Click, Point, ScreenWindow, Script
 
 
@@ -117,15 +119,19 @@ def test_build_local_control_application_passes_project_script_catalog(monkeypat
             """记录 composition 传入的 application 依赖。"""
             captured["kwargs"] = kwargs
 
-    def fake_load_project_script_catalog(project_root):
-        """返回可识别的 fake catalog。"""
+    def fake_load_project_script_catalog_result(project_root):
+        """返回可识别的 fake catalog result。"""
         captured["project_root"] = project_root
-        return "catalog"
+        return ProjectScriptCatalogResult(
+            catalog="catalog",
+            script_config_errors=(ScriptConfigError("bad.json", "bad"),),
+        )
 
     monkeypatch.setattr(composition, "LocalControlApplication", FakeLocalControlApplication)
-    monkeypatch.setattr(composition, "load_project_script_catalog", fake_load_project_script_catalog)
+    monkeypatch.setattr(composition, "load_project_script_catalog_result", fake_load_project_script_catalog_result)
 
     composition.build_local_control_application()
 
     assert captured["kwargs"]["catalog"] == "catalog"
+    assert captured["kwargs"]["script_config_errors"] == (ScriptConfigError("bad.json", "bad"),)
     assert captured["project_root"] == composition.PROJECT_ROOT

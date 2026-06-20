@@ -7,7 +7,11 @@ from game_automation.portable.scripts_manager.catalog import (
     ScriptCatalog,
     ScriptNotFoundError,
 )
-from game_automation.portable.application.project_scripts import load_project_script_catalog
+from game_automation.portable.application.config_script_loader import ScriptConfigError
+from game_automation.portable.application.project_scripts import (
+    load_project_script_catalog,
+    load_project_script_catalog_result,
+)
 from game_automation.portable.domain import Click, Point, ScreenWindow, Script
 
 
@@ -106,8 +110,8 @@ def test_project_catalog_keeps_builtin_scripts_when_script_dir_missing(tmp_path)
     assert catalog.list_names() == ("builtin",)
 
 
-def test_project_catalog_rejects_duplicate_script_names(tmp_path) -> None:
-    """验证文件脚本和内置脚本重名时返回可读错误。"""
+def test_project_catalog_reports_duplicate_script_names(tmp_path) -> None:
+    """验证文件脚本和内置脚本重名时隔离坏脚本并报告错误。"""
     script_dir = tmp_path / "scripts"
     script_dir.mkdir()
     (script_dir / "duplicate.json").write_text(
@@ -116,5 +120,31 @@ def test_project_catalog_rejects_duplicate_script_names(tmp_path) -> None:
     )
     base_catalog = ScriptCatalog((build_script("builtin"),))
 
-    with pytest.raises(ValueError, match="duplicate script name: builtin"):
-        load_project_script_catalog(tmp_path, base_catalog=base_catalog)
+    result = load_project_script_catalog_result(tmp_path, base_catalog=base_catalog)
+
+    assert result.catalog.list_names() == ("builtin",)
+    assert result.script_config_errors == (
+        ScriptConfigError("duplicate.json", "duplicate.json: duplicate script name: builtin"),
+    )
+
+
+def test_project_catalog_reports_bad_file_without_hiding_good_scripts(tmp_path) -> None:
+    """验证坏文件不会影响其他文件脚本进入项目 catalog。"""
+    script_dir = tmp_path / "scripts"
+    script_dir.mkdir()
+    (script_dir / "good.json").write_text(
+        '{"name": "good", "steps": [{"wait": 1}]}',
+        encoding="utf-8",
+    )
+    (script_dir / "bad.json").write_text(
+        '{"name": "bad", "steps": [{"drag": {}}]}',
+        encoding="utf-8",
+    )
+    base_catalog = ScriptCatalog((build_script("builtin"),))
+
+    result = load_project_script_catalog_result(tmp_path, base_catalog=base_catalog)
+
+    assert result.catalog.list_names() == ("builtin", "good")
+    assert result.script_config_errors == (
+        ScriptConfigError("bad.json", "bad.json: unsupported step type: drag"),
+    )

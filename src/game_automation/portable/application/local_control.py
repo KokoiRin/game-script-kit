@@ -24,6 +24,7 @@ from game_automation.portable.application.project_assets import (
     image_asset_root,
     screen_state_config_path,
 )
+from game_automation.portable.application.config_script_loader import ScriptConfigError
 from game_automation.portable.application.script_run import (
     InputDeviceFactory,
     PixelColorReaderFactory,
@@ -333,6 +334,7 @@ class LocalControlApplication:
         self,
         catalog: ScriptCatalog = DEFAULT_SCRIPT_CATALOG,
         *,
+        script_config_errors: tuple[ScriptConfigError, ...] = (),
         command_runner: CommandRunner | None = None,
         project_root: Path = PROJECT_ROOT,
         real_device_factory: InputDeviceFactory | None = None,
@@ -344,6 +346,7 @@ class LocalControlApplication:
     ) -> None:
         """注入 UI 用例需要的脚本 catalog、项目路径和外部能力工厂。"""
         self._catalog = catalog
+        self._script_config_errors = script_config_errors
         self._command_runner = command_runner if command_runner is not None else _run_command
         self._project_root = project_root
         self._real_device_factory = real_device_factory
@@ -363,6 +366,10 @@ class LocalControlApplication:
     def list_scripts(self) -> tuple[str, ...]:
         """返回 UI 可展示的脚本名称列表。"""
         return self._catalog.list_names()
+
+    def list_script_config_errors(self) -> tuple[ScriptConfigError, ...]:
+        """返回文件脚本加载时被隔离的配置错误。"""
+        return self._script_config_errors
 
     def image_asset_folder_label(self) -> str:
         """返回用户应放置模板图片的项目内目录名。"""
