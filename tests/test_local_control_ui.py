@@ -74,6 +74,8 @@ def test_local_ui_serves_control_page() -> None:
     assert 'id="capture-screen"' in html
     assert 'id="capture-region-diagnostics"' in html
     assert 'id="capture-probe-diagnostics"' in html
+    assert 'id="capture-region-crops"' in html
+    assert 'id="capture-probe-crops"' in html
     assert 'id="debug-screenshot"' in html
     assert 'id="run-tests"' in html
     assert 'id="screen-state-tab"' in html
@@ -108,6 +110,7 @@ def test_local_ui_serves_static_assets() -> None:
 
     assert ".screen-state-toolbar" in css
     assert ".screen-state-config-summary" in css
+    assert "grid-template-columns: minmax(180px, 1fr) 120px repeat(7, auto)" in css
     assert "grid-template-columns: minmax(180px, 1fr) 120px 140px 140px auto auto auto" in css
     assert "height: 280px" in css
     assert "resize: vertical" in css
@@ -145,6 +148,8 @@ def test_local_ui_serves_static_assets() -> None:
     assert 'fetch("/api/start-screen-state-probe"' in script
     assert 'fetch("/api/capture-region-diagnostics"' in script
     assert 'fetch("/api/capture-probe-diagnostics"' in script
+    assert 'fetch("/api/capture-region-crops"' in script
+    assert 'fetch("/api/capture-probe-crops"' in script
     assert "renderScreenStateStats" in script
     assert "renderScreenStateCandidates" in script
     assert "renderCandidateName" in script
@@ -630,6 +635,59 @@ def test_local_ui_captures_probe_diagnostics_over_http() -> None:
     }
 
 
+def test_local_ui_captures_region_crops_over_http() -> None:
+    """验证 UI HTTP 接口把区域裁剪请求委托给 application。"""
+    app = FakeControlApplication()
+    server = create_local_control_server(host="127.0.0.1", port=0, app=app)
+    thread = threading.Thread(target=server.serve_forever)
+    thread.start()
+    try:
+        payload = _request_json(
+            server.server_address,
+            "POST",
+            "/api/capture-region-crops",
+            {},
+        )
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+    assert app.region_crop_requests == 1
+    assert payload == {
+        "exit_code": 0,
+        "stdout": "saved region crop: /tmp/regions/主页标题.png\n",
+        "stderr": "",
+        "screenshot_path": "/tmp/regions",
+    }
+
+
+def test_local_ui_captures_probe_crops_over_http() -> None:
+    """验证 UI HTTP 接口把探测候选裁剪请求委托给 application。"""
+    app = FakeControlApplication()
+    server = create_local_control_server(host="127.0.0.1", port=0, app=app)
+    thread = threading.Thread(target=server.serve_forever)
+    thread.start()
+    try:
+        payload = _request_json(
+            server.server_address,
+            "POST",
+            "/api/capture-probe-crops",
+            {"min_confidence": 0.75},
+        )
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+    assert app.probe_crop_requests == [0.75]
+    assert payload == {
+        "exit_code": 1,
+        "stdout": "",
+        "stderr": "screen capture is not configured\n",
+    }
+
+
 def test_local_ui_runs_tests_over_http() -> None:
     """验证 UI HTTP 接口可以触发固定测试任务。"""
     app = FakeControlApplication()
@@ -668,6 +726,8 @@ class FakeControlApplication:
         self.capture_requests = 0
         self.region_diagnostics_requests = 0
         self.probe_diagnostics_requests: list[float] = []
+        self.region_crop_requests = 0
+        self.probe_crop_requests: list[float] = []
         self.probe_start_requests: list[dict[str, object]] = []
         self.probe_status_requests = 0
         self.probe_stop_requests = 0
@@ -865,6 +925,21 @@ class FakeControlApplication:
             stderr="",
             screenshot_path="/tmp/latest-screen-probe.png",
         )
+
+    def capture_screen_region_crops(self) -> ControlResult:
+        """记录 fake 区域裁剪请求。"""
+        self.region_crop_requests += 1
+        return ControlResult(
+            exit_code=0,
+            stdout="saved region crop: /tmp/regions/主页标题.png\n",
+            stderr="",
+            screenshot_path="/tmp/regions",
+        )
+
+    def capture_screen_probe_crops(self, *, min_confidence: float = 0.8) -> ControlResult:
+        """记录 fake 探测候选裁剪请求。"""
+        self.probe_crop_requests.append(min_confidence)
+        return ControlResult(exit_code=1, stdout="", stderr="screen capture is not configured\n")
 
 
 def _request_json(address, method: str, path: str, body: dict[str, object] | None = None) -> dict[str, object]:
