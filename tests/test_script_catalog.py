@@ -7,6 +7,7 @@ from game_automation.portable.scripts_manager.catalog import (
     ScriptCatalog,
     ScriptNotFoundError,
 )
+from game_automation.portable.application.project_scripts import load_project_script_catalog
 from game_automation.portable.domain import Click, Point, ScreenWindow, Script
 
 
@@ -77,3 +78,43 @@ def test_default_catalog_includes_click_image_demo() -> None:
 def test_default_catalog_includes_leave_retry_loop() -> None:
     """验证默认注册表包含离开/重来轮询点击脚本。"""
     assert "click-leave-or-retry-loop" in DEFAULT_SCRIPT_CATALOG.list_names()
+
+
+def test_project_catalog_includes_file_scripts(tmp_path) -> None:
+    """验证项目 catalog 会合并用户脚本文件和内置脚本。"""
+    script_dir = tmp_path / "scripts"
+    script_dir.mkdir()
+    (script_dir / "user.json").write_text(
+        '{"name": "用户脚本", "steps": [{"wait": 1}]}',
+        encoding="utf-8",
+    )
+    base_catalog = ScriptCatalog((build_script("builtin"),))
+
+    catalog = load_project_script_catalog(tmp_path, base_catalog=base_catalog)
+
+    assert catalog.list_names() == ("builtin", "用户脚本")
+    assert catalog.get("builtin").name == "builtin"
+    assert catalog.get("用户脚本").name == "用户脚本"
+
+
+def test_project_catalog_keeps_builtin_scripts_when_script_dir_missing(tmp_path) -> None:
+    """验证项目脚本目录不存在时仍保留内置脚本。"""
+    base_catalog = ScriptCatalog((build_script("builtin"),))
+
+    catalog = load_project_script_catalog(tmp_path, base_catalog=base_catalog)
+
+    assert catalog.list_names() == ("builtin",)
+
+
+def test_project_catalog_rejects_duplicate_script_names(tmp_path) -> None:
+    """验证文件脚本和内置脚本重名时返回可读错误。"""
+    script_dir = tmp_path / "scripts"
+    script_dir.mkdir()
+    (script_dir / "duplicate.json").write_text(
+        '{"name": "builtin", "steps": [{"wait": 1}]}',
+        encoding="utf-8",
+    )
+    base_catalog = ScriptCatalog((build_script("builtin"),))
+
+    with pytest.raises(ValueError, match="duplicate script name: builtin"):
+        load_project_script_catalog(tmp_path, base_catalog=base_catalog)

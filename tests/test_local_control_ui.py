@@ -12,6 +12,7 @@ import threading
 
 from game_automation.portable.application.local_control import (
     ControlResult,
+    LocalControlApplication,
     ScreenStateConfigSummaryResult,
     ScreenStateProbeCandidateSummary,
     ScreenStateProbeStats,
@@ -19,11 +20,14 @@ from game_automation.portable.application.local_control import (
     ScriptDetailsResult,
     ScriptRunStatus,
 )
+from game_automation.portable.application.project_assets import SCRIPT_FOLDER
+from game_automation.portable.application.project_scripts import load_project_script_catalog
 from game_automation.portable.application.screen_state_config import (
     ScreenStateConfigGroupSummary,
     ScreenStateConfigSearchSummary,
 )
 from game_automation.portable.domain import Rect
+from game_automation.portable.scripts_manager.catalog import ScriptCatalog
 from game_automation.platform.local_desktop.entrypoints.local_ui import create_local_control_server
 
 
@@ -41,6 +45,49 @@ def test_local_ui_lists_scripts_over_http() -> None:
 
     assert "conditional-color-demo" in payload["scripts"]
     assert "wait-until-color-demo" in payload["scripts"]
+
+
+def test_local_ui_uses_file_backed_scripts_over_http(tmp_path) -> None:
+    """验证 UI HTTP 接口可以列出、描述并启动文件脚本。"""
+    script_dir = tmp_path / SCRIPT_FOLDER
+    script_dir.mkdir()
+    (script_dir / "user.json").write_text(
+        '{"name": "用户脚本", "steps": [{"wait": 0}]}',
+        encoding="utf-8",
+    )
+    catalog = load_project_script_catalog(tmp_path, base_catalog=ScriptCatalog(()))
+    app = LocalControlApplication(catalog=catalog, project_root=tmp_path)
+    server = create_local_control_server(host="127.0.0.1", port=0, app=app)
+    thread = threading.Thread(target=server.serve_forever)
+    thread.start()
+    try:
+        scripts_payload = _request_json(server.server_address, "GET", "/api/scripts")
+        details_payload = _request_json(
+            server.server_address,
+            "GET",
+            "/api/script-details?name=%E7%94%A8%E6%88%B7%E8%84%9A%E6%9C%AC",
+        )
+        run_payload = _request_json(
+            server.server_address,
+            "POST",
+            "/api/run-script",
+            {
+                "name": "用户脚本",
+                "dry_run": True,
+                "dry_run_color": "#000000",
+                "dry_run_screen_state": "未知",
+                "dry_run_images": [],
+            },
+        )
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+    assert scripts_payload["scripts"] == ["用户脚本"]
+    assert details_payload["name"] == "用户脚本"
+    assert details_payload["steps"] == ["Wait 0s"]
+    assert run_payload["exit_code"] == 0
 
 
 def test_local_ui_serves_control_page() -> None:

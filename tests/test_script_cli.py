@@ -4,6 +4,7 @@ import json
 from types import ModuleType
 
 from game_automation.portable.application.local_control import ControlResult
+from game_automation.portable.application.project_assets import SCRIPT_FOLDER
 from game_automation.portable.domain import (
     Click,
     Color,
@@ -45,7 +46,66 @@ def test_star_cli_lists_available_scripts(capsys) -> None:
         "wait-until-screen-state-demo",
         "click-image-demo",
         "click-leave-or-retry-loop",
+        "file-script-demo",
     ]
+
+
+def test_star_cli_lists_file_backed_scripts(monkeypatch, tmp_path, capsys) -> None:
+    """验证 list 子命令会列出项目脚本目录中的 JSON 脚本。"""
+    script_dir = tmp_path / SCRIPT_FOLDER
+    script_dir.mkdir()
+    (script_dir / "user.json").write_text(
+        '{"name": "用户脚本", "steps": [{"wait": 1}]}',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(cli, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(cli, "DEFAULT_SCRIPT_CATALOG", ScriptCatalog((Script("builtin", ScreenWindow(), (Click(Point(1, 2)),)),)))
+
+    assert main(["list"]) == 0
+
+    output = capsys.readouterr().out.splitlines()
+    assert output == ["builtin", "用户脚本"]
+
+
+def test_star_cli_details_describes_file_backed_script(monkeypatch, tmp_path, capsys) -> None:
+    """验证 details 子命令可以展示文件脚本步骤和依赖。"""
+    script_dir = tmp_path / SCRIPT_FOLDER
+    script_dir.mkdir()
+    (script_dir / "user.json").write_text(
+        json.dumps(
+            {
+                "name": "用户脚本",
+                "resources": {"points": {"头像": {"x": 242, "y": 92}}},
+                "steps": [{"click": {"point": "头像"}}],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(cli, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(cli, "DEFAULT_SCRIPT_CATALOG", ScriptCatalog(()))
+
+    assert main(["details", "用户脚本"]) == 0
+
+    output = capsys.readouterr().out
+    assert "脚本：用户脚本" in output
+    assert 'Click PointRef("头像")' in output
+    assert "点位依赖：" in output
+    assert "- 头像" in output
+
+
+def test_star_cli_runs_file_backed_script_in_dry_run(monkeypatch, tmp_path) -> None:
+    """验证 run 子命令可以 dry-run 运行文件脚本。"""
+    script_dir = tmp_path / SCRIPT_FOLDER
+    script_dir.mkdir()
+    (script_dir / "user.json").write_text(
+        '{"name": "用户脚本", "steps": [{"wait": 0}]}',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(cli, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(cli, "DEFAULT_SCRIPT_CATALOG", ScriptCatalog(()))
+
+    assert main(["run", "用户脚本", "--dry-run"]) == 0
 
 
 def test_star_cli_capture_screen_outputs_application_result(monkeypatch, capsys) -> None:

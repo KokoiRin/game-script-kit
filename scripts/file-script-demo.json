@@ -1,0 +1,33 @@
+{
+  "name": "file-script-demo",
+  "resources": {
+    "points": {
+      "头像": {
+        "x": 242,
+        "y": 92
+      }
+    }
+  },
+  "steps": [
+    {
+      "wait": 0
+    },
+    {
+      "if_state": {
+        "state": "主页",
+        "then": [
+          {
+            "click": {
+              "point": "头像"
+            }
+          }
+        ],
+        "else": [
+          {
+            "wait": 0
+          }
+        ]
+      }
+    }
+  ]
+}

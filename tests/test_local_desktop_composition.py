@@ -106,3 +106,26 @@ def test_build_local_control_application_passes_batch_image_locator_factory(monk
     assert captured["kwargs"]["real_image_locator_factory"] is composition.build_real_screen_image_locator
     assert captured["kwargs"]["real_image_batch_locator_factory"] is composition.build_real_screen_image_batch_locator
     assert captured["kwargs"]["screen_size_factory"] is composition.read_real_screen_size
+
+
+def test_build_local_control_application_passes_project_script_catalog(monkeypatch) -> None:
+    """验证本地控制 UI 会装配包含项目脚本的 catalog。"""
+    captured = {}
+
+    class FakeLocalControlApplication:
+        def __init__(self, **kwargs) -> None:
+            """记录 composition 传入的 application 依赖。"""
+            captured["kwargs"] = kwargs
+
+    def fake_load_project_script_catalog(project_root):
+        """返回可识别的 fake catalog。"""
+        captured["project_root"] = project_root
+        return "catalog"
+
+    monkeypatch.setattr(composition, "LocalControlApplication", FakeLocalControlApplication)
+    monkeypatch.setattr(composition, "load_project_script_catalog", fake_load_project_script_catalog)
+
+    composition.build_local_control_application()
+
+    assert captured["kwargs"]["catalog"] == "catalog"
+    assert captured["project_root"] == composition.PROJECT_ROOT

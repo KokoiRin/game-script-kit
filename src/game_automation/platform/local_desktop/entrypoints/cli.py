@@ -22,6 +22,7 @@ from game_automation.portable.application.project_assets import (
 )
 from game_automation.portable.application.screen_state_config import load_screen_state_names
 from game_automation.portable.application.script_details import ScriptDetailsResult, describe_script_details
+from game_automation.portable.application.project_scripts import load_project_script_catalog
 from game_automation.portable.application.script_resources import (
     load_shared_script_resources,
     script_with_shared_resources,
@@ -32,7 +33,12 @@ from game_automation.portable.scripts_manager.catalog import ScriptNotFoundError
 
 def _run_list() -> int:
     """列出所有可用脚本。"""
-    for name in DEFAULT_SCRIPT_CATALOG.list_names():
+    try:
+        catalog = _load_cli_script_catalog()
+    except ValueError as exc:
+        print(f"script configuration failed: {exc}", file=sys.stderr)
+        return 2
+    for name in catalog.list_names():
         print(name)
     return 0
 
@@ -46,10 +52,13 @@ def _run_script(args: argparse.Namespace) -> int:
     if dry_run_screen_state_error != 0:
         return dry_run_screen_state_error
     try:
-        script = DEFAULT_SCRIPT_CATALOG.get(args.name)
+        script = _load_cli_script_catalog().get(args.name)
     except ScriptNotFoundError as exc:
         print(exc, file=sys.stderr)
         return 1
+    except ValueError as exc:
+        print(f"script configuration failed: {exc}", file=sys.stderr)
+        return 2
     try:
         script = script_with_shared_resources(script, load_shared_script_resources(PROJECT_ROOT))
     except (LookupError, ValueError) as exc:
@@ -113,10 +122,13 @@ def _resolve_dry_run_screen_state(args: argparse.Namespace) -> tuple[int, str]:
 def _run_details(args: argparse.Namespace) -> int:
     """按名称展示脚本详情。"""
     try:
-        script = DEFAULT_SCRIPT_CATALOG.get(args.name)
+        script = _load_cli_script_catalog().get(args.name)
     except ScriptNotFoundError as exc:
         print(exc, file=sys.stderr)
         return 1
+    except ValueError as exc:
+        print(f"script configuration failed: {exc}", file=sys.stderr)
+        return 2
     try:
         script = script_with_shared_resources(script, load_shared_script_resources(PROJECT_ROOT))
         details = _describe_script(script)
@@ -195,6 +207,11 @@ def _print_control_result(result) -> int:
     if result.stderr:
         print(result.stderr, file=sys.stderr, end="")
     return result.exit_code
+
+
+def _load_cli_script_catalog():
+    """加载 CLI 当前项目可用脚本 catalog。"""
+    return load_project_script_catalog(PROJECT_ROOT, base_catalog=DEFAULT_SCRIPT_CATALOG)
 
 
 def _describe_script(script) -> ScriptDetailsResult:
