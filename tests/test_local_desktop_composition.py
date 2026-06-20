@@ -61,3 +61,4 @@ def test_build_local_control_application_passes_batch_image_locator_factory(monk
     assert isinstance(app, FakeLocalControlApplication)
     assert captured["kwargs"]["real_image_locator_factory"] is composition.build_real_screen_image_locator
     assert captured["kwargs"]["real_image_batch_locator_factory"] is composition.build_real_screen_image_batch_locator
+    assert captured["kwargs"]["screen_size_factory"] is composition.read_real_screen_size

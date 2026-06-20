@@ -146,6 +146,15 @@ def create_local_control_server(
                     payload["screenshot_url"] = f"/api/debug-screenshot?version={screenshot_version}"
                 self._send_json(payload)
                 return
+            if self.path == "/api/capture-region-diagnostics":
+                result = control_app.capture_screen_region_diagnostics()
+                payload = _result_to_payload(result)
+                if result.screenshot_path:
+                    screenshot_version += 1
+                    latest_screenshot_path = result.screenshot_path
+                    payload["screenshot_url"] = f"/api/debug-screenshot?version={screenshot_version}"
+                self._send_json(payload)
+                return
             if self.path == "/api/run-tests":
                 payload = self._read_json()
                 result = control_app.run_tests(str(payload.get("task", "all")))

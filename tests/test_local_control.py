@@ -7,6 +7,8 @@
 import subprocess
 import time
 
+from PIL import Image
+
 from game_automation.portable.domain import ImageExists, ImageMatch, ImageTemplate, Point, Rect, Repeat, ScreenWindow, Script, Wait, WaitUntil
 from game_automation.portable.engine.ports import InputDevice
 from game_automation.portable.application.local_control import LocalControlApplication, PROJECT_ROOT
@@ -242,6 +244,94 @@ def test_local_control_captures_screen_debug_screenshot(tmp_path) -> None:
     assert result.screenshot_path == str(screenshot_path)
     assert screenshot_path.read_bytes() == b"png"
     assert captured_paths == [screenshot_path]
+
+
+def test_local_control_captures_screen_region_diagnostics(tmp_path) -> None:
+    """验证 UI 用例可生成带状态区域框的诊断截图。"""
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    (assets / "screen-states.json").write_text(
+        """
+        {
+          "regions": {
+            "主页标题": {"left": 10, "top": 5, "width": 20, "height": 10}
+          },
+          "groups": [
+            {
+              "state": "主页",
+              "searches": [
+                {"name": "主页标题", "image": "home.png", "region": "主页标题"}
+              ]
+            }
+          ]
+        }
+        """,
+        encoding="utf-8",
+    )
+    Image.new("RGB", (4, 4), "black").save(assets / "home.png")
+
+    def screen_capture(path):
+        """保存测试用截图。"""
+        Image.new("RGB", (200, 100), "white").save(path)
+
+    app = LocalControlApplication(
+        project_root=tmp_path,
+        screen_capture_factory=lambda: screen_capture,
+        screen_size_factory=lambda: Point(100, 50),
+    )
+
+    result = app.capture_screen_region_diagnostics()
+
+    diagnostic_path = tmp_path / ".star" / "debug" / "screenshots" / "latest-screen-regions.png"
+    assert result.exit_code == 0
+    assert result.stderr == ""
+    assert result.stdout == f"saved region diagnostics screenshot: {diagnostic_path}\n"
+    assert result.screenshot_path == str(diagnostic_path)
+    with Image.open(diagnostic_path) as diagnostic:
+        assert diagnostic.size == (200, 100)
+        assert diagnostic.getpixel((20, 10)) != (255, 255, 255)
+
+
+def test_local_control_region_diagnostics_requires_screen_state_config(tmp_path) -> None:
+    """验证区域诊断缺少状态配置时返回清晰错误。"""
+    (tmp_path / "assets").mkdir()
+    app = LocalControlApplication(project_root=tmp_path)
+
+    result = app.capture_screen_region_diagnostics()
+
+    assert result.exit_code == 2
+    assert result.stdout == ""
+    assert "screen state config is required for region diagnostics" in result.stderr
+
+
+def test_local_control_region_diagnostics_requires_named_regions(tmp_path) -> None:
+    """验证区域诊断要求配置中存在命名区域。"""
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    (assets / "screen-states.json").write_text(
+        """
+        {
+          "regions": {},
+          "groups": [
+            {
+              "state": "主页",
+              "searches": [
+                {"name": "主页标题", "image": "home.png"}
+              ]
+            }
+          ]
+        }
+        """,
+        encoding="utf-8",
+    )
+    Image.new("RGB", (4, 4), "black").save(assets / "home.png")
+    app = LocalControlApplication(project_root=tmp_path)
+
+    result = app.capture_screen_region_diagnostics()
+
+    assert result.exit_code == 2
+    assert result.stdout == ""
+    assert "screen state config has no named regions" in result.stderr
 
 
 def test_local_control_rejects_image_asset_outside_assets_folder(tmp_path) -> None:

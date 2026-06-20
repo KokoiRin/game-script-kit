@@ -13,6 +13,7 @@
     const refreshImagesButton = document.querySelector("#refresh-images");
     const clickImageButton = document.querySelector("#click-image");
     const captureScreenButton = document.querySelector("#capture-screen");
+    const captureRegionDiagnosticsButton = document.querySelector("#capture-region-diagnostics");
     const imageConfidenceInput = document.querySelector("#image-confidence");
     const debugPreview = document.querySelector("#debug-preview");
     const debugScreenshot = document.querySelector("#debug-screenshot");
@@ -32,6 +33,7 @@
       runTestsButton.disabled = isBusy;
       refreshImagesButton.disabled = isBusy;
       captureScreenButton.disabled = isBusy;
+      captureRegionDiagnosticsButton.disabled = isBusy;
       clickImageButton.disabled = isBusy || !imageAssetSelect.value;
       stopScriptButton.disabled = !activeScriptRun;
     }
@@ -248,6 +250,22 @@
       }
     }
 
+    async function captureRegionDiagnostics() {
+      setBusy(true);
+      statusEl.textContent = "正在生成区域诊断...";
+      outputEl.textContent = "";
+      try {
+        const response = await fetch("/api/capture-region-diagnostics", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({})
+        });
+        renderResult("区域诊断", await response.json());
+      } finally {
+        setBusy(false);
+      }
+    }
+
     async function startScreenStateProbe() {
       activeScreenStateProbe = true;
       setScreenStateBusy(true);
@@ -300,6 +318,7 @@
     runTestsButton.addEventListener("click", runTests);
     refreshImagesButton.addEventListener("click", loadImageAssets);
     captureScreenButton.addEventListener("click", captureScreen);
+    captureRegionDiagnosticsButton.addEventListener("click", captureRegionDiagnostics);
     clickImageButton.addEventListener("click", clickImage);
     startScreenStateProbeButton.addEventListener("click", startScreenStateProbe);
     stopScreenStateProbeButton.addEventListener("click", stopScreenStateProbe);
