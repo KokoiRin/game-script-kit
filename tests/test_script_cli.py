@@ -607,6 +607,81 @@ def test_star_cli_probe_state_outputs_current_state(monkeypatch, capsys) -> None
     ]
 
 
+def test_star_cli_probe_state_outputs_json(monkeypatch, capsys) -> None:
+    """验证 probe-state 可以输出机器可读 JSON。"""
+    calls = []
+
+    class FakeApp:
+        def probe_screen_state_once(self, *, min_confidence=0.8, logger=None):
+            """记录最低置信度并返回含三种候选状态的探测结果。"""
+            calls.append(min_confidence)
+            return ScreenStateProbeResult(
+                candidates=(
+                    ScreenStateCandidateResult(
+                        candidate=ScreenStateCandidate(
+                            "主页",
+                            ImageTemplate("assets/主页.png"),
+                            search_name="主页标识",
+                        ),
+                        match=ImageMatch(Rect(10, 20, 30, 40), confidence=0.91),
+                        elapsed_ms=4.0,
+                    ),
+                    ScreenStateCandidateResult(
+                        candidate=ScreenStateCandidate(
+                            "人物",
+                            ImageTemplate("assets/人物.png"),
+                            search_name="人物标识",
+                        ),
+                        match=None,
+                        elapsed_ms=3.0,
+                    ),
+                    ScreenStateCandidateResult(
+                        candidate=ScreenStateCandidate("装备", ImageTemplate("assets/装备.png")),
+                        match=None,
+                        elapsed_ms=0.0,
+                        skipped=True,
+                    ),
+                ),
+                elapsed_ms=7.0,
+            )
+
+    monkeypatch.setattr(cli, "build_local_control_application", lambda: FakeApp())
+
+    assert main(["probe-state", "--json", "--min-confidence", "0.75"]) == 0
+
+    captured = capsys.readouterr()
+    assert captured.err == ""
+    assert calls == [0.75]
+    assert json.loads(captured.out) == {
+        "current_state": "主页",
+        "known": True,
+        "elapsed_ms": 7.0,
+        "candidates": [
+            {
+                "name": "主页",
+                "search_name": "主页标识",
+                "status": "matched",
+                "elapsed_ms": 4.0,
+                "confidence": 0.91,
+            },
+            {
+                "name": "人物",
+                "search_name": "人物标识",
+                "status": "missed",
+                "elapsed_ms": 3.0,
+                "confidence": None,
+            },
+            {
+                "name": "装备",
+                "search_name": None,
+                "status": "skipped",
+                "elapsed_ms": 0.0,
+                "confidence": None,
+            },
+        ],
+    }
+
+
 def test_star_cli_probe_state_uses_min_confidence(monkeypatch, capsys) -> None:
     """验证 probe-state 子命令会传递最低置信度。"""
     calls = []
