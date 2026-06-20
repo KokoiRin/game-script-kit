@@ -1,0 +1,3 @@
+- [x] 扩展脚本详情 application 结果，收集并返回去重后的 `ScreenStateIs` 状态依赖。
+- [x] 扩展本地 UI HTTP payload 和静态页面交互，支持使用脚本状态填充 dry-run 状态。
+- [x] 补充 application、HTTP adapter、静态 UI 测试，并运行 OpenSpec change 校验。

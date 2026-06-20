@@ -111,6 +111,7 @@ def test_local_control_describes_state_script_dependencies(tmp_path) -> None:
     assert details.stderr == ""
     assert any('If ScreenStateIs("主页")' in step for step in details.steps)
     assert details.dependencies == ("状态: 主页", "图片: assets/start.png")
+    assert details.state_dependencies == ("主页",)
     assert details.readiness == (
         ("状态: 主页", "ok", "状态已配置"),
         ("图片: assets/start.png", "ok", "图片文件可用"),
@@ -150,6 +151,7 @@ def test_local_control_describes_unknown_script() -> None:
     assert details.name == "missing"
     assert details.steps == ()
     assert details.dependencies == ()
+    assert details.state_dependencies == ()
     assert details.readiness == ()
     assert details.stderr == "unknown script: missing"
 

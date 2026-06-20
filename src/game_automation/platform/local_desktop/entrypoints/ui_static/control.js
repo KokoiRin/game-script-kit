@@ -7,6 +7,7 @@
     const dryRunScreenStateInput = document.querySelector("#dry-run-screen-state");
     const screenStateSuggestions = document.querySelector("#screen-state-suggestions");
     const useProbedScreenStateButton = document.querySelector("#use-probed-screen-state");
+    const useScriptScreenStateButton = document.querySelector("#use-script-screen-state");
     const statusEl = document.querySelector("#status");
     const outputEl = document.querySelector("#output");
     const runScriptButton = document.querySelector("#run-script");
@@ -32,6 +33,7 @@
     let screenStateProbePollTimer = null;
     let activeScreenStateProbe = false;
     let latestScreenState = "未知";
+    let scriptStateDependencies = [];
 
     function setBusy(isBusy) {
       runScriptButton.disabled = isBusy;
@@ -41,6 +43,7 @@
       captureRegionDiagnosticsButton.disabled = isBusy;
       clickImageButton.disabled = isBusy || !imageAssetSelect.value;
       useProbedScreenStateButton.disabled = isBusy;
+      useScriptScreenStateButton.disabled = isBusy;
       stopScriptButton.disabled = !activeScriptRun;
     }
 
@@ -105,6 +108,15 @@
       statusEl.textContent = `已使用探测状态：${latestScreenState}`;
     }
 
+    function useScriptScreenState() {
+      if (scriptStateDependencies.length === 0) {
+        statusEl.textContent = "当前脚本没有状态依赖";
+        return;
+      }
+      dryRunScreenStateInput.value = scriptStateDependencies[0];
+      statusEl.textContent = `已使用脚本状态：${scriptStateDependencies[0]}`;
+    }
+
     function scheduleScriptRunPoll() {
       if (scriptRunPollTimer) {
         window.clearTimeout(scriptRunPollTimer);
@@ -157,6 +169,7 @@
     async function loadScriptDetails() {
       if (!scriptSelect.value) {
         scriptDetails.textContent = "";
+        scriptStateDependencies = [];
         return;
       }
       const response = await fetch(`/api/script-details?name=${encodeURIComponent(scriptSelect.value)}`);
@@ -165,10 +178,12 @@
     }
 
     function renderScriptDetails(payload) {
+      scriptStateDependencies = [];
       if (payload.exit_code !== 0) {
         scriptDetails.textContent = payload.stderr || "脚本详情读取失败";
         return;
       }
+      scriptStateDependencies = payload.state_dependencies || [];
       const lines = [`脚本：${payload.name}`, "步骤："];
       for (const step of payload.steps || []) {
         lines.push(`- ${step}`);
@@ -394,6 +409,7 @@
     stopScriptButton.addEventListener("click", stopScript);
     scriptSelect.addEventListener("change", loadScriptDetails);
     useProbedScreenStateButton.addEventListener("click", useProbedScreenState);
+    useScriptScreenStateButton.addEventListener("click", useScriptScreenState);
     runTestsButton.addEventListener("click", runTests);
     refreshImagesButton.addEventListener("click", loadImageAssets);
     captureScreenButton.addEventListener("click", captureScreen);
