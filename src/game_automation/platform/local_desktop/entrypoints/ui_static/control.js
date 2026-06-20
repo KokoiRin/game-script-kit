@@ -24,6 +24,7 @@
     const debugScreenshot = document.querySelector("#debug-screenshot");
     const screenStateConfidenceInput = document.querySelector("#screen-state-confidence");
     const screenStateIntervalInput = document.querySelector("#screen-state-interval");
+    const screenStateConfigSummary = document.querySelector("#screen-state-config-summary");
     const screenStateCurrent = document.querySelector("#screen-state-current");
     const screenStateStats = document.querySelector("#screen-state-stats");
     const screenStateLog = document.querySelector("#screen-state-log");
@@ -268,6 +269,35 @@
       }
     }
 
+    async function loadScreenStateConfigSummary() {
+      const response = await fetch("/api/screen-state-config");
+      const payload = await response.json();
+      renderScreenStateConfigSummary(payload);
+    }
+
+    function renderScreenStateConfigSummary(payload) {
+      if (payload.exit_code !== 0) {
+        screenStateConfigSummary.textContent = payload.stderr || "状态识别配置读取失败";
+        return;
+      }
+      const states = payload.states || [];
+      if (states.length === 0) {
+        screenStateConfigSummary.textContent = "未配置状态识别";
+        return;
+      }
+      const lines = ["状态识别配置："];
+      for (const state of states) {
+        lines.push(`- ${state.state}`);
+        for (const search of state.searches || []) {
+          const confidence = search.min_confidence === null || search.min_confidence === undefined
+            ? "默认"
+            : search.min_confidence;
+          lines.push(`  - ${search.name} / ${search.image} / ${search.region} / ${confidence}`);
+        }
+      }
+      screenStateConfigSummary.textContent = lines.join("\n");
+    }
+
     async function runScript() {
       activeScriptRun = true;
       setBusy(true);
@@ -448,3 +478,4 @@
     loadScripts();
     loadImageAssets();
     loadScreenStateNames();
+    loadScreenStateConfigSummary();

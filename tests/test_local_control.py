@@ -681,6 +681,87 @@ def test_local_control_lists_no_screen_state_names_for_invalid_config(tmp_path) 
     assert app.list_screen_state_names() == ()
 
 
+def test_local_control_describes_screen_state_config_summary(tmp_path) -> None:
+    """验证 UI 用例可生成用户可读的状态配置摘要。"""
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    Image.new("RGB", (4, 4), "black").save(assets / "home.png")
+    (assets / "screen-states.json").write_text(
+        """
+        {
+          "regions": {
+            "主页标题": {"left": 10, "top": 5, "width": 20, "height": 10}
+          },
+          "groups": [
+            {
+              "state": "主页",
+              "searches": [
+                {
+                  "name": "主页标识",
+                  "image": "home.png",
+                  "region": "主页标题",
+                  "min_confidence": 0.75
+                }
+              ]
+            }
+          ]
+        }
+        """,
+        encoding="utf-8",
+    )
+    app = LocalControlApplication(project_root=tmp_path)
+
+    result = app.describe_screen_state_config()
+
+    assert result.exit_code == 0
+    assert result.stderr == ""
+    assert result.groups[0].state == "主页"
+    assert result.groups[0].searches[0].name == "主页标识"
+    assert result.groups[0].searches[0].image == "home.png"
+    assert result.groups[0].searches[0].region == "主页标题"
+    assert result.groups[0].searches[0].min_confidence == 0.75
+
+
+def test_local_control_describes_empty_screen_state_config_when_missing(tmp_path) -> None:
+    """验证缺少状态配置时摘要为空但不报错。"""
+    (tmp_path / "assets").mkdir()
+    app = LocalControlApplication(project_root=tmp_path)
+
+    result = app.describe_screen_state_config()
+
+    assert result.exit_code == 0
+    assert result.groups == ()
+    assert result.stderr == ""
+
+
+def test_local_control_reports_invalid_screen_state_config_summary(tmp_path) -> None:
+    """验证状态配置摘要会报告非法配置。"""
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    (assets / "screen-states.json").write_text(
+        """
+        {
+          "groups": [
+            {
+              "state": "主页",
+              "searches": [
+                {"name": "主页标识", "image": "missing.png"}
+              ]
+            }
+          ]
+        }
+        """,
+        encoding="utf-8",
+    )
+    app = LocalControlApplication(project_root=tmp_path)
+
+    result = app.describe_screen_state_config()
+
+    assert result.exit_code == 2
+    assert result.groups == ()
+    assert "screen state search image does not exist" in result.stderr
+
+
 def test_local_control_clicks_selected_image_asset_in_dry_run(tmp_path) -> None:
     """验证 UI 用例可把 assets 里的图片作为目标执行查找并点击脚本。"""
     assets = tmp_path / "assets"

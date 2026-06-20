@@ -46,6 +46,18 @@
       border-radius: 8px;
       padding: 14px;
     }
+    .screen-state-config-summary {
+      margin-top: 12px;
+      min-height: 42px;
+      border: 1px solid #d8dde5;
+      border-radius: 8px;
+      background: #ffffff;
+      color: #15171a;
+      padding: 12px 14px;
+      font-size: 13px;
+      line-height: 1.5;
+      white-space: pre-wrap;
+    }
     .tabs {
       display: flex;
       gap: 8px;

@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +22,20 @@ from game_automation.portable.domain import (
     SearchRef,
     TargetCatalog,
 )
+
+
+@dataclass(frozen=True, slots=True)
+class ScreenStateConfigSearchSummary:
+    name: str
+    image: str
+    region: str
+    min_confidence: float | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ScreenStateConfigGroupSummary:
+    state: str
+    searches: tuple[ScreenStateConfigSearchSummary, ...]
 
 
 def load_screen_state_candidates(
@@ -110,6 +125,50 @@ def load_screen_state_names(config_path: Path) -> tuple[str, ...] | None:
     return tuple(names)
 
 
+def load_screen_state_config_summary(
+    config_path: Path,
+    *,
+    asset_root: Path,
+    supported_suffixes: frozenset[str],
+) -> tuple[ScreenStateConfigGroupSummary, ...] | None:
+    """读取状态配置并转换成用户可读摘要，不存在时返回 None。"""
+    data = _load_screen_state_config(config_path)
+    if data is None:
+        return None
+
+    regions = _parse_regions(data.get("regions", {}))
+    region_names = {region.name for region in regions}
+    groups = data.get("groups")
+    if not isinstance(groups, list) or not groups:
+        raise ValueError("screen state config groups must be a non-empty list")
+
+    summaries = []
+    for group in groups:
+        if not isinstance(group, dict):
+            raise ValueError("screen state group must be an object")
+        state = _required_text(group, "state", "screen state group state")
+        search_items = group.get("searches")
+        if not isinstance(search_items, list) or not search_items:
+            raise ValueError(f"screen state group searches must be non-empty: {state}")
+        summaries.append(
+            ScreenStateConfigGroupSummary(
+                state,
+                tuple(
+                    _screen_state_search_summary(
+                        state,
+                        search_item,
+                        search_index=search_index,
+                        asset_root=asset_root,
+                        supported_suffixes=supported_suffixes,
+                        region_names=region_names,
+                    )
+                    for search_index, search_item in enumerate(search_items)
+                ),
+            )
+        )
+    return tuple(summaries)
+
+
 def _load_screen_state_config(config_path: Path) -> dict[str, Any] | None:
     """读取状态配置 JSON object，不存在时返回 None。"""
     if not config_path.exists():
@@ -121,6 +180,48 @@ def _load_screen_state_config(config_path: Path) -> dict[str, Any] | None:
     if not isinstance(data, dict):
         raise ValueError("screen state config must be an object")
     return data
+
+
+def _screen_state_search_summary(
+    state: str,
+    search_item: Any,
+    *,
+    search_index: int,
+    asset_root: Path,
+    supported_suffixes: frozenset[str],
+    region_names: set[str],
+) -> ScreenStateConfigSearchSummary:
+    """把单个搜索项转换成用户可读摘要并复用配置校验规则。"""
+    if not isinstance(search_item, dict):
+        raise ValueError("screen state search must be an object")
+    search_name = search_item.get("name")
+    if search_name is None:
+        search_name = f"{state}:{search_index + 1}"
+    if not isinstance(search_name, str) or not search_name.strip():
+        raise ValueError("screen state search name cannot be empty")
+    image = _required_text(search_item, "image", "screen state search image")
+    _resolve_asset_image(image, asset_root=asset_root, supported_suffixes=supported_suffixes)
+    region_ref = _parse_region_ref(search_item.get("region"))
+    return ScreenStateConfigSearchSummary(
+        name=search_name,
+        image=image,
+        region=_summarize_region(region_ref, region_names=region_names),
+        min_confidence=_parse_optional_confidence(search_item.get("min_confidence")),
+    )
+
+
+def _summarize_region(region: Rect | RegionRef | None, *, region_names: set[str]) -> str:
+    """把搜索区域转换成 UI 可展示文本，并校验命名区域存在。"""
+    if region is None:
+        return "全屏"
+    if isinstance(region, RegionRef):
+        if region.name not in region_names:
+            raise LookupError(f"unknown region target: {region.name}")
+        return region.name
+    return (
+        f"left={region.left}, top={region.top}, "
+        f"width={region.width}, height={region.height}"
+    )
 
 
 def _parse_regions(value: Any) -> tuple[NamedRegion, ...]:

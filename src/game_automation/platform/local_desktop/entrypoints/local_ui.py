@@ -76,6 +76,9 @@ def create_local_control_server(
             if path == "/api/screen-state-names":
                 self._send_json({"states": list(control_app.list_screen_state_names())})
                 return
+            if path == "/api/screen-state-config":
+                self._send_json(_screen_state_config_to_payload(control_app.describe_screen_state_config()))
+                return
             if path == "/api/script-run":
                 self._send_json(_status_to_payload(control_app.current_script_run()))
                 return
@@ -274,6 +277,29 @@ def _probe_status_to_payload(status) -> dict[str, object]:
         "stdout": status.stdout,
         "stderr": status.stderr,
         "stats": _probe_stats_to_payload(status.stats),
+    }
+
+
+def _screen_state_config_to_payload(result) -> dict[str, object]:
+    """把界面状态配置摘要转换成 HTTP JSON payload。"""
+    return {
+        "exit_code": result.exit_code,
+        "states": [
+            {
+                "state": group.state,
+                "searches": [
+                    {
+                        "name": search.name,
+                        "image": search.image,
+                        "region": search.region,
+                        "min_confidence": search.min_confidence,
+                    }
+                    for search in group.searches
+                ],
+            }
+            for group in result.groups
+        ],
+        "stderr": result.stderr,
     }
 
 
