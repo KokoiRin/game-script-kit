@@ -130,6 +130,7 @@ class ScreenStateProbeStatus:
     exit_code: int | None = None
     stdout: str = ""
     stderr: str = ""
+    hints: tuple[str, ...] = ()
     stats: ScreenStateProbeStats = ScreenStateProbeStats()
     candidates: tuple[ScreenStateProbeCandidateSummary, ...] = ()
 
@@ -277,6 +278,7 @@ class _BackgroundScreenStateProbe:
         self._last_elapsed_ms: float | None = None
         self._matched_counts: dict[str, int] = {}
         self._skipped_counts: dict[str, int] = {}
+        self._hints: tuple[str, ...] = ()
         self._candidates: tuple[ScreenStateProbeCandidateSummary, ...] = ()
 
     def record_result(self, result: ScreenStateProbeResult) -> None:
@@ -293,6 +295,7 @@ class _BackgroundScreenStateProbe:
                 if candidate.skipped:
                     name = candidate.candidate.name
                     self._skipped_counts[name] = self._skipped_counts.get(name, 0) + 1
+            self._hints = result.hints
             self._candidates = tuple(
                 _probe_candidate_summary(candidate)
                 for candidate in result.candidates
@@ -314,6 +317,7 @@ class _BackgroundScreenStateProbe:
                 exit_code=self._exit_code,
                 stdout=stdout,
                 stderr=stderr,
+                hints=self._hints,
                 stats=ScreenStateProbeStats(
                     rounds=self._rounds,
                     last_elapsed_ms=self._last_elapsed_ms,

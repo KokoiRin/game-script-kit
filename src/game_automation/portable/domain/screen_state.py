@@ -13,6 +13,9 @@ from game_automation.portable.domain.image_matching import ImageMatch, ImageTemp
 from game_automation.portable.domain.point_aliases import ImageSearchSpec
 
 UNKNOWN_SCREEN_STATE = "未知"
+SCREEN_STATE_PROBE_ZERO_CONFIDENCE_HINT = (
+    "可能没有截到有效游戏画面，请检查屏幕录制权限、前台窗口或桌面会话"
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -103,3 +106,18 @@ class ScreenStateProbeResult:
         if not found_candidates:
             return None
         return max(found_candidates, key=lambda candidate: candidate.confidence or 0)
+
+    @property
+    def hints(self) -> tuple[str, ...]:
+        """返回本轮探测结果可推导出的用户诊断提示。"""
+        if self.known:
+            return ()
+        executed_candidates = tuple(candidate for candidate in self.candidates if not candidate.skipped)
+        if not executed_candidates:
+            return ()
+        best_confidences = tuple(candidate.best_confidence for candidate in executed_candidates)
+        if any(confidence is None for confidence in best_confidences):
+            return ()
+        if max(confidence or 0 for confidence in best_confidences) == 0:
+            return (SCREEN_STATE_PROBE_ZERO_CONFIDENCE_HINT,)
+        return ()

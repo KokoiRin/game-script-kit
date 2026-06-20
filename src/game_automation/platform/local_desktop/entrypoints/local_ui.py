@@ -324,6 +324,7 @@ def _probe_status_to_payload(status) -> dict[str, object]:
         "exit_code": status.exit_code,
         "stdout": status.stdout,
         "stderr": status.stderr,
+        "hints": list(status.hints),
         "stats": _probe_stats_to_payload(status.stats),
         "candidates": _probe_candidates_to_payload(status.candidates),
     }
