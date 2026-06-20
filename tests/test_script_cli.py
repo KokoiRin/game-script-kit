@@ -54,6 +54,66 @@ def test_star_cli_runs_named_script_with_dry_run(capsys) -> None:
     assert "wait 10s" in output
 
 
+def test_star_cli_shows_script_details(capsys) -> None:
+    """验证 details 子命令会展示脚本步骤和依赖检查。"""
+    assert main(["details", "click-image-demo"]) == 0
+
+    output = capsys.readouterr().out
+    assert "脚本：click-image-demo" in output
+    assert "步骤：" in output
+    assert "- Click ImageTarget(assets/start.png, min_confidence=1)" in output
+    assert "依赖：" in output
+    assert "- 图片: assets/start.png" in output
+    assert "图片依赖：" in output
+    assert "- assets/start.png" in output
+    assert "依赖检查：" in output
+
+
+def test_star_cli_details_uses_screen_state_search_ref(monkeypatch, tmp_path, capsys) -> None:
+    """验证 details 子命令会复用状态配置搜索别名。"""
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    (assets / "离开.png").write_bytes(b"fake")
+    (assets / "screen-states.json").write_text(
+        json.dumps(
+            {
+                "groups": [
+                    {
+                        "state": "战斗失败",
+                        "searches": [{"name": "离开按钮", "image": "离开.png"}],
+                    },
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    script = Script(
+        name="shared-search-details-cli",
+        window=ScreenWindow(),
+        steps=(Click(ImageTarget(SearchRef("离开按钮"))),),
+    )
+    monkeypatch.setattr(cli, "DEFAULT_SCRIPT_CATALOG", ScriptCatalog((script,)))
+    monkeypatch.setattr(cli, "PROJECT_ROOT", tmp_path)
+
+    assert main(["details", "shared-search-details-cli"]) == 0
+
+    output = capsys.readouterr().out
+    assert "脚本：shared-search-details-cli" in output
+    assert 'Click ImageTarget(SearchRef("离开按钮"), min_confidence=1)' in output
+    assert f"- {assets / '离开.png'}" in output
+    assert "命名搜索已配置，图片文件可用" in output
+
+
+def test_star_cli_details_reports_unknown_script(capsys) -> None:
+    """验证 details 子命令会报告未知脚本。"""
+    assert main(["details", "missing"]) == 1
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "unknown script: missing" in captured.err
+
+
 def test_star_cli_runs_repeat_demo_with_dry_run(capsys) -> None:
     """验证 repeat-demo 的 dry-run 会展开 Repeat 内部步骤。"""
     assert main(["run", "repeat-demo", "--dry-run"]) == 0

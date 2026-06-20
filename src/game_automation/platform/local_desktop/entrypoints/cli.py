@@ -10,7 +10,14 @@ import argparse
 import sys
 
 from game_automation.platform.local_desktop.composition import run_script_on_local_desktop
-from game_automation.portable.application.project_assets import PROJECT_ROOT
+from game_automation.portable.application.project_assets import (
+    IMAGE_ASSET_SUFFIXES,
+    PROJECT_ROOT,
+    SCREEN_STATE_CONFIG_NAME,
+    image_asset_root,
+)
+from game_automation.portable.application.screen_state_config import load_screen_state_names
+from game_automation.portable.application.script_details import ScriptDetailsResult, describe_script_details
 from game_automation.portable.application.script_resources import (
     load_shared_script_resources,
     script_with_shared_resources,
@@ -49,6 +56,73 @@ def _run_script(args: argparse.Namespace) -> int:
     if result.error_message is not None:
         print(result.error_message, file=sys.stderr)
     return result.exit_code
+
+
+def _run_details(args: argparse.Namespace) -> int:
+    """按名称展示脚本详情。"""
+    try:
+        script = DEFAULT_SCRIPT_CATALOG.get(args.name)
+    except ScriptNotFoundError as exc:
+        print(exc, file=sys.stderr)
+        return 1
+    try:
+        script = script_with_shared_resources(script, load_shared_script_resources(PROJECT_ROOT))
+        details = describe_script_details(
+            script,
+            asset_root=image_asset_root(PROJECT_ROOT),
+            supported_image_suffixes=IMAGE_ASSET_SUFFIXES,
+            state_names=_configured_screen_state_names(),
+        )
+    except (LookupError, ValueError) as exc:
+        print(f"script details configuration failed: {exc}", file=sys.stderr)
+        return 2
+    _print_script_details(details)
+    return details.exit_code
+
+
+def _configured_screen_state_names() -> tuple[str, ...] | None:
+    """读取状态配置中的状态名，配置不可用时返回 None。"""
+    try:
+        return load_screen_state_names(image_asset_root(PROJECT_ROOT) / SCREEN_STATE_CONFIG_NAME)
+    except ValueError:
+        return None
+
+
+def _print_script_details(details: ScriptDetailsResult) -> None:
+    """把脚本详情结果打印成稳定的 CLI 文本。"""
+    if details.exit_code != 0:
+        print(details.stderr, file=sys.stderr, end="")
+        return
+    print(f"脚本：{details.name}")
+    _print_section("步骤", details.steps)
+    _print_section("依赖", details.dependencies)
+    _print_section("图片依赖", details.image_dependencies)
+    _print_section(
+        "依赖检查",
+        tuple(
+            f"{_readiness_status_label(status)} {label}：{message}"
+            for label, status, message in details.readiness
+        ),
+    )
+
+
+def _print_section(title: str, lines: tuple[str, ...]) -> None:
+    """打印一个带标题的详情分组。"""
+    print(f"{title}：")
+    if not lines:
+        print("- 无")
+        return
+    for line in lines:
+        print(f"- {line}")
+
+
+def _readiness_status_label(status: str) -> str:
+    """把 readiness 状态转换成 CLI 展示标签。"""
+    if status == "ok":
+        return "[OK]"
+    if status == "missing":
+        return "[缺失]"
+    return "[未知]"
 
 
 def _run_recorder(args: argparse.Namespace) -> int:
@@ -100,6 +174,9 @@ def main(argv: list[str] | None = None) -> int:
 
     subparsers.add_parser("list", help="List available scripts.")
 
+    details_parser = subparsers.add_parser("details", help="Show a named script's steps and dependencies.")
+    details_parser.add_argument("name", help="Script name to inspect.")
+
     run_parser = subparsers.add_parser("run", help="Run a named script.")
     run_parser.add_argument("name", help="Script name to run.")
     mode = run_parser.add_mutually_exclusive_group()
@@ -135,6 +212,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "list":
         return _run_list()
+    elif args.command == "details":
+        return _run_details(args)
     elif args.command == "run":
         return _run_script(args)
     elif args.command == "recorder":
