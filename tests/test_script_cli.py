@@ -123,6 +123,52 @@ def test_star_cli_capture_region_diagnostics_reports_application_error(monkeypat
     assert captured.err == "screen state config has no named regions\n"
 
 
+def test_star_cli_capture_region_crops_outputs_application_result(monkeypatch, capsys) -> None:
+    """验证 capture-region-crops 子命令复用 application 区域裁剪结果。"""
+    calls = []
+
+    class FakeApp:
+        def capture_screen_region_crops(self):
+            """返回固定区域裁剪结果。"""
+            calls.append("capture-crops")
+            return ControlResult(
+                exit_code=0,
+                stdout=(
+                    "saved region crop: .star/debug/screenshots/regions/主页标题.png\n"
+                    "saved region crop: .star/debug/screenshots/regions/普通标题.png\n"
+                ),
+            )
+
+    monkeypatch.setattr(cli, "build_local_control_application", lambda: FakeApp())
+
+    assert main(["capture-region-crops"]) == 0
+
+    captured = capsys.readouterr()
+    assert captured.out == (
+        "saved region crop: .star/debug/screenshots/regions/主页标题.png\n"
+        "saved region crop: .star/debug/screenshots/regions/普通标题.png\n"
+    )
+    assert captured.err == ""
+    assert calls == ["capture-crops"]
+
+
+def test_star_cli_capture_region_crops_reports_application_error(monkeypatch, capsys) -> None:
+    """验证 capture-region-crops 会把 application 错误写入 stderr。"""
+
+    class FakeApp:
+        def capture_screen_region_crops(self):
+            """返回固定区域裁剪失败结果。"""
+            return ControlResult(exit_code=1, stderr="screen capture is not configured\n")
+
+    monkeypatch.setattr(cli, "build_local_control_application", lambda: FakeApp())
+
+    assert main(["capture-region-crops"]) == 1
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == "screen capture is not configured\n"
+
+
 def test_star_cli_runs_named_script_with_dry_run(capsys) -> None:
     """验证 dry-run 可以按名称运行指定脚本并打印操作。"""
     assert main(["run", "recorded-clicks", "--dry-run"]) == 0
