@@ -12,7 +12,7 @@ from typing import TypeAlias
 from game_automation.portable.domain.color import Color
 from game_automation.portable.domain.geometry import Point, Rect
 from game_automation.portable.domain.image_matching import ImageTemplate
-from game_automation.portable.domain.point_aliases import ImageRef
+from game_automation.portable.domain.point_aliases import ImageRef, ImageSearchSpec, SearchRef
 
 
 @dataclass(frozen=True, slots=True)
@@ -29,13 +29,13 @@ class ColorIs:
 
 @dataclass(frozen=True, slots=True)
 class ImageExists:
-    template: ImageTemplate | ImageRef
+    template: ImageTemplate | ImageRef | ImageSearchSpec | SearchRef
     region: Rect | None = None
-    min_confidence: float = 1.0
+    min_confidence: float | None = None
 
     def __post_init__(self) -> None:
         """校验图片匹配最低置信度必须大于 0 且不超过 1。"""
-        if not 0 < self.min_confidence <= 1:
+        if self.min_confidence is not None and not 0 < self.min_confidence <= 1:
             raise ValueError("image exists min_confidence must be greater than 0 and at most 1")
 
 

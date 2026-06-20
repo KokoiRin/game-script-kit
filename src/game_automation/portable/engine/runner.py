@@ -25,7 +25,7 @@ from game_automation.portable.domain import (
     WaitUntil,
 )
 from game_automation.portable.engine.condition_evaluator import evaluate_condition
-from game_automation.portable.engine.image_query import locate_image
+from game_automation.portable.engine.image_query import locate_image, resolve_image_search
 from game_automation.portable.engine.ports import (
     CancellationToken,
     InputDevice,
@@ -157,18 +157,24 @@ class ScriptRunner:
         """通过图像定位端口把图片目标解析成屏幕坐标。"""
         if self.image_locator is None:
             raise RuntimeError("image locator is required for image targets")
-        template = script.resources.resolve_image(target.template)
+        search = resolve_image_search(
+            target.template,
+            resources=script.resources,
+            region=target.region,
+            min_confidence=target.min_confidence,
+        )
         result = locate_image(
             target.template,
             image_locator=self.image_locator,
             resources=script.resources,
-            region=self._resolve_image_target_region(script, target.region),
+            region=target.region,
+            region_resolver=lambda region: self._resolve_image_target_region(script, region),
             min_confidence=target.min_confidence,
             logger=self.logger,
         )
         match = result.match
         if match is None:
-            raise RuntimeError(f"image target not found: {template.path}")
+            raise RuntimeError(f"image target not found: {search.template.path}")
         anchor_point = match.point_at(target.anchor)
         return Point(
             anchor_point.x + target.offset.x,

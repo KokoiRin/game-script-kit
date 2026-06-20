@@ -7,43 +7,96 @@ ScreenImageLocator；它不创建真实 adapter、不截图，也不解释点击
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import dataclass
 from time import perf_counter
 
-from game_automation.portable.domain import ImageLookupResult, ImageRef, ImageTemplate, Rect, TargetCatalog
+from game_automation.portable.domain import (
+    ImageLookupResult,
+    ImageRef,
+    ImageSearchSpec,
+    ImageTemplate,
+    Rect,
+    SearchRef,
+    TargetCatalog,
+)
 from game_automation.portable.engine.ports import RunLogger, ScreenImageLocator
 
 
+ImageSearchSource = ImageTemplate | ImageRef | ImageSearchSpec | SearchRef
+
+
+@dataclass(frozen=True, slots=True)
+class ResolvedImageSearch:
+    template: ImageTemplate
+    region: Rect | None
+    min_confidence: float
+
+
 def locate_image(
-    image: ImageTemplate | ImageRef,
+    image: ImageSearchSource,
     *,
     image_locator: ScreenImageLocator | None,
     resources: TargetCatalog,
     region: Rect | None = None,
-    min_confidence: float = 1.0,
+    min_confidence: float | None = None,
+    region_resolver: Callable[[Rect | None], Rect | None] | None = None,
     logger: RunLogger | None = None,
     clock: Callable[[], float] = perf_counter,
 ) -> ImageLookupResult:
     """解析图片引用并返回一次图片匹配查询结果。"""
     if image_locator is None:
         raise RuntimeError("image locator is required for image lookup")
-    template = resources.resolve_image(image)
-    started_at = clock()
-    match = image_locator.locate(
-        template,
+    search = resolve_image_search(
+        image,
+        resources=resources,
         region=region,
         min_confidence=min_confidence,
+    )
+    search_region = search.region
+    if region_resolver is not None:
+        search_region = region_resolver(search_region)
+    started_at = clock()
+    match = image_locator.locate(
+        search.template,
+        region=search_region,
+        min_confidence=search.min_confidence,
         logger=logger,
     )
     elapsed_ms = (clock() - started_at) * 1000
     _log_image_match(
         logger,
-        template=template,
-        region=region,
-        min_confidence=min_confidence,
+        template=search.template,
+        region=search_region,
+        min_confidence=search.min_confidence,
         elapsed_ms=elapsed_ms,
         result=ImageLookupResult(match),
     )
     return ImageLookupResult(match)
+
+
+def resolve_image_search(
+    image: ImageSearchSource,
+    *,
+    resources: TargetCatalog,
+    region: Rect | None = None,
+    min_confidence: float | None = None,
+) -> ResolvedImageSearch:
+    """解析图片、搜索规格和显式覆盖，生成最终图片搜索参数。"""
+    if isinstance(image, ImageSearchSpec | SearchRef):
+        search = resources.resolve_search(image)
+    else:
+        search = ImageSearchSpec(resources.resolve_image(image))
+    return ResolvedImageSearch(
+        template=resources.resolve_image(search.image),
+        region=region if region is not None else search.region,
+        min_confidence=(
+            min_confidence
+            if min_confidence is not None
+            else search.min_confidence
+            if search.min_confidence is not None
+            else 1.0
+        ),
+    )
 
 
 def _log_image_match(

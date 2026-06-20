@@ -15,17 +15,26 @@ from game_automation.portable.domain import (
     If,
     ImageExists,
     ImageRef,
+    ImageSearchSpec,
     ImageTarget,
     ImageTemplate,
     OffsetTarget,
     PointRef,
     Repeat,
     ScreenStateIs,
+    SearchRef,
     Script,
     Step,
     TargetCatalog,
     WaitUntil,
 )
+from game_automation.portable.domain.point_aliases import (
+    UnknownImageNameError,
+    UnknownImageSearchNameError,
+)
+
+
+ImageDependencySource = ImageTemplate | ImageRef | ImageSearchSpec | SearchRef
 
 
 @dataclass(frozen=True, slots=True)
@@ -183,14 +192,14 @@ def _collect_target_image_dependencies(
 
 
 def _append_resolved_image_dependency(
-    image: ImageTemplate | ImageRef,
+    image: ImageDependencySource,
     images: list[str],
     *,
     resources: TargetCatalog,
 ) -> None:
-    """把直接模板或可解析命名图片追加为 dry-run 可用路径。"""
+    """把直接模板、命名图片或命名搜索追加为 dry-run 可用路径。"""
     try:
-        images.append(resources.resolve_image(image).path)
+        images.append(_resolve_image_dependency_template(image, resources=resources).path)
     except LookupError:
         return
 
@@ -199,7 +208,7 @@ def _append_resolved_image_dependency(
 class _ImageReadinessDependency:
     label: str
     template: ImageTemplate | None
-    named: bool = False
+    source_kind: str = "direct"
 
 
 def _collect_image_readiness_dependencies(
@@ -263,7 +272,7 @@ def _collect_target_image_readiness_dependencies(
 
 
 def _image_readiness_dependency(
-    image: ImageTemplate | ImageRef,
+    image: ImageDependencySource,
     *,
     resources: TargetCatalog,
 ) -> _ImageReadinessDependency:
@@ -274,11 +283,45 @@ def _image_readiness_dependency(
             return _ImageReadinessDependency(
                 label=label,
                 template=resources.resolve_image(image),
-                named=True,
+                source_kind="named_image",
             )
-        except LookupError:
-            return _ImageReadinessDependency(label=label, template=None, named=True)
+        except UnknownImageNameError:
+            return _ImageReadinessDependency(
+                label=label,
+                template=None,
+                source_kind="named_image",
+            )
+    if isinstance(image, ImageSearchSpec | SearchRef):
+        try:
+            return _ImageReadinessDependency(
+                label=label,
+                template=resources.resolve_search(image).image,
+                source_kind="named_search" if isinstance(image, SearchRef) else "image_search",
+            )
+        except UnknownImageSearchNameError:
+            return _ImageReadinessDependency(
+                label=label,
+                template=None,
+                source_kind="missing_search",
+            )
+        except UnknownImageNameError:
+            return _ImageReadinessDependency(
+                label=label,
+                template=None,
+                source_kind="missing_search_image",
+            )
     return _ImageReadinessDependency(label=label, template=image)
+
+
+def _resolve_image_dependency_template(
+    image: ImageDependencySource,
+    *,
+    resources: TargetCatalog,
+) -> ImageTemplate:
+    """把图片依赖解析成最终模板路径。"""
+    if isinstance(image, ImageSearchSpec | SearchRef):
+        return resources.resolve_search(image).image
+    return resources.resolve_image(image)
 
 
 def _screen_state_readiness(
@@ -303,7 +346,7 @@ def _image_readiness(
 ) -> tuple[str, str, str]:
     """检查脚本引用的 assets 图片是否存在。"""
     if dependency.template is None:
-        return dependency.label, "missing", "命名图片未配置"
+        return dependency.label, "missing", _missing_image_dependency_message(dependency)
     image_path = Path(dependency.template.path)
     if (
         image_path.is_absolute()
@@ -318,12 +361,25 @@ def _image_readiness(
     except ValueError:
         return dependency.label, "unknown", "图片不在项目 assets 目录，无法确认"
     if candidate.is_file() and candidate.suffix.lower() in supported_image_suffixes:
-        if dependency.named:
+        if dependency.source_kind == "named_image":
             return dependency.label, "ok", f"命名图片已配置，图片文件可用：{dependency.template.path}"
+        if dependency.source_kind == "named_search":
+            return dependency.label, "ok", f"命名搜索已配置，图片文件可用：{dependency.template.path}"
         return dependency.label, "ok", "图片文件可用"
-    if dependency.named:
+    if dependency.source_kind == "named_image":
         return dependency.label, "missing", f"命名图片已配置，但图片文件不存在或后缀不受支持：{dependency.template.path}"
+    if dependency.source_kind == "named_search":
+        return dependency.label, "missing", f"命名搜索已配置，但图片文件不存在或后缀不受支持：{dependency.template.path}"
     return dependency.label, "missing", "图片文件不存在或后缀不受支持"
+
+
+def _missing_image_dependency_message(dependency: _ImageReadinessDependency) -> str:
+    """生成命名图片或命名搜索无法解析时的说明。"""
+    if dependency.source_kind == "missing_search":
+        return "命名搜索未配置"
+    if dependency.source_kind == "missing_search_image":
+        return "命名搜索引用的命名图片未配置"
+    return "命名图片未配置"
 
 
 def _collect_step_dependencies(step: Step, dependencies: list[str]) -> None:
@@ -368,8 +424,12 @@ def _collect_target_dependencies(target, dependencies: list[str]) -> None:
         _collect_target_dependencies(target.base, dependencies)
 
 
-def _describe_image(image: ImageTemplate | ImageRef) -> str:
-    """把图片模板或图片引用转换成摘要文本。"""
+def _describe_image(image: ImageDependencySource) -> str:
+    """把图片模板、图片引用或搜索引用转换成摘要文本。"""
     if isinstance(image, ImageRef):
         return f'ImageRef("{image.name}")'
+    if isinstance(image, SearchRef):
+        return f'SearchRef("{image.name}")'
+    if isinstance(image, ImageSearchSpec):
+        return f"ImageSearchSpec({_describe_image(image.image)})"
     return image.path

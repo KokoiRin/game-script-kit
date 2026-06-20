@@ -8,12 +8,17 @@ from game_automation.portable.domain import (
     ColorIs,
     ImageExists,
     ImageRef,
+    ImageSearchSpec,
     ImageMatch,
     ImageTemplate,
     NamedImage,
+    NamedImageSearch,
+    NamedRegion,
     Point,
     Rect,
+    RegionRef,
     ScreenStateIs,
+    SearchRef,
     TargetCatalog,
     UnknownImageNameError,
 )
@@ -157,6 +162,59 @@ def test_condition_evaluator_resolves_named_image() -> None:
 
     assert result is True
     assert locator.calls == [(ImageTemplate("assets/start.png"), None, 1.0)]
+
+
+def test_condition_evaluator_resolves_named_image_search() -> None:
+    """验证图片存在条件可以引用命名搜索规格。"""
+    locator = FakeImageLocator(ImageMatch(Rect(10, 20, 30, 40), confidence=0.85))
+    condition = ImageExists(SearchRef("离开按钮"))
+    catalog = TargetCatalog(
+        images=(NamedImage("离开", ImageTemplate("assets/离开.png")),),
+        regions=(NamedRegion("弹窗", Rect(20, 30, 40, 50)),),
+        searches=(
+            NamedImageSearch(
+                "离开按钮",
+                ImageSearchSpec(ImageRef("离开"), RegionRef("弹窗"), min_confidence=0.8),
+            ),
+        ),
+    )
+
+    result = evaluate_condition(
+        condition,
+        window=AreaWindow(Rect(100, 200, 800, 600)),
+        color_reader=None,
+        image_locator=locator,
+        resources=catalog,
+    )
+
+    assert result is True
+    assert locator.calls == [
+        (ImageTemplate("assets/离开.png"), Rect(120, 230, 40, 50), 0.8)
+    ]
+
+
+def test_condition_evaluator_overrides_named_image_search_confidence() -> None:
+    """验证图片条件显式置信度会覆盖命名搜索默认值。"""
+    locator = FakeImageLocator(ImageMatch(Rect(10, 20, 30, 40), confidence=0.95))
+    condition = ImageExists(SearchRef("离开按钮"), min_confidence=0.9)
+    catalog = TargetCatalog(
+        searches=(
+            NamedImageSearch(
+                "离开按钮",
+                ImageSearchSpec(ImageTemplate("assets/离开.png"), min_confidence=0.8),
+            ),
+        ),
+    )
+
+    evaluate_condition(
+        condition,
+        window=AreaWindow(Rect(100, 200, 800, 600)),
+        color_reader=None,
+        image_locator=locator,
+        resources=catalog,
+    )
+
+    assert locator.calls == [(ImageTemplate("assets/离开.png"), None, 0.9)]
 
 
 def test_condition_evaluator_reports_unknown_named_image() -> None:
