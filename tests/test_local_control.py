@@ -1235,6 +1235,59 @@ def test_local_control_captures_screen_region_diagnostics(tmp_path) -> None:
         assert diagnostic.getpixel((20, 10)) != (255, 255, 255)
 
 
+def test_local_control_captures_screen_region_crops(tmp_path) -> None:
+    """验证 UI 用例可把命名状态区域裁剪为独立图片。"""
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    (assets / "screen-states.json").write_text(
+        """
+        {
+          "regions": {
+            "主页标题": {"left": 10, "top": 5, "width": 30, "height": 20},
+            "普通标题": {"left": 60, "top": 10, "width": 20, "height": 15}
+          },
+          "groups": [
+            {
+              "state": "主页",
+              "searches": [
+                {"name": "主页标题", "image": "home.png", "region": "主页标题"}
+              ]
+            }
+          ]
+        }
+        """,
+        encoding="utf-8",
+    )
+    Image.new("RGB", (4, 4), "black").save(assets / "home.png")
+
+    def screen_capture(path):
+        """保存一张 2x 缩放的测试截图。"""
+        Image.new("RGB", (200, 100), "white").save(path)
+
+    app = LocalControlApplication(
+        project_root=tmp_path,
+        screen_capture_factory=lambda: screen_capture,
+        screen_size_factory=lambda: Point(100, 50),
+    )
+
+    result = app.capture_screen_region_crops()
+
+    crop_root = tmp_path / ".star" / "debug" / "screenshots" / "regions"
+    home_crop = crop_root / "主页标题.png"
+    normal_crop = crop_root / "普通标题.png"
+    assert result.exit_code == 0
+    assert result.stderr == ""
+    assert result.stdout.splitlines() == [
+        f"saved region crop: {home_crop}",
+        f"saved region crop: {normal_crop}",
+    ]
+    assert result.screenshot_path == str(crop_root)
+    with Image.open(home_crop) as crop:
+        assert crop.size == (60, 40)
+    with Image.open(normal_crop) as crop:
+        assert crop.size == (40, 30)
+
+
 def test_local_control_region_diagnostics_requires_screen_state_config(tmp_path) -> None:
     """验证区域诊断缺少状态配置时返回清晰错误。"""
     (tmp_path / "assets").mkdir()

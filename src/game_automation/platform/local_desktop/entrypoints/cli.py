@@ -156,6 +156,11 @@ def _run_capture_region_diagnostics() -> int:
     return _print_control_result(build_local_control_application().capture_screen_region_diagnostics())
 
 
+def _run_capture_region_crops() -> int:
+    """保存当前屏幕中每个状态识别命名区域的裁剪图。"""
+    return _print_control_result(build_local_control_application().capture_screen_region_crops())
+
+
 def _print_control_result(result) -> int:
     """把 application 控制结果映射为 CLI stdout、stderr 和退出码。"""
     if result.stdout:
@@ -362,6 +367,10 @@ def main(argv: list[str] | None = None) -> int:
         "capture-region-diagnostics",
         help="Capture the current screen with configured screen-state regions drawn.",
     )
+    subparsers.add_parser(
+        "capture-region-crops",
+        help="Capture each configured screen-state region as a separate image.",
+    )
 
     run_parser = subparsers.add_parser("run", help="Run a named script.")
     run_parser.add_argument("name", help="Script name to run.")
@@ -416,6 +425,8 @@ def main(argv: list[str] | None = None) -> int:
         return _run_capture_screen()
     elif args.command == "capture-region-diagnostics":
         return _run_capture_region_diagnostics()
+    elif args.command == "capture-region-crops":
+        return _run_capture_region_crops()
     elif args.command == "run":
         return _run_script(args)
     elif args.command == "recorder":

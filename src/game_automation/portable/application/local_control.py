@@ -72,6 +72,7 @@ ScreenImageBatchLocatorFactory = Callable[[], ScreenImageBatchLocator]
 
 DEBUG_SCREENSHOT_PATH = Path(".star") / "debug" / "screenshots" / "latest-screen.png"
 DEBUG_REGION_SCREENSHOT_PATH = Path(".star") / "debug" / "screenshots" / "latest-screen-regions.png"
+DEBUG_REGION_CROP_FOLDER = Path(".star") / "debug" / "screenshots" / "regions"
 
 
 @dataclass(frozen=True, slots=True)
@@ -688,27 +689,10 @@ class LocalControlApplication:
 
     def capture_screen_region_diagnostics(self) -> ControlResult:
         """保存一张带状态识别区域框的诊断截图。"""
-        config_path = self._image_asset_root() / SCREEN_STATE_CONFIG_NAME
-        if not config_path.exists():
-            return ControlResult(
-                exit_code=2,
-                stderr="screen state config is required for region diagnostics\n",
-            )
-        try:
-            load_screen_state_candidates(
-                config_path,
-                asset_root=self._image_asset_root(),
-                supported_suffixes=IMAGE_ASSET_SUFFIXES,
-            )
-            regions = load_screen_state_regions(config_path)
-        except ValueError as exc:
-            return ControlResult(exit_code=2, stderr=f"invalid screen state config: {exc}\n")
-        if not regions:
-            return ControlResult(exit_code=2, stderr="screen state config has no named regions\n")
-        if self._screen_capture_factory is None:
-            return ControlResult(exit_code=1, stderr="screen capture is not configured\n")
-        if self._screen_size_factory is None:
-            return ControlResult(exit_code=1, stderr="screen size is not configured\n")
+        context = self._screen_region_capture_context()
+        if isinstance(context, ControlResult):
+            return context
+        regions, screen_size = context
 
         raw_path = self.latest_screen_screenshot_path()
         diagnostic_path = self.latest_screen_region_diagnostics_path()
@@ -729,6 +713,33 @@ class LocalControlApplication:
             screenshot_path=str(diagnostic_path),
         )
 
+    def capture_screen_region_crops(self) -> ControlResult:
+        """保存当前屏幕中每个状态识别命名区域的裁剪图。"""
+        context = self._screen_region_capture_context()
+        if isinstance(context, ControlResult):
+            return context
+        regions, screen_size = context
+
+        raw_path = self.latest_screen_screenshot_path()
+        crop_root = self.latest_screen_region_crop_folder()
+        raw_path.parent.mkdir(parents=True, exist_ok=True)
+        crop_root.mkdir(parents=True, exist_ok=True)
+        try:
+            self._screen_capture_factory()(raw_path)
+            crop_paths = _save_region_crops(
+                screenshot_path=raw_path,
+                output_folder=crop_root,
+                screen_size=screen_size,
+                regions=regions,
+            )
+        except Exception as exc:
+            return ControlResult(exit_code=1, stderr=f"{exc}\n")
+        return ControlResult(
+            exit_code=0,
+            stdout="".join(f"saved region crop: {path}\n" for path in crop_paths),
+            screenshot_path=str(crop_root),
+        )
+
     def latest_screen_screenshot_path(self) -> Path:
         """返回最近一次截屏诊断保存的项目内文件路径。"""
         return self._project_root / DEBUG_SCREENSHOT_PATH
@@ -736,6 +747,10 @@ class LocalControlApplication:
     def latest_screen_region_diagnostics_path(self) -> Path:
         """返回最近一次区域诊断截图保存的项目内文件路径。"""
         return self._project_root / DEBUG_REGION_SCREENSHOT_PATH
+
+    def latest_screen_region_crop_folder(self) -> Path:
+        """返回最近一次命名区域裁剪图保存的项目内目录。"""
+        return self._project_root / DEBUG_REGION_CROP_FOLDER
 
     def run_tests(self, task_name: str = "all") -> ControlResult:
         """运行白名单测试任务，并返回 UI 可展示的执行结果。"""
@@ -825,6 +840,35 @@ class LocalControlApplication:
         """读取本地状态配置中可供脚本复用的资源目录。"""
         return load_shared_script_resources(self._project_root)
 
+    def _screen_region_capture_context(self) -> tuple[tuple[NamedRegion, ...], Point] | ControlResult:
+        """读取状态区域诊断所需的配置、截图能力和屏幕尺寸。"""
+        config_path = self._image_asset_root() / SCREEN_STATE_CONFIG_NAME
+        if not config_path.exists():
+            return ControlResult(
+                exit_code=2,
+                stderr="screen state config is required for region diagnostics\n",
+            )
+        try:
+            load_screen_state_candidates(
+                config_path,
+                asset_root=self._image_asset_root(),
+                supported_suffixes=IMAGE_ASSET_SUFFIXES,
+            )
+            regions = load_screen_state_regions(config_path)
+        except ValueError as exc:
+            return ControlResult(exit_code=2, stderr=f"invalid screen state config: {exc}\n")
+        if not regions:
+            return ControlResult(exit_code=2, stderr="screen state config has no named regions\n")
+        if self._screen_capture_factory is None:
+            return ControlResult(exit_code=1, stderr="screen capture is not configured\n")
+        if self._screen_size_factory is None:
+            return ControlResult(exit_code=1, stderr="screen size is not configured\n")
+        try:
+            screen_size = self._screen_size_factory()
+        except Exception as exc:
+            return ControlResult(exit_code=1, stderr=f"{exc}\n")
+        return (regions, screen_size)
+
 
 def _log_screen_state_probe_result(logger: RunLogger, result: ScreenStateProbeResult) -> None:
     """记录一轮界面状态探测摘要，供 UI 日志展示。"""
@@ -892,6 +936,36 @@ def _draw_region_diagnostics(
         draw.rectangle(box, outline=color, width=3)
         _draw_region_label(draw, font, f"{index}. {region.name}", box, color)
     diagnostic.save(output_path)
+
+
+def _save_region_crops(
+    *,
+    screenshot_path: Path,
+    output_folder: Path,
+    screen_size: Point,
+    regions: tuple[NamedRegion, ...],
+) -> tuple[Path, ...]:
+    """按命名区域把截图裁剪成独立图片并返回保存路径。"""
+    if screen_size.x <= 0 or screen_size.y <= 0:
+        raise ValueError("screen size must be positive")
+
+    from PIL import Image
+
+    saved_paths = []
+    with Image.open(screenshot_path) as image:
+        scale_x = image.width / screen_size.x
+        scale_y = image.height / screen_size.y
+        for region in regions:
+            box = _region_box_in_pixels(region.region, scale_x=scale_x, scale_y=scale_y)
+            output_path = output_folder / f"{_safe_region_crop_name(region.name)}.png"
+            image.crop(box).save(output_path)
+            saved_paths.append(output_path)
+    return tuple(saved_paths)
+
+
+def _safe_region_crop_name(name: str) -> str:
+    """把区域名转换成不含路径分隔符的裁剪文件名。"""
+    return "".join("_" if char in {"/", "\\", ":"} else char for char in name).strip() or "region"
 
 
 def _region_box_in_pixels(region: Rect, *, scale_x: float, scale_y: float) -> tuple[int, int, int, int]:
