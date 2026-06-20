@@ -42,6 +42,8 @@
     let activeScreenStateProbe = false;
     let latestScreenState = "未知";
     let currentScriptDetailsPayload = null;
+    let currentScreenStateConfigPayload = null;
+    let latestScreenStateCandidates = [];
     let scriptStateDependencies = [];
     let scriptImageDependencies = [];
 
@@ -112,8 +114,12 @@
       }
       screenStateStats.textContent = renderScreenStateStats(result.stats);
       screenStateHints.textContent = renderScreenStateHints(result.hints);
-      screenStateCandidates.textContent = renderScreenStateCandidates(result.candidates);
+      latestScreenStateCandidates = result.candidates || [];
+      screenStateCandidates.textContent = renderScreenStateCandidates(latestScreenStateCandidates);
       screenStateLog.textContent = `${result.stdout || ""}${result.stderr || ""}`;
+      if (currentScreenStateConfigPayload) {
+        renderScreenStateConfigSummary(currentScreenStateConfigPayload);
+      }
       if (currentScriptDetailsPayload) {
         renderScriptDetails(currentScriptDetailsPayload);
       }
@@ -395,6 +401,7 @@
     async function loadScreenStateConfigSummary() {
       const response = await fetch("/api/screen-state-config");
       const payload = await response.json();
+      currentScreenStateConfigPayload = payload;
       renderScreenStateConfigSummary(payload);
     }
 
@@ -409,6 +416,7 @@
         return;
       }
       const lines = ["状态识别配置："];
+      const candidateResults = buildCandidateResultIndex(latestScreenStateCandidates);
       for (const state of states) {
         lines.push(`- ${state.state}`);
         for (const search of state.searches || []) {
@@ -416,9 +424,35 @@
             ? "默认"
             : search.min_confidence;
           lines.push(`  - ${search.name} / ${search.image} / ${search.region} / ${confidence}`);
+          lines.push(`    ${renderSearchProbeSummary(candidateResults, state.state, search.name)}`);
         }
       }
       screenStateConfigSummary.textContent = lines.join("\n");
+    }
+
+    function buildCandidateResultIndex(candidates) {
+      const resultIndex = new Map();
+      for (const candidate of candidates || []) {
+        resultIndex.set(candidateResultKey(candidate.name, candidate.search_name), candidate);
+      }
+      return resultIndex;
+    }
+
+    function candidateResultKey(state, searchName) {
+      return `${state}\u0000${searchName || ""}`;
+    }
+
+    function renderSearchProbeSummary(candidateResults, state, searchName) {
+      const candidate = candidateResults.get(candidateResultKey(state, searchName));
+      if (!candidate) {
+        return "最近：暂无";
+      }
+      return (
+        `最近：${renderCandidateStatus(candidate.status)}；` +
+        `置信度 ${formatConfidence(candidate.confidence)}；` +
+        `最佳置信度 ${formatConfidence(candidate.best_confidence)}；` +
+        `最佳位置 ${formatRect(candidate.best_rect)}`
+      );
     }
 
     async function runScript() {

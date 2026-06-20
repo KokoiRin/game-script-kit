@@ -178,6 +178,13 @@ def test_local_ui_serves_static_assets() -> None:
     assert "跳过" in script
     assert "未命中" in script
     assert "renderScreenStateConfigSummary" in script
+    assert "currentScreenStateConfigPayload" in script
+    assert "latestScreenStateCandidates" in script
+    assert "buildCandidateResultIndex" in script
+    assert "renderSearchProbeSummary" in script
+    assert "renderScreenStateConfigSummary(currentScreenStateConfigPayload)" in script
+    assert "最近：暂无" in script
+    assert "最近：${renderCandidateStatus(candidate.status)}" in script
     assert "未配置状态识别" in script
     assert "命中次数：" in script
 
