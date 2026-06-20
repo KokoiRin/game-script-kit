@@ -162,6 +162,13 @@ def test_local_control_describes_state_script_dependencies(tmp_path) -> None:
     assert details.dependencies == ("状态: 主页", "图片: assets/start.png")
     assert details.state_dependencies == ("主页",)
     assert details.image_dependencies == ("assets/start.png",)
+    assert details.state_decisions == (
+        (
+            "主页",
+            ("Click ImageTarget(assets/start.png, min_confidence=1)",),
+            ("Wait 0.5s",),
+        ),
+    )
     assert details.readiness == (
         ("状态: 主页", "ok", "状态已配置"),
         ("图片: assets/start.png", "ok", "图片文件可用"),

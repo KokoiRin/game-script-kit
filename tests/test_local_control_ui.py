@@ -120,11 +120,14 @@ def test_local_ui_serves_static_assets() -> None:
     assert "没有可用探测状态" in script
     assert "scriptStateDependencies" in script
     assert "payload.state_dependencies" in script
+    assert "payload.state_decisions" in script
     assert "scriptImageDependencies" in script
     assert "payload.image_dependencies" in script
     assert "dry_run_images: scriptImageDependencies" in script
     assert "已使用脚本状态" in script
     assert "当前脚本没有状态依赖" in script
+    assert "状态决策：" in script
+    assert "没有状态决策" in script
     assert "依赖检查：" in script
     assert 'fetch("/api/screen-state-names"' in script
     assert 'fetch("/api/screen-state-config"' in script
@@ -229,6 +232,13 @@ def test_local_ui_gets_script_details_over_http() -> None:
         "steps": ['If ScreenStateIs("主页")', "  then Click Point(x=100, y=200)"],
         "dependencies": ["状态: 主页"],
         "state_dependencies": ["主页"],
+        "state_decisions": [
+            {
+                "state": "主页",
+                "matched_steps": ["Click Point(x=100, y=200)"],
+                "unmatched_steps": ["Wait 0.5s"],
+            }
+        ],
         "image_dependencies": ["assets/start.png"],
         "readiness": [
             {"label": "状态: 主页", "status": "ok", "message": "状态已配置"},
@@ -631,6 +641,9 @@ class FakeControlApplication:
             steps=('If ScreenStateIs("主页")', "  then Click Point(x=100, y=200)"),
             dependencies=("状态: 主页",),
             state_dependencies=("主页",),
+            state_decisions=(
+                ("主页", ("Click Point(x=100, y=200)",), ("Wait 0.5s",)),
+            ),
             image_dependencies=("assets/start.png",),
             readiness=(("状态: 主页", "ok", "状态已配置"),),
         )
