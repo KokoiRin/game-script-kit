@@ -64,6 +64,11 @@ def test_default_catalog_includes_wait_until_image_demo() -> None:
     assert "wait-until-image-demo" in DEFAULT_SCRIPT_CATALOG.list_names()
 
 
+def test_default_catalog_includes_wait_until_screen_state_demo() -> None:
+    """验证默认注册表包含界面状态条件等待示例脚本。"""
+    assert "wait-until-screen-state-demo" in DEFAULT_SCRIPT_CATALOG.list_names()
+
+
 def test_default_catalog_includes_click_image_demo() -> None:
     """验证默认注册表包含图片目标点击示例脚本。"""
     assert "click-image-demo" in DEFAULT_SCRIPT_CATALOG.list_names()

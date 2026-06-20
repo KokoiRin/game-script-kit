@@ -41,6 +41,7 @@ def test_star_cli_lists_available_scripts(capsys) -> None:
         "conditional-screen-state-demo",
         "wait-until-color-demo",
         "wait-until-image-demo",
+        "wait-until-screen-state-demo",
         "click-image-demo",
         "click-leave-or-retry-loop",
     ]
@@ -318,6 +319,17 @@ def test_star_cli_details_uses_screen_state_search_ref(monkeypatch, tmp_path, ca
     assert "命名搜索已配置，图片文件可用" in output
 
 
+def test_star_cli_shows_wait_until_screen_state_details(capsys) -> None:
+    """验证 details 子命令会展示状态等待步骤和状态依赖。"""
+    assert main(["details", "wait-until-screen-state-demo"]) == 0
+
+    output = capsys.readouterr().out
+    assert "脚本：wait-until-screen-state-demo" in output
+    assert 'WaitUntil ScreenStateIs("主页") timeout=1s interval=0.5s' in output
+    assert "- 状态: 主页" in output
+    assert "[OK] 状态: 主页：状态已配置" in output
+
+
 def test_star_cli_details_reports_unknown_script(capsys) -> None:
     """验证 details 子命令会报告未知脚本。"""
     assert main(["details", "missing"]) == 1
@@ -579,6 +591,27 @@ def test_star_cli_reports_wait_until_image_demo_timeout(capsys) -> None:
         "wait 0.5s",
     ]
     assert "script run timed out: wait until condition timed out" in captured.err
+
+
+def test_star_cli_runs_wait_until_screen_state_demo_with_custom_dry_run_state(capsys) -> None:
+    """验证状态等待脚本 dry-run 可用指定状态立即成功。"""
+    assert (
+        main(
+            [
+                "run",
+                "wait-until-screen-state-demo",
+                "--dry-run",
+                "--dry-run-screen-state",
+                "主页",
+            ]
+        )
+        == 0
+    )
+
+    output = capsys.readouterr().out.splitlines()
+    assert output == [
+        "click Point(x=100, y=200)",
+    ]
 
 
 def test_star_cli_run_defaults_to_macos(monkeypatch, capsys) -> None:

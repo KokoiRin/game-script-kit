@@ -43,6 +43,10 @@ from game_automation.portable.scripts_manager.wait_until_image_demo import (
     WAIT_UNTIL_IMAGE_DEMO_TEMPLATE,
     build_wait_until_image_demo_script,
 )
+from game_automation.portable.scripts_manager.wait_until_screen_state_demo import (
+    WAIT_UNTIL_SCREEN_STATE_DEMO_SCRIPT,
+    build_wait_until_screen_state_demo_script,
+)
 
 __all__ = [
     "DEFAULT_SCRIPT_CATALOG",
@@ -60,6 +64,7 @@ __all__ = [
     "WAIT_UNTIL_COLOR_DEMO_SCRIPT",
     "WAIT_UNTIL_IMAGE_DEMO_SCRIPT",
     "WAIT_UNTIL_IMAGE_DEMO_TEMPLATE",
+    "WAIT_UNTIL_SCREEN_STATE_DEMO_SCRIPT",
     "build_conditional_color_demo_script",
     "build_conditional_screen_state_demo_script",
     "build_click_image_demo_script",
@@ -69,4 +74,5 @@ __all__ = [
     "build_repeat_demo_script",
     "build_wait_until_color_demo_script",
     "build_wait_until_image_demo_script",
+    "build_wait_until_screen_state_demo_script",
 ]
