@@ -326,6 +326,8 @@ def test_star_cli_shows_wait_until_screen_state_details(capsys) -> None:
     output = capsys.readouterr().out
     assert "脚本：wait-until-screen-state-demo" in output
     assert 'WaitUntil ScreenStateIs("主页") timeout=1s interval=0.5s' in output
+    assert "状态等待：" in output
+    assert "- 等待状态: 主页" in output
     assert "- 状态: 主页" in output
     assert "[OK] 状态: 主页：状态已配置" in output
 

@@ -261,6 +261,40 @@ def test_local_control_describes_state_script_dependencies(tmp_path) -> None:
     )
 
 
+def test_local_control_describes_screen_state_waits(tmp_path) -> None:
+    """验证 UI 用例会把状态等待收集为结构化详情。"""
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    (assets / "home.png").write_bytes(b"fake")
+    (assets / "screen-states.json").write_text(
+        json.dumps(
+            {"groups": [{"state": "主页", "searches": [{"name": "主页标题", "image": "home.png"}]}]},
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    script = Script(
+        name="state-wait",
+        window=ScreenWindow(),
+        steps=(
+            WaitUntil(
+                condition=ScreenStateIs("主页"),
+                timeout_seconds=1,
+                interval_seconds=0.5,
+            ),
+            Click(Point(100, 200)),
+        ),
+    )
+    app = LocalControlApplication(catalog=ScriptCatalog((script,)), project_root=tmp_path)
+
+    details = app.describe_script("state-wait")
+
+    assert details.exit_code == 0
+    assert details.state_waits == ("主页",)
+    assert details.state_dependencies == ("主页",)
+    assert details.state_decisions == ()
+
+
 def test_local_control_describes_named_image_dependencies() -> None:
     """验证 UI 用例会把命名图片依赖解析成 dry-run 可用图片路径。"""
     script = Script(

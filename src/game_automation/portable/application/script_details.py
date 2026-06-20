@@ -40,6 +40,7 @@ class ScriptDetailsResult:
     steps: tuple[str, ...] = ()
     dependencies: tuple[str, ...] = ()
     state_dependencies: tuple[str, ...] = ()
+    state_waits: tuple[str, ...] = ()
     state_decisions: tuple[tuple[str, tuple[str, ...], tuple[str, ...]], ...] = ()
     image_dependencies: tuple[str, ...] = ()
     readiness: tuple[tuple[str, str, str], ...] = ()
@@ -66,6 +67,7 @@ def describe_script_details(
         steps=_describe_steps(script.steps),
         dependencies=dependency_details.dependencies,
         state_dependencies=dependency_details.state_dependencies,
+        state_waits=_describe_state_waits(script.steps),
         state_decisions=_describe_state_decisions(script.steps),
         image_dependencies=dependency_details.image_dependencies,
         readiness=dependency_details.readiness,
@@ -88,6 +90,29 @@ def _describe_state_decisions(
     for step in steps:
         _collect_state_decisions(step, decisions)
     return tuple(decisions)
+
+
+def _describe_state_waits(steps: tuple[Step, ...]) -> tuple[str, ...]:
+    """按脚本阅读顺序收集状态等待摘要。"""
+    waits: list[str] = []
+    for step in steps:
+        _collect_state_waits(step, waits)
+    return tuple(dict.fromkeys(waits))
+
+
+def _collect_state_waits(step: Step, waits: list[str]) -> None:
+    """递归收集 WaitUntil(ScreenStateIs(...)) 引用的状态。"""
+    if isinstance(step, WaitUntil):
+        if isinstance(step.condition, ScreenStateIs):
+            waits.append(step.condition.state)
+        return
+    if isinstance(step, If):
+        for child in (*step.then_steps, *step.else_steps):
+            _collect_state_waits(child, waits)
+        return
+    if isinstance(step, Repeat):
+        for child in step.steps:
+            _collect_state_waits(child, waits)
 
 
 def _collect_state_decisions(
