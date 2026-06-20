@@ -16,6 +16,14 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+from game_automation.portable.application.project_assets import (
+    IMAGE_ASSET_FOLDER,
+    IMAGE_ASSET_SUFFIXES,
+    PROJECT_ROOT,
+    SCREEN_STATE_CONFIG_NAME,
+    image_asset_root,
+    screen_state_config_path,
+)
 from game_automation.portable.application.script_run import (
     InputDeviceFactory,
     PixelColorReaderFactory,
@@ -28,9 +36,12 @@ from game_automation.portable.application.screen_state_config import (
     load_screen_state_config_summary,
     load_screen_state_names,
     load_screen_state_regions,
-    load_screen_state_target_catalog,
 )
 from game_automation.portable.application.script_details import ScriptDetailsResult, describe_script_details
+from game_automation.portable.application.script_resources import (
+    load_shared_script_resources,
+    script_with_shared_resources,
+)
 from game_automation.portable.domain import (
     Click,
     ImageTarget,
@@ -42,7 +53,6 @@ from game_automation.portable.domain import (
     ScreenStateProbeResult,
     ScreenWindow,
     Script,
-    TargetCatalog,
 )
 from game_automation.portable.engine.ports import (
     RunLogger,
@@ -60,12 +70,8 @@ ScreenCaptureFactory = Callable[[], ScreenCapture]
 ScreenSizeFactory = Callable[[], Point]
 ScreenImageBatchLocatorFactory = Callable[[], ScreenImageBatchLocator]
 
-PROJECT_ROOT = Path(__file__).resolve().parents[4]
-IMAGE_ASSET_FOLDER = "assets"
-IMAGE_ASSET_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".webp"})
 DEBUG_SCREENSHOT_PATH = Path(".star") / "debug" / "screenshots" / "latest-screen.png"
 DEBUG_REGION_SCREENSHOT_PATH = Path(".star") / "debug" / "screenshots" / "latest-screen-regions.png"
-SCREEN_STATE_CONFIG_NAME = "screen-states.json"
 
 
 @dataclass(frozen=True, slots=True)
@@ -745,7 +751,7 @@ class LocalControlApplication:
 
     def _image_asset_root(self) -> Path:
         """返回本地 UI 允许读取模板图片的项目内目录。"""
-        return self._project_root / IMAGE_ASSET_FOLDER
+        return image_asset_root(self._project_root)
 
     def _resolve_image_asset(self, asset_name: str) -> Path:
         """解析并校验图片资源必须位于项目 assets 目录内。"""
@@ -803,48 +809,17 @@ class LocalControlApplication:
     def _configured_screen_state_names_for_readiness(self) -> tuple[str, ...] | None:
         """读取状态名用于详情检查，配置不可用时返回 None。"""
         try:
-            return load_screen_state_names(self._image_asset_root() / SCREEN_STATE_CONFIG_NAME)
+            return load_screen_state_names(screen_state_config_path(self._project_root))
         except ValueError:
             return None
 
     def _script_with_shared_resources(self, script: Script) -> Script:
         """把状态配置里的共享搜索资源合并进脚本资源目录。"""
-        shared = self._shared_script_resources()
-        if shared is None:
-            return script
-        resources = _merge_target_catalogs(shared, script.resources)
-        if resources == script.resources:
-            return script
-        return Script(
-            name=script.name,
-            window=script.window,
-            steps=script.steps,
-            resources=resources,
-        )
+        return script_with_shared_resources(script, self._shared_script_resources())
 
-    def _shared_script_resources(self) -> TargetCatalog | None:
+    def _shared_script_resources(self):
         """读取本地状态配置中可供脚本复用的资源目录。"""
-        return load_screen_state_target_catalog(
-            self._image_asset_root() / SCREEN_STATE_CONFIG_NAME,
-            asset_root=self._image_asset_root(),
-            supported_suffixes=IMAGE_ASSET_SUFFIXES,
-        )
-
-
-def _merge_target_catalogs(shared: TargetCatalog, local: TargetCatalog) -> TargetCatalog:
-    """合并共享和脚本局部资源，局部资源覆盖同名共享资源。"""
-    return TargetCatalog(
-        points=_merge_named_resources(shared.points, local.points),
-        images=_merge_named_resources(shared.images, local.images),
-        regions=_merge_named_resources(shared.regions, local.regions),
-        searches=_merge_named_resources(shared.searches, local.searches),
-    )
-
-
-def _merge_named_resources(shared, local):
-    """按名称合并资源元组，保留局部资源的覆盖权。"""
-    local_names = {item.name for item in local}
-    return (*tuple(item for item in shared if item.name not in local_names), *local)
+        return load_shared_script_resources(self._project_root)
 
 
 def _log_screen_state_probe_result(logger: RunLogger, result: ScreenStateProbeResult) -> None:
