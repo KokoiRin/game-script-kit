@@ -262,6 +262,8 @@ def _print_screen_state_probe_result(result) -> None:
         return
     for candidate in result.candidates:
         print(f"- {_screen_state_candidate_line(candidate)}")
+    if result.hints:
+        _print_section("提示", result.hints)
 
 
 def _print_screen_state_probe_json(result) -> None:
@@ -275,6 +277,7 @@ def _screen_state_probe_payload(result) -> dict[str, object]:
         "current_state": result.current_state,
         "known": result.known,
         "elapsed_ms": result.elapsed_ms,
+        "hints": list(result.hints),
         "candidates": [_screen_state_candidate_payload(candidate) for candidate in result.candidates],
     }
 

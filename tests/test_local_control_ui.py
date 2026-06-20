@@ -85,6 +85,7 @@ def test_local_ui_serves_control_page() -> None:
     assert 'id="screen-state-current"' in html
     assert 'id="screen-state-config-summary"' in html
     assert 'id="screen-state-stats"' in html
+    assert 'id="screen-state-hints"' in html
     assert 'id="screen-state-candidates"' in html
     assert 'id="screen-state-log"' in html
     assert "运行测试" in html
@@ -118,6 +119,7 @@ def test_local_ui_serves_static_assets() -> None:
     assert 'document.querySelector("#screen-state-config-summary")' in script
     assert 'document.querySelector("#screen-state-stats")' in script
     assert 'document.querySelector("#screen-state-candidates")' in script
+    assert 'document.querySelector("#screen-state-hints")' in script
     assert 'document.querySelector("#script-details")' in script
     assert 'document.querySelector("#dry-run-screen-state")' in script
     assert 'document.querySelector("#screen-state-suggestions")' in script
@@ -156,6 +158,7 @@ def test_local_ui_serves_static_assets() -> None:
     assert 'fetch("/api/capture-region-crops"' in script
     assert 'fetch("/api/capture-probe-crops"' in script
     assert "renderScreenStateStats" in script
+    assert "renderScreenStateHints" in script
     assert "renderScreenStateCandidates" in script
     assert "renderCandidateName" in script
     assert "candidate.search_name" in script
@@ -165,6 +168,8 @@ def test_local_ui_serves_static_assets() -> None:
     assert "最佳置信度" in script
     assert "最佳位置" in script
     assert "暂无候选结果" in script
+    assert "暂无诊断提示" in script
+    assert "诊断提示：" in script
     assert "命中" in script
     assert "跳过" in script
     assert "未命中" in script
@@ -409,6 +414,7 @@ def test_local_ui_starts_screen_state_probe_over_http() -> None:
             "matched_counts": {},
             "skipped_counts": {},
         },
+        "hints": [],
         "candidates": [],
     }
 
@@ -439,6 +445,7 @@ def test_local_ui_gets_screen_state_probe_status_over_http() -> None:
             "matched_counts": {"主页": 2, "人物": 1},
             "skipped_counts": {"技能": 2},
         },
+        "hints": [],
         "candidates": [
             {
                 "name": "主页",
@@ -460,6 +467,35 @@ def test_local_ui_gets_screen_state_probe_status_over_http() -> None:
             },
         ],
     }
+
+
+def test_local_ui_gets_screen_state_probe_hints_over_http() -> None:
+    """验证 UI HTTP 接口会返回界面探测诊断提示。"""
+
+    class HintApp(FakeControlApplication):
+        def current_screen_state_probe(self) -> ScreenStateProbeStatus:
+            """返回带诊断提示的 fake 界面探测状态。"""
+            self.probe_status_requests += 1
+            return ScreenStateProbeStatus(
+                running=False,
+                current_state="未知",
+                exit_code=0,
+                hints=("可能没有截到有效游戏画面，请检查屏幕录制权限、前台窗口或桌面会话",),
+            )
+
+    app = HintApp()
+    server = create_local_control_server(host="127.0.0.1", port=0, app=app)
+    thread = threading.Thread(target=server.serve_forever)
+    thread.start()
+    try:
+        payload = _request_json(server.server_address, "GET", "/api/screen-state-probe")
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+    assert app.probe_status_requests == 1
+    assert payload["hints"] == ["可能没有截到有效游戏画面，请检查屏幕录制权限、前台窗口或桌面会话"]
 
 
 def test_local_ui_stops_screen_state_probe_over_http() -> None:
@@ -488,6 +524,7 @@ def test_local_ui_stops_screen_state_probe_over_http() -> None:
             "matched_counts": {},
             "skipped_counts": {},
         },
+        "hints": [],
         "candidates": [],
     }
 

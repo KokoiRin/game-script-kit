@@ -981,6 +981,36 @@ def test_star_cli_probe_state_outputs_current_state(monkeypatch, capsys) -> None
     ]
 
 
+def test_star_cli_probe_state_outputs_hints(capsys, monkeypatch) -> None:
+    """验证 probe-state 文本输出会展示状态探测诊断提示。"""
+
+    class FakeApp:
+        def probe_screen_state_once(self, *, min_confidence=0.8, logger=None):
+            """返回疑似截图不可用的未知探测结果。"""
+            return ScreenStateProbeResult(
+                candidates=(
+                    ScreenStateCandidateResult(
+                        candidate=ScreenStateCandidate("主页", ImageTemplate("assets/主页.png")),
+                        match=None,
+                        elapsed_ms=4.0,
+                        best_confidence=0.0,
+                        best_rect=Rect(10, 20, 30, 40),
+                    ),
+                ),
+                elapsed_ms=4.0,
+            )
+
+    monkeypatch.setattr(cli, "build_local_control_application", lambda: FakeApp())
+
+    assert main(["probe-state"]) == 0
+
+    output = capsys.readouterr().out
+    assert "提示：" in output
+    assert "屏幕录制权限" in output
+    assert "前台窗口" in output
+    assert "桌面会话" in output
+
+
 def test_star_cli_probe_state_outputs_json(monkeypatch, capsys) -> None:
     """验证 probe-state 可以输出机器可读 JSON。"""
     calls = []
@@ -1032,6 +1062,7 @@ def test_star_cli_probe_state_outputs_json(monkeypatch, capsys) -> None:
         "current_state": "主页",
         "known": True,
         "elapsed_ms": 7.0,
+        "hints": [],
         "candidates": [
             {
                 "name": "主页",
@@ -1062,6 +1093,34 @@ def test_star_cli_probe_state_outputs_json(monkeypatch, capsys) -> None:
             },
         ],
     }
+
+
+def test_star_cli_probe_state_json_outputs_hints(monkeypatch, capsys) -> None:
+    """验证 probe-state JSON 输出包含状态探测诊断提示。"""
+
+    class FakeApp:
+        def probe_screen_state_once(self, *, min_confidence=0.8, logger=None):
+            """返回疑似截图不可用的未知探测结果。"""
+            return ScreenStateProbeResult(
+                candidates=(
+                    ScreenStateCandidateResult(
+                        candidate=ScreenStateCandidate("主页", ImageTemplate("assets/主页.png")),
+                        match=None,
+                        elapsed_ms=4.0,
+                        best_confidence=0.0,
+                        best_rect=Rect(10, 20, 30, 40),
+                    ),
+                ),
+                elapsed_ms=4.0,
+            )
+
+    monkeypatch.setattr(cli, "build_local_control_application", lambda: FakeApp())
+
+    assert main(["probe-state", "--json"]) == 0
+
+    payload = json.loads(capsys.readouterr().out)
+    assert len(payload["hints"]) == 1
+    assert "屏幕录制权限" in payload["hints"][0]
 
 
 def test_star_cli_probe_state_uses_min_confidence(monkeypatch, capsys) -> None:

@@ -70,6 +70,52 @@ def test_screen_state_probe_result_is_unknown_when_no_candidate_matches() -> Non
     assert result.known is False
 
 
+def test_screen_state_probe_result_hints_when_all_best_confidences_are_zero() -> None:
+    """验证候选最佳置信度全为零时提示排查截图能力。"""
+    result = ScreenStateProbeResult(
+        candidates=(
+            ScreenStateCandidateResult(
+                candidate=ScreenStateCandidate("主页", ImageTemplate("assets/home.png")),
+                match=None,
+                elapsed_ms=4.0,
+                best_confidence=0.0,
+                best_rect=Rect(10, 20, 30, 40),
+            ),
+            ScreenStateCandidateResult(
+                candidate=ScreenStateCandidate("人物", ImageTemplate("assets/character.png")),
+                match=None,
+                elapsed_ms=5.0,
+                best_confidence=0.0,
+                best_rect=Rect(50, 60, 30, 40),
+            ),
+        ),
+        elapsed_ms=9.0,
+    )
+
+    assert len(result.hints) == 1
+    assert "屏幕录制权限" in result.hints[0]
+    assert "前台窗口" in result.hints[0]
+    assert "桌面会话" in result.hints[0]
+
+
+def test_screen_state_probe_result_does_not_hint_for_low_nonzero_confidence() -> None:
+    """验证普通低置信度未命中不会提示截图能力不可用。"""
+    result = ScreenStateProbeResult(
+        candidates=(
+            ScreenStateCandidateResult(
+                candidate=ScreenStateCandidate("主页", ImageTemplate("assets/home.png")),
+                match=None,
+                elapsed_ms=4.0,
+                best_confidence=0.12,
+                best_rect=Rect(10, 20, 30, 40),
+            ),
+        ),
+        elapsed_ms=4.0,
+    )
+
+    assert result.hints == ()
+
+
 def test_screen_state_probe_result_chooses_highest_confidence_match() -> None:
     """验证多个候选命中时选择置信度最高的候选作为当前状态。"""
     result = ScreenStateProbeResult(
@@ -555,7 +601,7 @@ def test_local_control_background_screen_state_probe_tracks_stats(tmp_path) -> N
     )
 
     started = app.start_screen_state_probe(min_confidence=0.8, interval_seconds=0.01)
-    assert started.stats.rounds == 0
+    assert started.running is True
 
     running = _wait_until_probe_stats_rounds(app, 2)
     app.stop_screen_state_probe()

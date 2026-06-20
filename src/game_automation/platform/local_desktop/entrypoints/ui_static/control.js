@@ -30,6 +30,7 @@
     const screenStateConfigSummary = document.querySelector("#screen-state-config-summary");
     const screenStateCurrent = document.querySelector("#screen-state-current");
     const screenStateStats = document.querySelector("#screen-state-stats");
+    const screenStateHints = document.querySelector("#screen-state-hints");
     const screenStateCandidates = document.querySelector("#screen-state-candidates");
     const screenStateLog = document.querySelector("#screen-state-log");
     const startScreenStateProbeButton = document.querySelector("#start-screen-state-probe");
@@ -108,6 +109,7 @@
         screenStateCurrent.textContent = `当前状态：${state}，退出码：${result.exit_code}`;
       }
       screenStateStats.textContent = renderScreenStateStats(result.stats);
+      screenStateHints.textContent = renderScreenStateHints(result.hints);
       screenStateCandidates.textContent = renderScreenStateCandidates(result.candidates);
       screenStateLog.textContent = `${result.stdout || ""}${result.stderr || ""}`;
       if (currentScriptDetailsPayload) {
@@ -124,6 +126,14 @@
       const matched = renderCountMap(probeStats.matched_counts);
       const skipped = renderCountMap(probeStats.skipped_counts);
       return `轮数：${rounds}；最近耗时：${elapsed}；命中次数：${matched}；跳过次数：${skipped}`;
+    }
+
+    function renderScreenStateHints(hints) {
+      const items = hints || [];
+      if (items.length === 0) {
+        return "暂无诊断提示";
+      }
+      return `诊断提示：\n${items.map((hint) => `- ${hint}`).join("\n")}`;
     }
 
     function renderCountMap(counts) {
