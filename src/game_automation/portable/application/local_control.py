@@ -75,6 +75,10 @@ DEBUG_REGION_SCREENSHOT_PATH = Path(".star") / "debug" / "screenshots" / "latest
 DEBUG_PROBE_SCREENSHOT_PATH = Path(".star") / "debug" / "screenshots" / "latest-screen-probe.png"
 DEBUG_REGION_CROP_FOLDER = Path(".star") / "debug" / "screenshots" / "regions"
 DEBUG_PROBE_CROP_FOLDER = Path(".star") / "debug" / "screenshots" / "probe-crops"
+BLANK_SCREENSHOT_WARNING = (
+    "warning: captured screenshot appears all black. "
+    "Check macOS Screen Recording permission, foreground window, or desktop session.\n"
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -683,11 +687,13 @@ class LocalControlApplication:
         screenshot_path.parent.mkdir(parents=True, exist_ok=True)
         try:
             self._screen_capture_factory()(screenshot_path)
+            warning = _screen_capture_health_warning(screenshot_path)
         except Exception as exc:
             return ControlResult(exit_code=1, stderr=f"{exc}\n")
         return ControlResult(
             exit_code=0,
             stdout=f"saved screenshot: {screenshot_path}\n",
+            stderr=warning,
             screenshot_path=str(screenshot_path),
         )
 
@@ -703,6 +709,7 @@ class LocalControlApplication:
         raw_path.parent.mkdir(parents=True, exist_ok=True)
         try:
             self._screen_capture_factory()(raw_path)
+            warning = _screen_capture_health_warning(raw_path)
             _draw_region_diagnostics(
                 screenshot_path=raw_path,
                 output_path=diagnostic_path,
@@ -714,6 +721,7 @@ class LocalControlApplication:
         return ControlResult(
             exit_code=0,
             stdout=f"saved region diagnostics screenshot: {diagnostic_path}\n",
+            stderr=warning,
             screenshot_path=str(diagnostic_path),
         )
 
@@ -734,6 +742,7 @@ class LocalControlApplication:
         try:
             result = self.probe_screen_state_once(min_confidence=min_confidence)
             self._screen_capture_factory()(raw_path)
+            warning = _screen_capture_health_warning(raw_path)
             _draw_probe_diagnostics(
                 screenshot_path=raw_path,
                 output_path=diagnostic_path,
@@ -751,6 +760,7 @@ class LocalControlApplication:
                 f"saved probe diagnostics screenshot: {diagnostic_path}\n"
                 f"current_state={result.current_state}\n"
             ),
+            stderr=warning,
             screenshot_path=str(diagnostic_path),
         )
 
@@ -767,6 +777,7 @@ class LocalControlApplication:
         crop_root.mkdir(parents=True, exist_ok=True)
         try:
             self._screen_capture_factory()(raw_path)
+            warning = _screen_capture_health_warning(raw_path)
             crop_paths = _save_region_crops(
                 screenshot_path=raw_path,
                 output_folder=crop_root,
@@ -778,6 +789,7 @@ class LocalControlApplication:
         return ControlResult(
             exit_code=0,
             stdout="".join(f"saved region crop: {path}\n" for path in crop_paths),
+            stderr=warning,
             screenshot_path=str(crop_root),
         )
 
@@ -799,6 +811,7 @@ class LocalControlApplication:
         try:
             result = self.probe_screen_state_once(min_confidence=min_confidence)
             self._screen_capture_factory()(raw_path)
+            warning = _screen_capture_health_warning(raw_path)
             crop_paths = _save_probe_candidate_crops(
                 screenshot_path=raw_path,
                 output_folder=crop_root,
@@ -818,6 +831,7 @@ class LocalControlApplication:
         return ControlResult(
             exit_code=0,
             stdout=stdout,
+            stderr=warning,
             screenshot_path=str(crop_root),
         )
 
@@ -1158,6 +1172,25 @@ def _safe_probe_crop_name(index: int, candidate) -> str:
     if candidate.candidate.search_name:
         parts.append(candidate.candidate.search_name)
     return _safe_region_crop_name("_".join(parts))
+
+
+def _screen_capture_health_warning(path: Path) -> str:
+    """检查已保存截图是否疑似全黑，并返回用户可见警告。"""
+    try:
+        from PIL import Image
+
+        with Image.open(path) as image:
+            extrema = image.convert("RGB").getextrema()
+    except Exception:
+        return ""
+    return BLANK_SCREENSHOT_WARNING if _rgb_extrema_are_near_black(extrema) else ""
+
+
+def _rgb_extrema_are_near_black(
+    extrema: tuple[tuple[int, int], tuple[int, int], tuple[int, int]],
+) -> bool:
+    """判断 RGB 极值是否表示整张截图接近纯黑。"""
+    return all(channel_max <= 2 for _, channel_max in extrema)
 
 
 def _safe_region_crop_name(name: str) -> str:
