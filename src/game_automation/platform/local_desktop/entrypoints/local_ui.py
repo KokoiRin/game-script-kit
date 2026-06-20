@@ -86,6 +86,7 @@ def create_local_control_server(
                     str(payload.get("name", "")),
                     dry_run=bool(payload.get("dry_run", True)),
                     dry_run_color=str(payload.get("dry_run_color", "#000000")),
+                    dry_run_screen_state=str(payload.get("dry_run_screen_state", "未知")),
                 )
                 self._send_json(_status_to_payload(status))
                 return

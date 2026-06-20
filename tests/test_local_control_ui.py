@@ -47,6 +47,7 @@ def test_local_ui_serves_control_page() -> None:
     assert 'src="/static/control.js"' in html
     assert 'id="script-select"' in html
     assert 'id="dry-run-enabled" type="checkbox" checked' in html
+    assert 'id="dry-run-screen-state"' in html
     assert 'id="run-script"' in html
     assert 'id="stop-script"' in html
     assert 'id="image-asset-select"' in html
@@ -63,6 +64,7 @@ def test_local_ui_serves_control_page() -> None:
     assert 'id="screen-state-current"' in html
     assert 'id="screen-state-log"' in html
     assert "运行测试" in html
+    assert "模拟状态" in html
     assert "查找并点击图片" in html
     assert "截屏诊断" in html
     assert "区域诊断" in html
@@ -86,6 +88,7 @@ def test_local_ui_serves_static_assets() -> None:
     assert "height: 280px" in css
     assert "resize: vertical" in css
     assert 'document.querySelector("#screen-state-confidence")' in script
+    assert 'document.querySelector("#dry-run-screen-state")' in script
     assert 'fetch("/api/start-screen-state-probe"' in script
     assert 'fetch("/api/capture-region-diagnostics"' in script
 
@@ -124,6 +127,7 @@ def test_local_ui_runs_script_over_http() -> None:
                 "name": "conditional-color-demo",
                 "dry_run": True,
                 "dry_run_color": "#102030",
+                "dry_run_screen_state": "主页",
             },
         )
     finally:
@@ -136,6 +140,7 @@ def test_local_ui_runs_script_over_http() -> None:
             "name": "conditional-color-demo",
             "dry_run": True,
             "dry_run_color": "#102030",
+            "dry_run_screen_state": "主页",
         }
     ]
     assert payload == {
@@ -445,13 +450,21 @@ class FakeControlApplication:
         """返回 fake 图片资源列表。"""
         return ("start.png", "confirm.webp")
 
-    def start_named_script(self, name: str, *, dry_run: bool, dry_run_color: str) -> ScriptRunStatus:
+    def start_named_script(
+        self,
+        name: str,
+        *,
+        dry_run: bool,
+        dry_run_color: str,
+        dry_run_screen_state: str = "未知",
+    ) -> ScriptRunStatus:
         """记录 fake 后台脚本启动请求。"""
         self.start_requests.append(
             {
                 "name": name,
                 "dry_run": dry_run,
                 "dry_run_color": dry_run_color,
+                "dry_run_screen_state": dry_run_screen_state,
             }
         )
         return ScriptRunStatus(running=True, stdout="started\n")

@@ -40,6 +40,11 @@
 - **WHEN** 用户输入 `#RRGGBB` dry-run 颜色并运行颜色条件脚本
 - **THEN** 系统使用该固定颜色评估颜色条件
 
+#### Scenario: dry-run 使用指定界面状态
+
+- **WHEN** 用户输入 dry-run 模拟状态并运行界面状态条件脚本
+- **THEN** 系统使用该固定状态评估界面状态条件
+
 #### Scenario: 脚本运行失败
 
 - **WHEN** 脚本运行返回非零退出码或错误消息
@@ -180,3 +185,17 @@ pixel matching.
 - **WHEN** 用户点击区域诊断按钮但状态配置不存在、非法或没有命名区域
 - **THEN** 系统返回非零退出码和清晰错误消息
 - **AND** 系统不启动界面状态探测循环
+
+### Requirement: UI dry-run 支持指定当前界面状态
+本地控制 UI SHALL 允许用户在运行命名脚本时指定 dry-run 当前界面状态。HTTP adapter MUST 把该值传给 application 层脚本运行用例；application 层 MUST 用该值作为 `ScreenStateIs` 条件的 dry-run 状态来源。
+
+#### Scenario: 页面展示模拟状态输入
+- **WHEN** 用户打开本地 UI 页面
+- **THEN** 页面展示用于 dry-run 的模拟界面状态输入
+- **AND** 该输入默认值为 `未知`
+
+#### Scenario: dry-run 状态条件脚本使用模拟状态
+- **WHEN** 用户在 UI 中输入模拟状态 `主页`
+- **AND** 用户以 dry-run 模式运行包含 `ScreenStateIs("主页")` 的脚本
+- **THEN** 系统通过 application 层使用 `主页` 作为 dry-run 当前状态
+- **AND** 脚本按状态条件命中路径执行
