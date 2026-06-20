@@ -18,6 +18,7 @@
     const refreshImagesButton = document.querySelector("#refresh-images");
     const clickImageButton = document.querySelector("#click-image");
     const captureScreenButton = document.querySelector("#capture-screen");
+    const diagnoseScreenButton = document.querySelector("#diagnose-screen");
     const captureRegionDiagnosticsButton = document.querySelector("#capture-region-diagnostics");
     const captureProbeDiagnosticsButton = document.querySelector("#capture-probe-diagnostics");
     const captureRegionCropsButton = document.querySelector("#capture-region-crops");
@@ -49,6 +50,7 @@
       runTestsButton.disabled = isBusy;
       refreshImagesButton.disabled = isBusy;
       captureScreenButton.disabled = isBusy;
+      diagnoseScreenButton.disabled = isBusy;
       captureRegionDiagnosticsButton.disabled = isBusy;
       captureProbeDiagnosticsButton.disabled = isBusy;
       captureRegionCropsButton.disabled = isBusy;
@@ -520,6 +522,24 @@
       }
     }
 
+    async function diagnoseScreen() {
+      setBusy(true);
+      statusEl.textContent = "正在诊断屏幕识别环境...";
+      outputEl.textContent = "";
+      try {
+        const response = await fetch("/api/diagnose-screen", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({
+            min_confidence: Number.parseFloat(screenStateConfidenceInput.value)
+          })
+        });
+        renderResult("环境诊断", await response.json());
+      } finally {
+        setBusy(false);
+      }
+    }
+
     async function captureRegionDiagnostics() {
       setBusy(true);
       statusEl.textContent = "正在生成区域诊断...";
@@ -644,6 +664,7 @@
     runTestsButton.addEventListener("click", runTests);
     refreshImagesButton.addEventListener("click", loadImageAssets);
     captureScreenButton.addEventListener("click", captureScreen);
+    diagnoseScreenButton.addEventListener("click", diagnoseScreen);
     captureRegionDiagnosticsButton.addEventListener("click", captureRegionDiagnostics);
     captureProbeDiagnosticsButton.addEventListener("click", captureProbeDiagnostics);
     captureRegionCropsButton.addEventListener("click", captureRegionCrops);

@@ -72,6 +72,7 @@ def test_local_ui_serves_control_page() -> None:
     assert 'id="image-confidence"' in html
     assert 'id="click-image"' in html
     assert 'id="capture-screen"' in html
+    assert 'id="diagnose-screen"' in html
     assert 'id="capture-region-diagnostics"' in html
     assert 'id="capture-probe-diagnostics"' in html
     assert 'id="capture-region-crops"' in html
@@ -92,6 +93,7 @@ def test_local_ui_serves_control_page() -> None:
     assert "模拟状态" in html
     assert "查找并点击图片" in html
     assert "截屏诊断" in html
+    assert "环境诊断" in html
     assert "区域诊断" in html
     assert "界面探测" in html
 
@@ -111,7 +113,7 @@ def test_local_ui_serves_static_assets() -> None:
 
     assert ".screen-state-toolbar" in css
     assert ".screen-state-config-summary" in css
-    assert "grid-template-columns: minmax(180px, 1fr) 120px repeat(7, auto)" in css
+    assert "grid-template-columns: minmax(180px, 1fr) 120px repeat(8, auto)" in css
     assert "grid-template-columns: minmax(180px, 1fr) 120px 140px 140px auto auto auto" in css
     assert "height: 280px" in css
     assert "resize: vertical" in css
@@ -125,6 +127,7 @@ def test_local_ui_serves_static_assets() -> None:
     assert 'document.querySelector("#screen-state-suggestions")' in script
     assert 'document.querySelector("#use-probed-screen-state")' in script
     assert 'document.querySelector("#use-script-screen-state")' in script
+    assert 'document.querySelector("#diagnose-screen")' in script
     assert 'latestScreenState = state' in script
     assert 'dryRunScreenStateInput.value = latestScreenState' in script
     assert "没有可用探测状态" in script
@@ -154,6 +157,7 @@ def test_local_ui_serves_static_assets() -> None:
     assert 'fetch(`/api/script-details?name=${encodeURIComponent(scriptSelect.value)}`)' in script
     assert 'fetch("/api/start-screen-state-probe"' in script
     assert 'fetch("/api/capture-region-diagnostics"' in script
+    assert 'fetch("/api/diagnose-screen"' in script
     assert 'fetch("/api/capture-probe-diagnostics"' in script
     assert 'fetch("/api/capture-region-crops"' in script
     assert 'fetch("/api/capture-probe-crops"' in script
@@ -623,6 +627,63 @@ def test_local_ui_captures_screen_over_http() -> None:
     }
 
 
+def test_local_ui_diagnoses_screen_over_http() -> None:
+    """验证 UI HTTP 接口把屏幕环境诊断请求委托给 application。"""
+    app = FakeControlApplication()
+    server = create_local_control_server(host="127.0.0.1", port=0, app=app)
+    thread = threading.Thread(target=server.serve_forever)
+    thread.start()
+    try:
+        payload = _request_json(
+            server.server_address,
+            "POST",
+            "/api/diagnose-screen",
+            {"min_confidence": 0.75},
+        )
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+    assert app.screen_diagnosis_requests == [0.75]
+    assert payload == {
+        "exit_code": 0,
+        "stdout": (
+            "saved screenshot: /tmp/latest-screen.png\n"
+            "current_state=未知\n"
+        ),
+        "stderr": "warning: captured screenshot appears all black\n",
+        "screenshot_path": "/tmp/latest-screen.png",
+        "screenshot_url": "/api/debug-screenshot?version=1",
+    }
+
+
+def test_local_ui_rejects_non_numeric_screen_diagnosis_confidence_over_http() -> None:
+    """验证 UI HTTP 接口拒绝非数字屏幕诊断置信度。"""
+    app = FakeControlApplication()
+    server = create_local_control_server(host="127.0.0.1", port=0, app=app)
+    thread = threading.Thread(target=server.serve_forever)
+    thread.start()
+    try:
+        payload = _request_json(
+            server.server_address,
+            "POST",
+            "/api/diagnose-screen",
+            {"min_confidence": "bad"},
+        )
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+    assert app.screen_diagnosis_requests == []
+    assert payload == {
+        "exit_code": 2,
+        "stdout": "",
+        "stderr": "invalid screen diagnosis request: min_confidence must be a number\n",
+    }
+
+
 def test_local_ui_captures_region_diagnostics_over_http() -> None:
     """验证 UI HTTP 接口把区域诊断请求委托给 application。"""
     app = FakeControlApplication()
@@ -771,6 +832,7 @@ class FakeControlApplication:
         self.test_requests: list[str] = []
         self.image_click_requests: list[dict[str, object]] = []
         self.capture_requests = 0
+        self.screen_diagnosis_requests: list[float] = []
         self.region_diagnostics_requests = 0
         self.probe_diagnostics_requests: list[float] = []
         self.region_crop_requests = 0
@@ -952,6 +1014,19 @@ class FakeControlApplication:
             exit_code=0,
             stdout="saved screenshot: /tmp/latest-screen.png\n",
             stderr="",
+            screenshot_path="/tmp/latest-screen.png",
+        )
+
+    def diagnose_screen_setup(self, *, min_confidence: float = 0.8) -> ControlResult:
+        """记录 fake 屏幕环境诊断请求。"""
+        self.screen_diagnosis_requests.append(min_confidence)
+        return ControlResult(
+            exit_code=0,
+            stdout=(
+                "saved screenshot: /tmp/latest-screen.png\n"
+                "current_state=未知\n"
+            ),
+            stderr="warning: captured screenshot appears all black\n",
             screenshot_path="/tmp/latest-screen.png",
         )
 
