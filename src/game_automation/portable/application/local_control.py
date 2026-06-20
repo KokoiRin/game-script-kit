@@ -22,9 +22,13 @@ from game_automation.portable.application.script_run import (
     ScreenImageLocatorFactory,
     run_script,
 )
-from game_automation.portable.application.screen_state_config import load_screen_state_candidates
-from game_automation.portable.application.screen_state_config import load_screen_state_names
-from game_automation.portable.application.screen_state_config import load_screen_state_regions
+from game_automation.portable.application.screen_state_config import (
+    ScreenStateConfigGroupSummary,
+    load_screen_state_candidates,
+    load_screen_state_config_summary,
+    load_screen_state_names,
+    load_screen_state_regions,
+)
 from game_automation.portable.application.script_details import ScriptDetailsResult, describe_script_details
 from game_automation.portable.domain import (
     Click,
@@ -75,6 +79,13 @@ class ScriptRunStatus:
     running: bool
     exit_code: int | None = None
     stdout: str = ""
+    stderr: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class ScreenStateConfigSummaryResult:
+    exit_code: int
+    groups: tuple[ScreenStateConfigGroupSummary, ...] = ()
     stderr: str = ""
 
 
@@ -340,6 +351,18 @@ class LocalControlApplication:
         except ValueError:
             return ()
         return () if names is None else names
+
+    def describe_screen_state_config(self) -> ScreenStateConfigSummaryResult:
+        """返回 UI 可展示的界面状态配置摘要。"""
+        try:
+            groups = load_screen_state_config_summary(
+                self._image_asset_root() / SCREEN_STATE_CONFIG_NAME,
+                asset_root=self._image_asset_root(),
+                supported_suffixes=IMAGE_ASSET_SUFFIXES,
+            )
+        except (LookupError, ValueError) as exc:
+            return ScreenStateConfigSummaryResult(exit_code=2, stderr=f"{exc}\n")
+        return ScreenStateConfigSummaryResult(exit_code=0, groups=() if groups is None else groups)
 
     def describe_script(self, name: str) -> ScriptDetailsResult:
         """返回 UI 可展示的脚本步骤和依赖摘要。"""

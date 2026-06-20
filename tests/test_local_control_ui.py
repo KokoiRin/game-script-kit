@@ -12,10 +12,15 @@ import threading
 
 from game_automation.portable.application.local_control import (
     ControlResult,
+    ScreenStateConfigSummaryResult,
     ScreenStateProbeStats,
     ScreenStateProbeStatus,
     ScriptDetailsResult,
     ScriptRunStatus,
+)
+from game_automation.portable.application.screen_state_config import (
+    ScreenStateConfigGroupSummary,
+    ScreenStateConfigSearchSummary,
 )
 from game_automation.platform.local_desktop.entrypoints.local_ui import create_local_control_server
 
@@ -73,6 +78,7 @@ def test_local_ui_serves_control_page() -> None:
     assert 'id="stop-screen-state-probe"' in html
     assert 'id="screen-state-interval"' in html
     assert 'id="screen-state-current"' in html
+    assert 'id="screen-state-config-summary"' in html
     assert 'id="screen-state-stats"' in html
     assert 'id="screen-state-log"' in html
     assert "运行测试" in html
@@ -97,10 +103,12 @@ def test_local_ui_serves_static_assets() -> None:
         server.server_close()
 
     assert ".screen-state-toolbar" in css
+    assert ".screen-state-config-summary" in css
     assert "grid-template-columns: minmax(180px, 1fr) 120px 140px 140px auto auto auto" in css
     assert "height: 280px" in css
     assert "resize: vertical" in css
     assert 'document.querySelector("#screen-state-confidence")' in script
+    assert 'document.querySelector("#screen-state-config-summary")' in script
     assert 'document.querySelector("#screen-state-stats")' in script
     assert 'document.querySelector("#script-details")' in script
     assert 'document.querySelector("#dry-run-screen-state")' in script
@@ -119,10 +127,13 @@ def test_local_ui_serves_static_assets() -> None:
     assert "当前脚本没有状态依赖" in script
     assert "依赖检查：" in script
     assert 'fetch("/api/screen-state-names"' in script
+    assert 'fetch("/api/screen-state-config"' in script
     assert 'fetch(`/api/script-details?name=${encodeURIComponent(scriptSelect.value)}`)' in script
     assert 'fetch("/api/start-screen-state-probe"' in script
     assert 'fetch("/api/capture-region-diagnostics"' in script
     assert "renderScreenStateStats" in script
+    assert "renderScreenStateConfigSummary" in script
+    assert "未配置状态识别" in script
     assert "命中次数：" in script
 
 
@@ -159,6 +170,39 @@ def test_local_ui_lists_screen_state_names_over_http() -> None:
         server.server_close()
 
     assert payload == {"states": ["主页", "人物"]}
+
+
+def test_local_ui_gets_screen_state_config_summary_over_http() -> None:
+    """验证 UI HTTP 接口可以返回界面状态配置摘要。"""
+    app = FakeControlApplication()
+    server = create_local_control_server(host="127.0.0.1", port=0, app=app)
+    thread = threading.Thread(target=server.serve_forever)
+    thread.start()
+    try:
+        payload = _request_json(server.server_address, "GET", "/api/screen-state-config")
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+    assert app.screen_state_config_requests == 1
+    assert payload == {
+        "exit_code": 0,
+        "states": [
+            {
+                "state": "主页",
+                "searches": [
+                    {
+                        "name": "主页标识",
+                        "image": "home.png",
+                        "region": "主页标题",
+                        "min_confidence": 0.75,
+                    }
+                ],
+            }
+        ],
+        "stderr": "",
+    }
 
 
 def test_local_ui_gets_script_details_over_http() -> None:
@@ -540,6 +584,7 @@ class FakeControlApplication:
         self.probe_start_requests: list[dict[str, object]] = []
         self.probe_status_requests = 0
         self.probe_stop_requests = 0
+        self.screen_state_config_requests = 0
 
     def list_scripts(self) -> tuple[str, ...]:
         """返回 fake 脚本列表。"""
@@ -556,6 +601,26 @@ class FakeControlApplication:
     def list_screen_state_names(self) -> tuple[str, ...]:
         """返回 fake 界面状态候选。"""
         return ("主页", "人物")
+
+    def describe_screen_state_config(self) -> ScreenStateConfigSummaryResult:
+        """返回 fake 界面状态配置摘要。"""
+        self.screen_state_config_requests += 1
+        return ScreenStateConfigSummaryResult(
+            exit_code=0,
+            groups=(
+                ScreenStateConfigGroupSummary(
+                    state="主页",
+                    searches=(
+                        ScreenStateConfigSearchSummary(
+                            name="主页标识",
+                            image="home.png",
+                            region="主页标题",
+                            min_confidence=0.75,
+                        ),
+                    ),
+                ),
+            ),
+        )
 
     def describe_script(self, name: str) -> ScriptDetailsResult:
         """返回 fake 脚本详情。"""
