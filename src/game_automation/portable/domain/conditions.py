@@ -39,4 +39,17 @@ class ImageExists:
             raise ValueError("image exists min_confidence must be greater than 0 and at most 1")
 
 
-Condition: TypeAlias = ColorIs | ImageExists
+@dataclass(frozen=True, slots=True)
+class ScreenStateIs:
+    state: str
+    min_confidence: float = 0.8
+
+    def __post_init__(self) -> None:
+        """校验界面状态名称和最低识别置信度。"""
+        if not self.state.strip():
+            raise ValueError("screen state condition state cannot be empty")
+        if not 0 < self.min_confidence <= 1:
+            raise ValueError("screen state condition min_confidence must be greater than 0 and at most 1")
+
+
+Condition: TypeAlias = ColorIs | ImageExists | ScreenStateIs

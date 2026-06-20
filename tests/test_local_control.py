@@ -4,12 +4,28 @@
 固定测试任务白名单。它不测试 HTTP 细节，也不直接绑定 engine 内部实现。
 """
 
+import json
 import subprocess
 import time
 
 from PIL import Image
 
-from game_automation.portable.domain import ImageExists, ImageMatch, ImageTemplate, Point, Rect, Repeat, ScreenWindow, Script, Wait, WaitUntil
+from game_automation.portable.domain import (
+    Click,
+    If,
+    ImageBatchMatchResult,
+    ImageExists,
+    ImageMatch,
+    ImageTemplate,
+    Point,
+    Rect,
+    Repeat,
+    ScreenStateIs,
+    ScreenWindow,
+    Script,
+    Wait,
+    WaitUntil,
+)
 from game_automation.portable.engine.ports import InputDevice
 from game_automation.portable.application.local_control import LocalControlApplication, PROJECT_ROOT
 from game_automation.portable.scripts_manager.catalog import ScriptCatalog
@@ -151,6 +167,86 @@ def test_local_control_background_status_includes_image_match_logs() -> None:
     assert "image match template=assets/start.png" in final.stdout
     assert "found=True" in final.stdout
     assert "confidence=0.91" in final.stdout
+
+
+def test_local_control_runs_script_with_screen_state_condition(tmp_path) -> None:
+    """验证本地控制真实脚本可通过状态探测判断当前界面。"""
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    (assets / "主页.png").write_bytes(b"fake")
+    (assets / "screen-states.json").write_text(
+        json.dumps(
+            {
+                "regions": {
+                    "主页标题": {"left": 10, "top": 20, "width": 120, "height": 40}
+                },
+                "groups": [
+                    {
+                        "state": "主页",
+                        "searches": [
+                            {"name": "主页标题", "image": "主页.png", "region": "主页标题"}
+                        ],
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    clicks = []
+    batch_requests = []
+    script = Script(
+        name="state-aware",
+        window=ScreenWindow(),
+        steps=(
+            If(
+                condition=ScreenStateIs("主页"),
+                then_steps=(Click(Point(100, 200)),),
+                else_steps=(Wait(0.5),),
+            ),
+        ),
+    )
+
+    class FakeDevice(InputDevice):
+        def click(self, target: Point) -> None:
+            """记录真实点击坐标。"""
+            clicks.append(target)
+
+        def drag_to(self, start: Point, end: Point, duration_seconds: float = 0.0) -> None:
+            """状态分支脚本不会拖拽。"""
+
+        def wait(self, duration_seconds: float) -> None:
+            """状态命中后不会等待。"""
+
+    class FakeBatchLocator:
+        def locate_requests(self, requests, *, logger=None, stop_on_first_match=False):
+            """记录状态探测请求并返回主页命中。"""
+            batch_requests.append((requests, stop_on_first_match))
+            return (
+                ImageBatchMatchResult(
+                    requests[0].template,
+                    ImageMatch(Rect(10, 20, 30, 40), confidence=0.91),
+                    elapsed_ms=4.0,
+                ),
+            )
+
+    app = LocalControlApplication(
+        catalog=ScriptCatalog((script,)),
+        project_root=tmp_path,
+        real_device_factory=FakeDevice,
+        real_image_batch_locator_factory=FakeBatchLocator,
+    )
+
+    result = app.run_named_script("state-aware", dry_run=False)
+
+    assert result.exit_code == 0
+    assert result.stderr == ""
+    assert clicks == [Point(100, 200)]
+    assert len(batch_requests) == 1
+    requests, stop_on_first_match = batch_requests[0]
+    assert stop_on_first_match is True
+    assert requests[0].region == Rect(10, 20, 120, 40)
+    assert "screen state probe round current_state=主页" in result.stdout
 
 
 def test_local_control_lists_image_assets_from_project_assets_folder(tmp_path) -> None:

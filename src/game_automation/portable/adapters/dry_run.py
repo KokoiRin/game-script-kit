@@ -10,7 +10,13 @@ from dataclasses import dataclass
 from typing import Mapping
 
 from game_automation.portable.domain import Color, ImageMatch, ImageTemplate, Point, Rect
-from game_automation.portable.engine.ports import InputDevice, PixelColorReader, RunLogger, ScreenImageLocator
+from game_automation.portable.engine.ports import (
+    InputDevice,
+    PixelColorReader,
+    RunLogger,
+    ScreenImageLocator,
+    ScreenStateReader,
+)
 
 
 class DryRunInputDevice(InputDevice):
@@ -50,3 +56,17 @@ class DryRunScreenImageLocator(ScreenImageLocator):
         if match is None or match.confidence < min_confidence:
             return None
         return match
+
+
+@dataclass(frozen=True, slots=True)
+class DryRunScreenStateReader(ScreenStateReader):
+    state: str
+
+    def read_current_state(
+        self,
+        *,
+        min_confidence: float = 0.8,
+        logger: RunLogger | None = None,
+    ) -> str:
+        """返回固定界面状态，让 dry-run 状态条件可预测。"""
+        return self.state

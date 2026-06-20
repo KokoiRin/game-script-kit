@@ -34,6 +34,7 @@ def _run_script(args: argparse.Namespace) -> int:
         dry_run=args.dry_run,
         dry_run_color=args.dry_run_color,
         dry_run_images=tuple(args.dry_run_image),
+        dry_run_screen_state=args.dry_run_screen_state,
     )
     if result.error_message is not None:
         print(result.error_message, file=sys.stderr)
@@ -104,6 +105,11 @@ def main(argv: list[str] | None = None) -> int:
         action="append",
         default=[],
         help="Template path treated as found when dry-running image conditions. Can be repeated.",
+    )
+    run_parser.add_argument(
+        "--dry-run-screen-state",
+        default="未知",
+        help="Fixed screen state used when dry-running screen-state conditions.",
     )
 
     recorder_parser = subparsers.add_parser("recorder", help="Record screen coordinates.")

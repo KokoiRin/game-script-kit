@@ -17,6 +17,7 @@ def test_star_cli_lists_available_scripts(capsys) -> None:
         "recorded-clicks",
         "repeat-demo",
         "conditional-color-demo",
+        "conditional-screen-state-demo",
         "wait-until-color-demo",
         "wait-until-image-demo",
         "click-image-demo",
@@ -76,6 +77,30 @@ def test_star_cli_runs_conditional_color_demo_with_custom_dry_run_color(capsys) 
         "click Point(x=100, y=200)",
         "wait 0.25s",
     ]
+
+
+def test_star_cli_runs_conditional_screen_state_demo_with_default_dry_run_state(capsys) -> None:
+    """验证状态条件分支脚本 dry-run 默认固定状态会走 else 分支。"""
+    assert main(["run", "conditional-screen-state-demo", "--dry-run"]) == 0
+
+    output = capsys.readouterr().out.splitlines()
+    assert output == ["wait 0.5s"]
+
+
+def test_star_cli_runs_conditional_screen_state_demo_with_custom_dry_run_state(capsys) -> None:
+    """验证状态条件分支脚本 dry-run 可用指定状态走 then 分支。"""
+    assert main(
+        [
+            "run",
+            "conditional-screen-state-demo",
+            "--dry-run",
+            "--dry-run-screen-state",
+            "主页",
+        ]
+    ) == 0
+
+    output = capsys.readouterr().out.splitlines()
+    assert output == ["click Point(x=100, y=200)"]
 
 
 def test_star_cli_reports_invalid_dry_run_color(capsys) -> None:

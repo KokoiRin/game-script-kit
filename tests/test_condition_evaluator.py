@@ -13,6 +13,7 @@ from game_automation.portable.domain import (
     NamedImage,
     Point,
     Rect,
+    ScreenStateIs,
     TargetCatalog,
     UnknownImageNameError,
 )
@@ -52,6 +53,20 @@ class FakeImageLocator:
         """记录定位参数并返回固定匹配结果。"""
         self.calls.append((template, region, min_confidence))
         return self.match
+
+
+class FakeScreenStateReader:
+    """提供条件评估测试用固定界面状态。"""
+
+    def __init__(self, state: str) -> None:
+        """保存固定状态并记录读取请求。"""
+        self.state = state
+        self.calls = []
+
+    def read_current_state(self, *, min_confidence: float = 0.8, logger=None) -> str:
+        """记录最低置信度并返回固定状态。"""
+        self.calls.append(min_confidence)
+        return self.state
 
 
 def test_condition_evaluator_matches_color_with_tolerance_and_window() -> None:
@@ -184,6 +199,48 @@ def test_condition_evaluator_resolves_image_region_with_window() -> None:
             0.8,
         )
     ]
+
+
+def test_condition_evaluator_returns_true_when_screen_state_matches() -> None:
+    """验证界面状态条件会通过状态读取端口返回真。"""
+    reader = FakeScreenStateReader("主页")
+
+    result = evaluate_condition(
+        ScreenStateIs("主页", min_confidence=0.7),
+        window=AreaWindow(Rect(100, 200, 800, 600)),
+        color_reader=None,
+        image_locator=None,
+        screen_state_reader=reader,
+    )
+
+    assert result is True
+    assert reader.calls == [0.7]
+
+
+def test_condition_evaluator_returns_false_when_screen_state_differs() -> None:
+    """验证界面状态不一致时条件为假。"""
+    reader = FakeScreenStateReader("人物")
+
+    result = evaluate_condition(
+        ScreenStateIs("主页"),
+        window=AreaWindow(Rect(100, 200, 800, 600)),
+        color_reader=None,
+        image_locator=None,
+        screen_state_reader=reader,
+    )
+
+    assert result is False
+
+
+def test_condition_evaluator_requires_screen_state_reader() -> None:
+    """验证界面状态条件缺少读取端口时由评估器报告错误。"""
+    with pytest.raises(RuntimeError, match="screen state reader"):
+        evaluate_condition(
+            ScreenStateIs("主页"),
+            window=AreaWindow(Rect(100, 200, 800, 600)),
+            color_reader=None,
+            image_locator=None,
+        )
 
 
 def test_condition_evaluator_requires_image_locator() -> None:

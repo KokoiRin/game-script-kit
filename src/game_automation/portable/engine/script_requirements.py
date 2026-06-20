@@ -15,6 +15,7 @@ from game_automation.portable.domain import (
     ImageExists,
     ImageTarget,
     Repeat,
+    ScreenStateIs,
     Script,
     Step,
     WaitUntil,
@@ -26,6 +27,7 @@ from game_automation.portable.domain.conditions import Condition
 class ScriptRequirements:
     needs_color_reader: bool = False
     needs_image_locator: bool = False
+    needs_screen_state_reader: bool = False
 
 
 def inspect_script_requirements(script: Script) -> ScriptRequirements:
@@ -37,13 +39,18 @@ def _inspect_steps(steps: tuple[Step, ...]) -> ScriptRequirements:
     """检查步骤序列需要哪些运行时端口。"""
     needs_color_reader = False
     needs_image_locator = False
+    needs_screen_state_reader = False
     for step in steps:
         requirements = _inspect_step(step)
         needs_color_reader = needs_color_reader or requirements.needs_color_reader
         needs_image_locator = needs_image_locator or requirements.needs_image_locator
+        needs_screen_state_reader = (
+            needs_screen_state_reader or requirements.needs_screen_state_reader
+        )
     return ScriptRequirements(
         needs_color_reader=needs_color_reader,
         needs_image_locator=needs_image_locator,
+        needs_screen_state_reader=needs_screen_state_reader,
     )
 
 
@@ -69,6 +76,7 @@ def _inspect_condition(condition: Condition) -> ScriptRequirements:
     return ScriptRequirements(
         needs_color_reader=isinstance(condition, ColorIs),
         needs_image_locator=isinstance(condition, ImageExists),
+        needs_screen_state_reader=isinstance(condition, ScreenStateIs),
     )
 
 
@@ -77,4 +85,5 @@ def _merge_requirements(*requirements: ScriptRequirements) -> ScriptRequirements
     return ScriptRequirements(
         needs_color_reader=any(item.needs_color_reader for item in requirements),
         needs_image_locator=any(item.needs_image_locator for item in requirements),
+        needs_screen_state_reader=any(item.needs_screen_state_reader for item in requirements),
     )

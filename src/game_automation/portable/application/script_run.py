@@ -13,6 +13,7 @@ from game_automation.portable.adapters.dry_run import (
     DryRunInputDevice,
     DryRunPixelColorReader,
     DryRunScreenImageLocator,
+    DryRunScreenStateReader,
 )
 from game_automation.portable.domain import Color, ImageMatch, ImageTemplate, Rect, Script
 from game_automation.portable.engine.ports import (
@@ -21,6 +22,7 @@ from game_automation.portable.engine.ports import (
     PixelColorReader,
     RunLogger,
     ScreenImageLocator,
+    ScreenStateReader,
 )
 from game_automation.portable.engine.runner import ScriptCancelledError, ScriptRunner
 from game_automation.portable.engine.script_requirements import inspect_script_requirements
@@ -28,6 +30,7 @@ from game_automation.portable.engine.script_requirements import inspect_script_r
 InputDeviceFactory = Callable[[], InputDevice]
 PixelColorReaderFactory = Callable[[], PixelColorReader]
 ScreenImageLocatorFactory = Callable[[], ScreenImageLocator]
+ScreenStateReaderFactory = Callable[[], ScreenStateReader]
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,9 +45,11 @@ def run_script(
     dry_run: bool,
     dry_run_color: str = "#000000",
     dry_run_images: tuple[str, ...] = (),
+    dry_run_screen_state: str = "未知",
     real_device_factory: InputDeviceFactory | None = None,
     real_color_reader_factory: PixelColorReaderFactory | None = None,
     real_image_locator_factory: ScreenImageLocatorFactory | None = None,
+    real_screen_state_reader_factory: ScreenStateReaderFactory | None = None,
     cancellation_token: CancellationToken | None = None,
     logger: RunLogger | None = None,
 ) -> ScriptRunResult:
@@ -55,9 +60,11 @@ def run_script(
             dry_run=dry_run,
             dry_run_color=dry_run_color,
             dry_run_images=dry_run_images,
+            dry_run_screen_state=dry_run_screen_state,
             real_device_factory=real_device_factory,
             real_color_reader_factory=real_color_reader_factory,
             real_image_locator_factory=real_image_locator_factory,
+            real_screen_state_reader_factory=real_screen_state_reader_factory,
             cancellation_token=cancellation_token,
             logger=logger,
         )
@@ -98,9 +105,11 @@ def _build_runner(
     dry_run: bool,
     dry_run_color: str,
     dry_run_images: tuple[str, ...],
+    dry_run_screen_state: str,
     real_device_factory: InputDeviceFactory | None,
     real_color_reader_factory: PixelColorReaderFactory | None,
     real_image_locator_factory: ScreenImageLocatorFactory | None,
+    real_screen_state_reader_factory: ScreenStateReaderFactory | None,
     cancellation_token: CancellationToken | None,
     logger: RunLogger | None,
 ) -> ScriptRunner:
@@ -117,6 +126,10 @@ def _build_runner(
                 dry_run_images,
                 needs_image_locator=requirements.needs_image_locator,
             ),
+            screen_state_reader=_build_dry_run_screen_state_reader(
+                dry_run_screen_state,
+                needs_screen_state_reader=requirements.needs_screen_state_reader,
+            ),
             cancellation_token=cancellation_token,
             logger=logger,
         )
@@ -130,6 +143,10 @@ def _build_runner(
         image_locator=_build_real_image_locator(
             needs_image_locator=requirements.needs_image_locator,
             real_image_locator_factory=real_image_locator_factory,
+        ),
+        screen_state_reader=_build_real_screen_state_reader(
+            needs_screen_state_reader=requirements.needs_screen_state_reader,
+            real_screen_state_reader_factory=real_screen_state_reader_factory,
         ),
         cancellation_token=cancellation_token,
         logger=logger,
@@ -169,6 +186,17 @@ def _build_dry_run_image_locator(
     return DryRunScreenImageLocator(matches)
 
 
+def _build_dry_run_screen_state_reader(
+    dry_run_screen_state: str,
+    *,
+    needs_screen_state_reader: bool,
+) -> ScreenStateReader | None:
+    """按脚本需求创建 dry-run 固定界面状态 reader。"""
+    if not needs_screen_state_reader:
+        return None
+    return DryRunScreenStateReader(dry_run_screen_state)
+
+
 def _build_real_color_reader(
     *,
     needs_color_reader: bool,
@@ -193,3 +221,16 @@ def _build_real_image_locator(
     if real_image_locator_factory is None:
         raise RuntimeError("real image locator factory is required")
     return real_image_locator_factory()
+
+
+def _build_real_screen_state_reader(
+    *,
+    needs_screen_state_reader: bool,
+    real_screen_state_reader_factory: ScreenStateReaderFactory | None,
+) -> ScreenStateReader | None:
+    """按脚本需求通过平台层注入的工厂创建真实界面状态 reader。"""
+    if not needs_screen_state_reader:
+        return None
+    if real_screen_state_reader_factory is None:
+        raise RuntimeError("real screen state reader factory is required")
+    return real_screen_state_reader_factory()

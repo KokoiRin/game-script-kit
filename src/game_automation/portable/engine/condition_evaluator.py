@@ -6,12 +6,12 @@
 
 from __future__ import annotations
 
-from game_automation.portable.domain import Color, ColorIs, ImageExists, Point, Rect
+from game_automation.portable.domain import Color, ColorIs, ImageExists, Point, Rect, ScreenStateIs
 from game_automation.portable.domain.conditions import Condition
 from game_automation.portable.domain.point_aliases import TargetCatalog
 from game_automation.portable.domain.windows import Window
 from game_automation.portable.engine.image_query import locate_image
-from game_automation.portable.engine.ports import PixelColorReader, RunLogger, ScreenImageLocator
+from game_automation.portable.engine.ports import PixelColorReader, RunLogger, ScreenImageLocator, ScreenStateReader
 
 
 def evaluate_condition(
@@ -20,6 +20,7 @@ def evaluate_condition(
     window: Window,
     color_reader: PixelColorReader | None,
     image_locator: ScreenImageLocator | None,
+    screen_state_reader: ScreenStateReader | None = None,
     resources: TargetCatalog | None = None,
     logger: RunLogger | None = None,
 ) -> bool:
@@ -33,6 +34,12 @@ def evaluate_condition(
             window=window,
             image_locator=image_locator,
             resources=target_catalog,
+            logger=logger,
+        )
+    if isinstance(condition, ScreenStateIs):
+        return _evaluate_screen_state_is(
+            condition,
+            screen_state_reader=screen_state_reader,
             logger=logger,
         )
     raise TypeError(f"unsupported script condition: {type(condition).__name__}")
@@ -82,6 +89,25 @@ def _evaluate_image_exists(
         logger=logger,
     )
     return result.found
+
+
+def _evaluate_screen_state_is(
+    condition: ScreenStateIs,
+    *,
+    screen_state_reader: ScreenStateReader | None,
+    logger: RunLogger | None,
+) -> bool:
+    """通过界面状态读取端口判断当前状态是否匹配。"""
+    if screen_state_reader is None:
+        raise RuntimeError("screen state reader is required for screen state conditions")
+
+    return (
+        screen_state_reader.read_current_state(
+            min_confidence=condition.min_confidence,
+            logger=logger,
+        )
+        == condition.state
+    )
 
 
 def _resolve_region(window: Window, region: Rect | None) -> Rect | None:

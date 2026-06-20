@@ -14,7 +14,9 @@ from game_automation.portable.domain import (
     Point,
     Rect,
     ScreenWindow,
+    ScreenStateIs,
     Script,
+    Wait,
     WaitUntil,
 )
 from game_automation.portable.engine.ports import InputDevice
@@ -50,6 +52,23 @@ def build_click_image_script() -> Script:
         name="click-image-test",
         window=ScreenWindow(),
         steps=(Click(ImageTarget(ImageTemplate(IMAGE_TEMPLATE_PATH))),),
+    )
+
+
+def build_screen_state_branch_script() -> Script:
+    """构造应用层测试用界面状态分支脚本。"""
+    from game_automation.portable.domain import If
+
+    return Script(
+        name="screen-state-branch-test",
+        window=ScreenWindow(),
+        steps=(
+            If(
+                condition=ScreenStateIs("主页"),
+                then_steps=(Click(Point(100, 200)),),
+                else_steps=(Wait(0.5),),
+            ),
+        ),
     )
 
 
@@ -142,6 +161,54 @@ def test_run_script_dry_run_click_image_reports_missing_target(capsys) -> None:
     assert captured.out == ""
     assert result.exit_code == 1
     assert result.error_message == "script run failed: image target not found: assets/start.png"
+
+
+def test_run_script_dry_run_screen_state_condition_uses_fixed_state(capsys) -> None:
+    """验证 dry-run 界面状态条件可使用固定状态结果。"""
+    result = run_script(
+        build_screen_state_branch_script(),
+        dry_run=True,
+        dry_run_screen_state="主页",
+    )
+
+    captured = capsys.readouterr()
+    assert result.exit_code == 0
+    assert result.error_message is None
+    assert captured.out == "click Point(x=100, y=200)\n"
+
+
+def test_run_script_real_mode_injects_screen_state_reader_for_state_script() -> None:
+    """验证真实运行状态条件脚本时会使用注入的状态读取端口。"""
+    clicks = []
+    confidence_values = []
+
+    class FakeMacOSPointerDevice(InputDevice):
+        def click(self, target) -> None:
+            clicks.append(target)
+
+        def drag_to(self, start, end, duration_seconds: float = 0.0) -> None:
+            """状态分支脚本不会拖拽。"""
+
+        def wait(self, duration_seconds: float) -> None:
+            """状态分支命中后不会等待。"""
+
+    class FakeScreenStateReader:
+        def read_current_state(self, *, min_confidence=0.8, logger=None):
+            """记录最低置信度并返回固定状态。"""
+            confidence_values.append(min_confidence)
+            return "主页"
+
+    result = run_script(
+        build_screen_state_branch_script(),
+        dry_run=False,
+        real_device_factory=FakeMacOSPointerDevice,
+        real_screen_state_reader_factory=FakeScreenStateReader,
+    )
+
+    assert result.exit_code == 0
+    assert result.error_message is None
+    assert confidence_values == [0.8]
+    assert clicks == [Point(100, 200)]
 
 
 def test_run_script_real_mode_uses_injected_device_without_color_reader(capsys) -> None:

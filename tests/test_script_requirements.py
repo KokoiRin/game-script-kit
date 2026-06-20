@@ -12,6 +12,7 @@ from game_automation.portable.domain import (
     Point,
     Repeat,
     ScreenWindow,
+    ScreenStateIs,
     Script,
     Wait,
     WaitUntil,
@@ -107,6 +108,45 @@ def test_script_requirements_need_image_locator_for_image_condition() -> None:
 
     assert requirements.needs_color_reader is False
     assert requirements.needs_image_locator is True
+
+
+def test_script_requirements_need_screen_state_reader_for_screen_state_condition() -> None:
+    """验证顶层 If 界面状态条件会声明需要状态读取端口。"""
+    script = Script(
+        name="screen-state-if",
+        window=ScreenWindow(),
+        steps=(
+            If(
+                condition=ScreenStateIs("主页"),
+                then_steps=(Click(Point(3, 4)),),
+            ),
+        ),
+    )
+
+    requirements = inspect_script_requirements(script)
+
+    assert requirements.needs_color_reader is False
+    assert requirements.needs_image_locator is False
+    assert requirements.needs_screen_state_reader is True
+
+
+def test_script_requirements_need_screen_state_reader_for_wait_until_state() -> None:
+    """验证 WaitUntil 界面状态条件会声明需要状态读取端口。"""
+    script = Script(
+        name="wait-until-state",
+        window=ScreenWindow(),
+        steps=(
+            WaitUntil(
+                condition=ScreenStateIs("主页"),
+                timeout_seconds=1,
+                interval_seconds=0.5,
+            ),
+        ),
+    )
+
+    requirements = inspect_script_requirements(script)
+
+    assert requirements.needs_screen_state_reader is True
 
 
 def test_script_requirements_need_image_locator_for_named_image_condition() -> None:
