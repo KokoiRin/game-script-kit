@@ -74,6 +74,7 @@ DEBUG_SCREENSHOT_PATH = Path(".star") / "debug" / "screenshots" / "latest-screen
 DEBUG_REGION_SCREENSHOT_PATH = Path(".star") / "debug" / "screenshots" / "latest-screen-regions.png"
 DEBUG_PROBE_SCREENSHOT_PATH = Path(".star") / "debug" / "screenshots" / "latest-screen-probe.png"
 DEBUG_REGION_CROP_FOLDER = Path(".star") / "debug" / "screenshots" / "regions"
+DEBUG_PROBE_CROP_FOLDER = Path(".star") / "debug" / "screenshots" / "probe-crops"
 
 
 @dataclass(frozen=True, slots=True)
@@ -780,6 +781,46 @@ class LocalControlApplication:
             screenshot_path=str(crop_root),
         )
 
+    def capture_screen_probe_crops(self, *, min_confidence: float = 0.8) -> ControlResult:
+        """保存一轮状态探测候选最佳位置裁剪图。"""
+        if self._screen_capture_factory is None:
+            return ControlResult(exit_code=1, stderr="screen capture is not configured\n")
+        if self._screen_size_factory is None:
+            return ControlResult(exit_code=1, stderr="screen size is not configured\n")
+        try:
+            screen_size = self._screen_size_factory()
+        except Exception as exc:
+            return ControlResult(exit_code=1, stderr=f"{exc}\n")
+
+        raw_path = self.latest_screen_screenshot_path()
+        crop_root = self.latest_screen_probe_crop_folder()
+        raw_path.parent.mkdir(parents=True, exist_ok=True)
+        crop_root.mkdir(parents=True, exist_ok=True)
+        try:
+            result = self.probe_screen_state_once(min_confidence=min_confidence)
+            self._screen_capture_factory()(raw_path)
+            crop_paths = _save_probe_candidate_crops(
+                screenshot_path=raw_path,
+                output_folder=crop_root,
+                screen_size=screen_size,
+                result=result,
+            )
+        except ValueError as exc:
+            return ControlResult(exit_code=2, stderr=f"{exc}\n")
+        except Exception as exc:
+            return ControlResult(exit_code=1, stderr=f"{exc}\n")
+
+        stdout = (
+            "no probe candidate crops saved\n"
+            if not crop_paths
+            else "".join(f"saved probe crop: {path}\n" for path in crop_paths)
+        )
+        return ControlResult(
+            exit_code=0,
+            stdout=stdout,
+            screenshot_path=str(crop_root),
+        )
+
     def latest_screen_screenshot_path(self) -> Path:
         """返回最近一次截屏诊断保存的项目内文件路径。"""
         return self._project_root / DEBUG_SCREENSHOT_PATH
@@ -795,6 +836,10 @@ class LocalControlApplication:
     def latest_screen_region_crop_folder(self) -> Path:
         """返回最近一次命名区域裁剪图保存的项目内目录。"""
         return self._project_root / DEBUG_REGION_CROP_FOLDER
+
+    def latest_screen_probe_crop_folder(self) -> Path:
+        """返回最近一次探测候选裁剪图保存的项目内目录。"""
+        return self._project_root / DEBUG_PROBE_CROP_FOLDER
 
     def run_tests(self, task_name: str = "all") -> ControlResult:
         """运行白名单测试任务，并返回 UI 可展示的执行结果。"""
@@ -1078,6 +1123,41 @@ def _save_region_crops(
             image.crop(box).save(output_path)
             saved_paths.append(output_path)
     return tuple(saved_paths)
+
+
+def _save_probe_candidate_crops(
+    *,
+    screenshot_path: Path,
+    output_folder: Path,
+    screen_size: Point,
+    result: ScreenStateProbeResult,
+) -> tuple[Path, ...]:
+    """按候选最佳位置把截图裁剪成独立图片并返回保存路径。"""
+    if screen_size.x <= 0 or screen_size.y <= 0:
+        raise ValueError("screen size must be positive")
+
+    from PIL import Image
+
+    saved_paths = []
+    with Image.open(screenshot_path) as image:
+        scale_x = image.width / screen_size.x
+        scale_y = image.height / screen_size.y
+        for index, candidate in enumerate(result.candidates, start=1):
+            if candidate.best_rect is None:
+                continue
+            box = _region_box_in_pixels(candidate.best_rect, scale_x=scale_x, scale_y=scale_y)
+            output_path = output_folder / f"{_safe_probe_crop_name(index, candidate)}.png"
+            image.crop(box).save(output_path)
+            saved_paths.append(output_path)
+    return tuple(saved_paths)
+
+
+def _safe_probe_crop_name(index: int, candidate) -> str:
+    """生成不含路径分隔符的探测候选裁剪文件名。"""
+    parts = [f"{index:02d}", candidate.candidate.name]
+    if candidate.candidate.search_name:
+        parts.append(candidate.candidate.search_name)
+    return _safe_region_crop_name("_".join(parts))
 
 
 def _safe_region_crop_name(name: str) -> str:

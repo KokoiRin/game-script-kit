@@ -1318,6 +1318,122 @@ def test_local_control_probe_diagnostics_requires_screen_capture(tmp_path) -> No
     assert "screen capture is not configured" in result.stderr
 
 
+def test_local_control_captures_screen_probe_crops(tmp_path) -> None:
+    """验证 UI 用例可导出候选最佳匹配位置裁剪图。"""
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    (assets / "screen-states.json").write_text(
+        """
+        {
+          "groups": [
+            {
+              "state": "主页",
+              "searches": [
+                {"name": "主页标题", "image": "home.png"}
+              ]
+            }
+          ]
+        }
+        """,
+        encoding="utf-8",
+    )
+    Image.new("RGB", (4, 4), "black").save(assets / "home.png")
+    batch_requests = []
+
+    class FakeBatchLocator:
+        def locate_requests(self, requests, *, logger=None, stop_on_first_match=False):
+            """记录探测请求并返回未命中候选的最佳位置。"""
+            batch_requests.append(tuple(requests))
+            return (
+                ImageBatchMatchResult(
+                    requests[0].template,
+                    None,
+                    elapsed_ms=4.0,
+                    best_confidence=0.7,
+                    best_rect=Rect(10, 5, 20, 10),
+                ),
+            )
+
+    def screen_capture(path):
+        """保存一张 2x 缩放的测试截图。"""
+        Image.new("RGB", (200, 100), "white").save(path)
+
+    app = LocalControlApplication(
+        project_root=tmp_path,
+        screen_capture_factory=lambda: screen_capture,
+        screen_size_factory=lambda: Point(100, 50),
+        real_image_batch_locator_factory=FakeBatchLocator,
+    )
+
+    result = app.capture_screen_probe_crops(min_confidence=0.75)
+
+    crop_root = tmp_path / ".star" / "debug" / "screenshots" / "probe-crops"
+    crop_path = crop_root / "01_主页_主页标题.png"
+    assert result.exit_code == 0
+    assert result.stderr == ""
+    assert result.stdout == f"saved probe crop: {crop_path}\n"
+    assert result.screenshot_path == str(crop_root)
+    assert batch_requests[0][0].min_confidence == 0.75
+    with Image.open(crop_path) as crop:
+        assert crop.size == (40, 20)
+
+
+def test_local_control_probe_crops_reports_no_saved_candidates(tmp_path) -> None:
+    """验证没有候选最佳位置时裁剪命令仍清晰返回成功。"""
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    (assets / "screen-states.json").write_text(
+        """
+        {
+          "groups": [
+            {
+              "state": "主页",
+              "searches": [
+                {"name": "主页标题", "image": "home.png"}
+              ]
+            }
+          ]
+        }
+        """,
+        encoding="utf-8",
+    )
+    Image.new("RGB", (4, 4), "black").save(assets / "home.png")
+
+    class FakeBatchLocator:
+        def locate_requests(self, requests, *, logger=None, stop_on_first_match=False):
+            """返回没有最佳位置的未命中候选。"""
+            return (ImageBatchMatchResult(requests[0].template, None, elapsed_ms=4.0),)
+
+    def screen_capture(path):
+        """保存测试截图。"""
+        Image.new("RGB", (200, 100), "white").save(path)
+
+    app = LocalControlApplication(
+        project_root=tmp_path,
+        screen_capture_factory=lambda: screen_capture,
+        screen_size_factory=lambda: Point(100, 50),
+        real_image_batch_locator_factory=FakeBatchLocator,
+    )
+
+    result = app.capture_screen_probe_crops()
+
+    crop_root = tmp_path / ".star" / "debug" / "screenshots" / "probe-crops"
+    assert result.exit_code == 0
+    assert result.stderr == ""
+    assert result.stdout == "no probe candidate crops saved\n"
+    assert result.screenshot_path == str(crop_root)
+
+
+def test_local_control_probe_crops_requires_screen_capture(tmp_path) -> None:
+    """验证候选裁剪导出缺少截图能力时返回清晰错误。"""
+    app = LocalControlApplication(project_root=tmp_path)
+
+    result = app.capture_screen_probe_crops()
+
+    assert result.exit_code == 1
+    assert "screen capture is not configured" in result.stderr
+
+
 def test_local_control_captures_screen_region_crops(tmp_path) -> None:
     """验证 UI 用例可把命名状态区域裁剪为独立图片。"""
     assets = tmp_path / "assets"
