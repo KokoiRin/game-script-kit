@@ -9,6 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from game_automation.portable.domain.image_matching import ImageMatch, ImageTemplate
+from game_automation.portable.domain.point_aliases import ImageSearchSpec
 
 UNKNOWN_SCREEN_STATE = "未知"
 
@@ -16,12 +17,21 @@ UNKNOWN_SCREEN_STATE = "未知"
 @dataclass(frozen=True, slots=True)
 class ScreenStateCandidate:
     name: str
-    template: ImageTemplate
+    search: ImageSearchSpec | ImageTemplate
 
     def __post_init__(self) -> None:
         """校验界面状态候选名称必须非空。"""
         if not self.name.strip():
             raise ValueError("screen state candidate name cannot be empty")
+        if isinstance(self.search, ImageTemplate):
+            object.__setattr__(self, "search", ImageSearchSpec(self.search))
+
+    @property
+    def template(self) -> ImageTemplate:
+        """返回兼容旧调用方的候选模板。"""
+        if not isinstance(self.search.image, ImageTemplate):
+            raise TypeError("screen state candidate image must be resolved before probing")
+        return self.search.image
 
 
 @dataclass(frozen=True, slots=True)

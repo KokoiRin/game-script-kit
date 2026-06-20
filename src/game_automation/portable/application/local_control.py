@@ -22,6 +22,7 @@ from game_automation.portable.application.script_run import (
     ScreenImageLocatorFactory,
     run_script,
 )
+from game_automation.portable.application.screen_state_config import load_screen_state_candidates
 from game_automation.portable.domain import Click, ImageTarget, ImageTemplate, ScreenWindow, Script
 from game_automation.portable.domain import ScreenStateCandidate, ScreenStateProbeResult
 from game_automation.portable.engine.ports import RunLogger, ScreenImageBatchLocator, ScreenImageLocator
@@ -38,6 +39,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[4]
 IMAGE_ASSET_FOLDER = "assets"
 IMAGE_ASSET_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".webp"})
 DEBUG_SCREENSHOT_PATH = Path(".star") / "debug" / "screenshots" / "latest-screen.png"
+SCREEN_STATE_CONFIG_NAME = "screen-states.json"
 
 
 @dataclass(frozen=True, slots=True)
@@ -538,11 +540,18 @@ class LocalControlApplication:
         return candidate
 
     def _screen_state_candidates(self) -> tuple[ScreenStateCandidate, ...]:
-        """把 assets 目录中的图片资源转换为界面状态候选。"""
+        """优先从状态配置读取候选，没有配置时扫描 assets 图片。"""
+        configured_candidates = load_screen_state_candidates(
+            self._image_asset_root() / SCREEN_STATE_CONFIG_NAME,
+            asset_root=self._image_asset_root(),
+            supported_suffixes=IMAGE_ASSET_SUFFIXES,
+        )
+        if configured_candidates is not None:
+            return configured_candidates
         return tuple(
             ScreenStateCandidate(
                 name=Path(asset_name).stem,
-                template=ImageTemplate(str(self._resolve_image_asset(asset_name))),
+                search=ImageTemplate(str(self._resolve_image_asset(asset_name))),
             )
             for asset_name in self.list_image_assets()
         )

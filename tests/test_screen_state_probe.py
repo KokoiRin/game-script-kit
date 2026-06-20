@@ -4,12 +4,17 @@
 实现，也不直接测试 OpenCV adapter。
 """
 
+import json
 import time
+
+import pytest
 
 from game_automation.portable.application.local_control import LocalControlApplication
 from game_automation.portable.domain import (
     ImageMatch,
     ImageBatchMatchResult,
+    ImageSearchRequest,
+    ImageSearchSpec,
     ImageTemplate,
     Rect,
     ScreenStateCandidate,
@@ -124,21 +129,19 @@ def test_local_control_screen_state_probe_uses_batch_locator_when_configured(tmp
             raise AssertionError("single image locator should not be called")
 
     class FakeBatchLocator:
-        def locate_many(
+        def locate_requests(
             self,
-            templates,
+            requests,
             *,
-            region=None,
-            min_confidence=1.0,
             logger=None,
             stop_on_first_match=False,
         ):
             """记录批量请求并返回装备命中。"""
-            batch_requests.append((templates, min_confidence, stop_on_first_match))
+            batch_requests.append((requests, stop_on_first_match))
             return (
-                ImageBatchMatchResult(templates[0], None, elapsed_ms=3.0),
+                ImageBatchMatchResult(requests[0].template, None, elapsed_ms=3.0),
                 ImageBatchMatchResult(
-                    templates[1],
+                    requests[1].template,
                     ImageMatch(Rect(10, 20, 30, 40), confidence=0.91),
                     elapsed_ms=4.0,
                 ),
@@ -154,13 +157,179 @@ def test_local_control_screen_state_probe_uses_batch_locator_when_configured(tmp
 
     assert result.current_state == "装备"
     assert len(batch_requests) == 1
-    assert batch_requests[0][2] is True
+    assert batch_requests[0][1] is True
+    assert [request.min_confidence for request in batch_requests[0][0]] == [0.8, 0.8]
+
+
+def test_local_control_probes_screen_state_from_configured_groups(tmp_path) -> None:
+    """验证 application 可从状态组配置生成带区域的搜索请求。"""
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    (assets / "离开.png").write_bytes(b"fake")
+    (assets / "重来.png").write_bytes(b"fake")
+    (assets / "主页.png").write_bytes(b"fake")
+    (assets / "screen-states.json").write_text(
+        json.dumps(
+            {
+                "regions": {
+                    "右上弹窗": {"left": 100, "top": 20, "width": 300, "height": 120},
+                    "主页标题": {"left": 0, "top": 0, "width": 200, "height": 80},
+                },
+                "groups": [
+                    {
+                        "state": "战斗失败",
+                        "searches": [
+                            {
+                                "name": "离开按钮",
+                                "image": "离开.png",
+                                "region": "右上弹窗",
+                                "min_confidence": 0.75,
+                            },
+                            {
+                                "name": "重来按钮",
+                                "image": "重来.png",
+                                "region": "右上弹窗",
+                                "min_confidence": 0.8,
+                            },
+                        ],
+                    },
+                    {
+                        "state": "主页",
+                        "searches": [
+                            {"name": "主页标题", "image": "主页.png", "region": "主页标题"}
+                        ],
+                    },
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    captured_requests = []
+
+    class FailingSingleLocator:
+        def locate(self, template, *, region=None, min_confidence=1.0, logger=None):
+            """batch 已装配时不应调用单图定位。"""
+            raise AssertionError("single image locator should not be called")
+
+    class FakeBatchLocator:
+        def locate_requests(self, requests, *, logger=None, stop_on_first_match=False):
+            """记录状态组配置生成的搜索请求，并让第二个搜索项命中。"""
+            captured_requests.append((requests, stop_on_first_match))
+            return (
+                ImageBatchMatchResult(requests[0].template, None, elapsed_ms=3.0),
+                ImageBatchMatchResult(
+                    requests[1].template,
+                    ImageMatch(Rect(10, 20, 30, 40), confidence=0.91),
+                    elapsed_ms=4.0,
+                ),
+                ImageBatchMatchResult.skipped_result(requests[2].template),
+            )
+
+    app = LocalControlApplication(
+        project_root=tmp_path,
+        real_image_locator_factory=FailingSingleLocator,
+        real_image_batch_locator_factory=FakeBatchLocator,
+    )
+
+    result = app.probe_screen_state_once(min_confidence=0.8)
+
+    assert result.current_state == "战斗失败"
+    assert [candidate.candidate.name for candidate in result.candidates] == [
+        "战斗失败",
+        "战斗失败",
+        "主页",
+    ]
+    requests, stop_on_first_match = captured_requests[0]
+    assert stop_on_first_match is True
+    assert [request.region for request in requests] == [
+        Rect(100, 20, 300, 120),
+        Rect(100, 20, 300, 120),
+        Rect(0, 0, 200, 80),
+    ]
+    assert [request.min_confidence for request in requests] == [0.75, 0.8, 0.8]
+
+
+def test_local_control_rejects_invalid_screen_state_config(tmp_path) -> None:
+    """验证状态组配置中的非法图片路径会被拒绝。"""
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    (assets / "screen-states.json").write_text(
+        json.dumps(
+            {
+                "groups": [
+                    {
+                        "state": "坏配置",
+                        "searches": [{"name": "逃逸图片", "image": "../outside.png"}],
+                    }
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    app = LocalControlApplication(project_root=tmp_path)
+
+    with pytest.raises(ValueError, match="screen state search image must stay inside assets folder"):
+        app.probe_screen_state_once(min_confidence=0.8)
+
+
+@pytest.mark.parametrize(
+    ("config", "error_type", "message"),
+    [
+        ({"groups": []}, ValueError, "screen state config groups must be a non-empty list"),
+        (
+            {"groups": [{"state": "空场景", "searches": []}]},
+            ValueError,
+            "screen state group searches must be non-empty: 空场景",
+        ),
+        (
+            {
+                "groups": [
+                    {
+                        "state": "未知区域",
+                        "searches": [
+                            {"name": "按钮", "image": "按钮.png", "region": "不存在区域"}
+                        ],
+                    }
+                ]
+            },
+            LookupError,
+            "unknown region target: 不存在区域",
+        ),
+    ],
+)
+def test_local_control_rejects_malformed_screen_state_config(
+    tmp_path,
+    config,
+    error_type,
+    message,
+) -> None:
+    """验证状态组配置中的空组、空搜索和未知区域会被拒绝。"""
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    (assets / "按钮.png").write_bytes(b"fake")
+    (assets / "screen-states.json").write_text(
+        json.dumps(config, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    app = LocalControlApplication(project_root=tmp_path)
+
+    with pytest.raises(error_type, match=message):
+        app.probe_screen_state_once(min_confidence=0.8)
 
 
 def test_probe_screen_state_prefers_batch_locator_and_preserves_candidate_order() -> None:
     """验证界面探测优先使用批量定位并按候选顺序映射结果。"""
     candidates = (
-        ScreenStateCandidate("人物", ImageTemplate("assets/character.png")),
+        ScreenStateCandidate(
+            "人物",
+            ImageSearchSpec(
+                ImageTemplate("assets/character.png"),
+                region=Rect(10, 20, 300, 120),
+                min_confidence=0.85,
+            ),
+        ),
         ScreenStateCandidate("装备", ImageTemplate("assets/equipment.png")),
     )
 
@@ -174,28 +343,26 @@ def test_probe_screen_state_prefers_batch_locator_and_preserves_candidate_order(
             """初始化 fake batch 请求记录。"""
             self.requests = []
 
-        def locate_many(
+        def locate_requests(
             self,
-            templates,
+            requests,
             *,
-            region=None,
-            min_confidence=1.0,
             logger=None,
             stop_on_first_match=False,
         ):
-            """记录批量模板请求并返回同序结果。"""
-            self.requests.append((templates, min_confidence, stop_on_first_match))
+            """记录批量搜索请求并返回同序结果。"""
+            self.requests.append((requests, stop_on_first_match))
             return (
                 ImageBatchMatchResult(
-                    templates[0],
+                    requests[0].template,
                     ImageMatch(Rect(1, 2, 3, 4), confidence=0.9),
                     elapsed_ms=3.0,
                 ),
-                ImageBatchMatchResult.skipped_result(templates[1]),
+                ImageBatchMatchResult.skipped_result(requests[1].template),
             ) if stop_on_first_match else (
-                ImageBatchMatchResult(templates[0], None, elapsed_ms=3.0),
+                ImageBatchMatchResult(requests[0].template, None, elapsed_ms=3.0),
                 ImageBatchMatchResult(
-                    templates[1],
+                    requests[1].template,
                     ImageMatch(Rect(10, 20, 30, 40), confidence=0.91),
                     elapsed_ms=4.0,
                 ),
@@ -213,8 +380,24 @@ def test_probe_screen_state_prefers_batch_locator_and_preserves_candidate_order(
     assert result.current_state == "人物"
     assert [candidate.candidate.name for candidate in result.candidates] == ["人物", "装备"]
     assert [candidate.skipped for candidate in result.candidates] == [False, True]
+    first_request = batch_locator.requests[0][0][0]
+    assert first_request == ImageSearchRequest(
+        ImageTemplate("assets/character.png"),
+        region=Rect(10, 20, 300, 120),
+        min_confidence=0.85,
+    )
     assert batch_locator.requests == [
-        ((ImageTemplate("assets/character.png"), ImageTemplate("assets/equipment.png")), 0.8, True)
+        (
+            (
+                ImageSearchRequest(
+                    ImageTemplate("assets/character.png"),
+                    region=Rect(10, 20, 300, 120),
+                    min_confidence=0.85,
+                ),
+                ImageSearchRequest(ImageTemplate("assets/equipment.png"), min_confidence=0.8),
+            ),
+            True,
+        )
     ]
 
 

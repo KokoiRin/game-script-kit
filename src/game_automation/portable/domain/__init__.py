@@ -8,15 +8,28 @@ from game_automation.portable.domain.actions import Click, ClickTarget, Drag, If
 from game_automation.portable.domain.color import Color
 from game_automation.portable.domain.conditions import ColorIs, Condition, ImageExists
 from game_automation.portable.domain.geometry import Point, Rect
-from game_automation.portable.domain.image_matching import ImageBatchMatchResult, ImageLookupResult, ImageMatch, ImageTemplate
+from game_automation.portable.domain.image_matching import (
+    ImageBatchMatchResult,
+    ImageLookupResult,
+    ImageMatch,
+    ImageSearchRequest,
+    ImageTemplate,
+)
 from game_automation.portable.domain.point_aliases import (
     ImageRef,
+    ImageSearchSpec,
     NamedImage,
+    NamedImageSearch,
     NamedPoint,
+    NamedRegion,
     PointRef,
+    RegionRef,
+    SearchRef,
     TargetCatalog,
     UnknownImageNameError,
+    UnknownImageSearchNameError,
     UnknownPointNameError,
+    UnknownRegionNameError,
 )
 from game_automation.portable.domain.script import Script
 from game_automation.portable.domain.screen_state import (
@@ -43,10 +56,14 @@ __all__ = [
     "ImageLookupResult",
     "ImageMatch",
     "ImageRef",
+    "ImageSearchSpec",
+    "ImageSearchRequest",
     "ImageTemplate",
     "ImageTarget",
     "NamedImage",
+    "NamedImageSearch",
     "NamedPoint",
+    "NamedRegion",
     "OffsetTarget",
     "Point",
     "PointRef",
@@ -57,12 +74,16 @@ __all__ = [
     "ScreenStateCandidate",
     "ScreenStateCandidateResult",
     "ScreenStateProbeResult",
+    "RegionRef",
+    "SearchRef",
     "Script",
     "Step",
     "TargetCatalog",
     "UNKNOWN_SCREEN_STATE",
     "UnknownImageNameError",
+    "UnknownImageSearchNameError",
     "UnknownPointNameError",
+    "UnknownRegionNameError",
     "Wait",
     "WaitUntil",
     "Window",

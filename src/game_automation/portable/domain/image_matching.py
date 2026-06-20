@@ -85,6 +85,18 @@ class ImageLookupResult:
 
 
 @dataclass(frozen=True, slots=True)
+class ImageSearchRequest:
+    template: ImageTemplate
+    region: Rect | None = None
+    min_confidence: float = 1.0
+
+    def __post_init__(self) -> None:
+        """校验图片搜索请求最低置信度必须大于 0 且不超过 1。"""
+        if not 0 < self.min_confidence <= 1:
+            raise ValueError("image search request min_confidence must be greater than 0 and at most 1")
+
+
+@dataclass(frozen=True, slots=True)
 class ImageBatchMatchResult:
     template: ImageTemplate
     match: ImageMatch | None

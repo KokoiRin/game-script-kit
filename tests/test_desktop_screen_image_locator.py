@@ -9,7 +9,7 @@ import pytest
 
 from game_automation.platform.desktop.adapters import image_matching as image_matching_adapter
 from game_automation.platform.desktop.adapters import PyAutoGuiScreenImageLocator
-from game_automation.portable.domain import ImageTemplate, Rect
+from game_automation.portable.domain import ImageSearchRequest, ImageTemplate, Rect
 
 
 class ScreenshotBackend:
@@ -137,6 +137,41 @@ def test_screen_image_locator_batch_matches_many_templates_with_one_screenshot(t
     assert results[1].match.rect == Rect(left=44, top=31, width=8, height=6)
     assert any("image batch match stages " in message for message in logger.messages)
     assert any("template_count=2" in message for message in logger.messages)
+
+
+def test_screen_image_locator_batch_matches_requests_with_independent_regions(tmp_path) -> None:
+    """验证批量搜索请求可以在同一张截图上使用各自区域。"""
+    first_template = _build_template_image()
+    second_template = _build_second_template_image()
+    first_path = tmp_path / "first.png"
+    second_path = tmp_path / "second.png"
+    first_template.save(first_path)
+    second_template.save(second_path)
+    screenshot = Image.new("RGB", (120, 80), "white")
+    screenshot.paste(first_template, (20, 10))
+    screenshot.paste(second_template, (82, 52))
+    backend = ScreenshotBackend(screenshot)
+
+    results = PyAutoGuiScreenImageLocator(backend=backend).locate_requests(
+        (
+            ImageSearchRequest(
+                ImageTemplate(str(first_path)),
+                region=Rect(left=10, top=5, width=40, height=30),
+                min_confidence=0.8,
+            ),
+            ImageSearchRequest(
+                ImageTemplate(str(second_path)),
+                region=Rect(left=70, top=45, width=40, height=30),
+                min_confidence=0.8,
+            ),
+        )
+    )
+
+    assert backend.screenshot_calls == 1
+    assert results[0].match is not None
+    assert results[0].match.rect == Rect(left=20, top=10, width=8, height=6)
+    assert results[1].match is not None
+    assert results[1].match.rect == Rect(left=82, top=52, width=8, height=6)
 
 
 def test_screen_image_locator_batch_converts_screenshot_to_array_once(tmp_path, monkeypatch) -> None:
