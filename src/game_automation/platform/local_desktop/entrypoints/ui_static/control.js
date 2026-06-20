@@ -35,6 +35,7 @@
     let screenStateProbePollTimer = null;
     let activeScreenStateProbe = false;
     let latestScreenState = "未知";
+    let currentScriptDetailsPayload = null;
     let scriptStateDependencies = [];
     let scriptImageDependencies = [];
 
@@ -101,6 +102,9 @@
       }
       screenStateStats.textContent = renderScreenStateStats(result.stats);
       screenStateLog.textContent = `${result.stdout || ""}${result.stderr || ""}`;
+      if (currentScriptDetailsPayload) {
+        renderScriptDetails(currentScriptDetailsPayload);
+      }
     }
 
     function renderScreenStateStats(stats) {
@@ -193,6 +197,7 @@
     async function loadScriptDetails() {
       if (!scriptSelect.value) {
         scriptDetails.textContent = "";
+        currentScriptDetailsPayload = null;
         scriptStateDependencies = [];
         scriptImageDependencies = [];
         return;
@@ -203,6 +208,7 @@
     }
 
     function renderScriptDetails(payload) {
+      currentScriptDetailsPayload = payload;
       scriptStateDependencies = [];
       scriptImageDependencies = [];
       if (payload.exit_code !== 0) {
@@ -221,6 +227,7 @@
       } else {
         for (const decision of payload.state_decisions || []) {
           lines.push(`- 当状态为 ${decision.state}`);
+          lines.push(`  ${renderStateDecisionPreview(decision)}`);
           lines.push(`  命中：${renderDecisionSteps(decision.matched_steps)}`);
           lines.push(`  未命中：${renderDecisionSteps(decision.unmatched_steps)}`);
         }
@@ -242,6 +249,16 @@
         }
       }
       scriptDetails.textContent = lines.join("\n");
+    }
+
+    function renderStateDecisionPreview(decision) {
+      if (!latestScreenState || latestScreenState === "未知") {
+        return "当前：未知";
+      }
+      if (latestScreenState === decision.state) {
+        return "当前：命中";
+      }
+      return "当前：未命中";
     }
 
     function renderDecisionSteps(steps) {
