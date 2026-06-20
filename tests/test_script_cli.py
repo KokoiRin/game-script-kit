@@ -1,9 +1,26 @@
 """验证 star CLI 可以列出和按名称运行脚本。"""
 
+import json
 from types import ModuleType
 
-from game_automation.portable.domain import Color, ImageMatch, ImageTemplate, Point, Rect
+from game_automation.portable.domain import (
+    Click,
+    Color,
+    ImageMatch,
+    ImageSearchSpec,
+    ImageTarget,
+    ImageTemplate,
+    NamedImageSearch,
+    Point,
+    Rect,
+    ScreenWindow,
+    Script,
+    SearchRef,
+    TargetCatalog,
+)
 from game_automation.portable.engine.ports import InputDevice
+from game_automation.portable.scripts_manager.catalog import ScriptCatalog
+from game_automation.platform.local_desktop.entrypoints import cli
 from game_automation.platform.local_desktop.entrypoints.cli import main
 
 
@@ -321,6 +338,105 @@ def test_star_cli_runs_click_image_demo_with_dry_run_image(capsys) -> None:
     assert output == [
         "click Point(x=0, y=0)",
     ]
+
+
+def test_star_cli_uses_screen_state_search_ref_for_dry_run(monkeypatch, tmp_path, capsys) -> None:
+    """验证 CLI dry-run 可复用状态配置里的搜索别名。"""
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    (assets / "离开.png").write_bytes(b"fake")
+    (assets / "screen-states.json").write_text(
+        json.dumps(
+            {
+                "groups": [
+                    {
+                        "state": "战斗失败",
+                        "searches": [
+                            {
+                                "name": "离开按钮",
+                                "image": "离开.png",
+                                "min_confidence": 0.75,
+                            },
+                        ],
+                    },
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    script = Script(
+        name="shared-search-cli",
+        window=ScreenWindow(),
+        steps=(Click(ImageTarget(SearchRef("离开按钮"))),),
+    )
+    monkeypatch.setattr(cli, "DEFAULT_SCRIPT_CATALOG", ScriptCatalog((script,)))
+    monkeypatch.setattr(cli, "PROJECT_ROOT", tmp_path)
+
+    assert main(
+        [
+            "run",
+            "shared-search-cli",
+            "--dry-run",
+            "--dry-run-image",
+            str(assets / "离开.png"),
+        ]
+    ) == 0
+
+    captured = capsys.readouterr()
+    assert captured.err == ""
+    assert captured.out.splitlines() == ["click Point(x=0, y=0)"]
+
+
+def test_star_cli_local_search_ref_overrides_screen_state_config(monkeypatch, tmp_path, capsys) -> None:
+    """验证 CLI 中脚本局部搜索别名覆盖状态配置同名搜索。"""
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    (assets / "配置.png").write_bytes(b"fake")
+    (assets / "脚本.png").write_bytes(b"fake")
+    (assets / "screen-states.json").write_text(
+        json.dumps(
+            {
+                "groups": [
+                    {
+                        "state": "战斗失败",
+                        "searches": [{"name": "离开按钮", "image": "配置.png"}],
+                    },
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    script = Script(
+        name="local-search-cli",
+        window=ScreenWindow(),
+        resources=TargetCatalog(
+            searches=(
+                NamedImageSearch(
+                    "离开按钮",
+                    ImageSearchSpec(ImageTemplate("assets/脚本.png")),
+                ),
+            ),
+        ),
+        steps=(Click(ImageTarget(SearchRef("离开按钮"))),),
+    )
+    monkeypatch.setattr(cli, "DEFAULT_SCRIPT_CATALOG", ScriptCatalog((script,)))
+    monkeypatch.setattr(cli, "PROJECT_ROOT", tmp_path)
+
+    assert main(
+        [
+            "run",
+            "local-search-cli",
+            "--dry-run",
+            "--dry-run-image",
+            "assets/脚本.png",
+        ]
+    ) == 0
+
+    captured = capsys.readouterr()
+    assert captured.err == ""
+    assert captured.out.splitlines() == ["click Point(x=0, y=0)"]
 
 
 def test_star_cli_reports_click_image_demo_missing_target(capsys) -> None:

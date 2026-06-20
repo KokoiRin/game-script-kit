@@ -10,6 +10,11 @@ import argparse
 import sys
 
 from game_automation.platform.local_desktop.composition import run_script_on_local_desktop
+from game_automation.portable.application.project_assets import PROJECT_ROOT
+from game_automation.portable.application.script_resources import (
+    load_shared_script_resources,
+    script_with_shared_resources,
+)
 from game_automation.portable.scripts_manager import DEFAULT_SCRIPT_CATALOG
 from game_automation.portable.scripts_manager.catalog import ScriptNotFoundError
 
@@ -28,6 +33,11 @@ def _run_script(args: argparse.Namespace) -> int:
     except ScriptNotFoundError as exc:
         print(exc, file=sys.stderr)
         return 1
+    try:
+        script = script_with_shared_resources(script, load_shared_script_resources(PROJECT_ROOT))
+    except (LookupError, ValueError) as exc:
+        print(f"script resource configuration failed: {exc}", file=sys.stderr)
+        return 2
 
     result = run_script_on_local_desktop(
         script,
