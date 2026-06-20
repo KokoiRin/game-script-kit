@@ -16,6 +16,7 @@ from game_automation.portable.domain import (
     ImageBatchMatchResult,
     ImageExists,
     ImageMatch,
+    ImageTarget,
     ImageTemplate,
     Point,
     Rect,
@@ -81,20 +82,27 @@ def test_local_control_runs_state_script_with_dry_run_screen_state() -> None:
     assert result.stdout == "click Point(x=100, y=200)\n"
 
 
-def test_local_control_describes_state_script_dependencies() -> None:
-    """验证 UI 用例可以生成状态驱动脚本详情。"""
+def test_local_control_describes_state_script_dependencies(tmp_path) -> None:
+    """验证 UI 用例可以生成状态驱动脚本详情和可用依赖检查。"""
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    (assets / "start.png").write_bytes(b"fake")
+    (assets / "screen-states.json").write_text(
+        json.dumps({"groups": [{"state": "主页", "searches": []}]}, ensure_ascii=False),
+        encoding="utf-8",
+    )
     script = Script(
         name="state-branch",
         window=ScreenWindow(),
         steps=(
             If(
                 condition=ScreenStateIs("主页"),
-                then_steps=(Click(Point(100, 200)),),
+                then_steps=(Click(ImageTarget(ImageTemplate("assets/start.png"))),),
                 else_steps=(Wait(0.5),),
             ),
         ),
     )
-    app = LocalControlApplication(catalog=ScriptCatalog((script,)))
+    app = LocalControlApplication(catalog=ScriptCatalog((script,)), project_root=tmp_path)
 
     details = app.describe_script("state-branch")
 
@@ -102,7 +110,34 @@ def test_local_control_describes_state_script_dependencies() -> None:
     assert details.name == "state-branch"
     assert details.stderr == ""
     assert any('If ScreenStateIs("主页")' in step for step in details.steps)
-    assert details.dependencies == ("状态: 主页",)
+    assert details.dependencies == ("状态: 主页", "图片: assets/start.png")
+    assert details.readiness == (
+        ("状态: 主页", "ok", "状态已配置"),
+        ("图片: assets/start.png", "ok", "图片文件可用"),
+    )
+
+
+def test_local_control_describes_missing_script_dependencies(tmp_path) -> None:
+    """验证 UI 用例会标出缺失图片和无法确认的状态依赖。"""
+    script = Script(
+        name="state-branch",
+        window=ScreenWindow(),
+        steps=(
+            If(
+                condition=ScreenStateIs("主页"),
+                then_steps=(Click(ImageTarget(ImageTemplate("assets/start.png"))),),
+                else_steps=(Wait(0.5),),
+            ),
+        ),
+    )
+    app = LocalControlApplication(catalog=ScriptCatalog((script,)), project_root=tmp_path)
+
+    details = app.describe_script("state-branch")
+
+    assert details.readiness == (
+        ("状态: 主页", "unknown", "状态配置不可用，无法确认"),
+        ("图片: assets/start.png", "missing", "图片文件不存在或后缀不受支持"),
+    )
 
 
 def test_local_control_describes_unknown_script() -> None:
@@ -115,6 +150,7 @@ def test_local_control_describes_unknown_script() -> None:
     assert details.name == "missing"
     assert details.steps == ()
     assert details.dependencies == ()
+    assert details.readiness == ()
     assert details.stderr == "unknown script: missing"
 
 

@@ -105,6 +105,7 @@ def test_local_ui_serves_static_assets() -> None:
     assert 'latestScreenState = state' in script
     assert 'dryRunScreenStateInput.value = latestScreenState' in script
     assert "没有可用探测状态" in script
+    assert "依赖检查：" in script
     assert 'fetch("/api/screen-state-names"' in script
     assert 'fetch(`/api/script-details?name=${encodeURIComponent(scriptSelect.value)}`)' in script
     assert 'fetch("/api/start-screen-state-probe"' in script
@@ -169,6 +170,9 @@ def test_local_ui_gets_script_details_over_http() -> None:
         "name": "conditional-color-demo",
         "steps": ['If ScreenStateIs("主页")', "  then Click Point(x=100, y=200)"],
         "dependencies": ["状态: 主页"],
+        "readiness": [
+            {"label": "状态: 主页", "status": "ok", "message": "状态已配置"},
+        ],
         "stderr": "",
     }
 
@@ -525,6 +529,7 @@ class FakeControlApplication:
             name=name,
             steps=('If ScreenStateIs("主页")', "  then Click Point(x=100, y=200)"),
             dependencies=("状态: 主页",),
+            readiness=(("状态: 主页", "ok", "状态已配置"),),
         )
 
     def start_named_script(
