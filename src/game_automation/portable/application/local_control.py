@@ -778,6 +778,7 @@ class LocalControlApplication:
         try:
             self._screen_capture_factory()(raw_path)
             warning = _screen_capture_health_warning(raw_path)
+            _refresh_crop_output_folder(crop_root)
             crop_paths = _save_region_crops(
                 screenshot_path=raw_path,
                 output_folder=crop_root,
@@ -812,6 +813,7 @@ class LocalControlApplication:
             result = self.probe_screen_state_once(min_confidence=min_confidence)
             self._screen_capture_factory()(raw_path)
             warning = _screen_capture_health_warning(raw_path)
+            _refresh_crop_output_folder(crop_root)
             crop_paths = _save_probe_candidate_crops(
                 screenshot_path=raw_path,
                 output_folder=crop_root,
@@ -1191,6 +1193,13 @@ def _rgb_extrema_are_near_black(
 ) -> bool:
     """判断 RGB 极值是否表示整张截图接近纯黑。"""
     return all(channel_max <= 2 for _, channel_max in extrema)
+
+
+def _refresh_crop_output_folder(output_folder: Path) -> None:
+    """删除裁剪输出目录中的旧 PNG，让目录只代表本轮导出结果。"""
+    for path in output_folder.glob("*.png"):
+        if path.is_file():
+            path.unlink()
 
 
 def _safe_region_crop_name(name: str) -> str:
