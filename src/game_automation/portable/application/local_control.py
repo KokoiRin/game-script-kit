@@ -31,12 +31,18 @@ from game_automation.portable.application.script_run import (
     ScreenImageLocatorFactory,
     run_script,
 )
+from game_automation.portable.application.screen_diagnostics import (
+    ControlResult,
+    ScreenCapture,
+    ScreenCaptureFactory,
+    ScreenDiagnosticsUseCase,
+    ScreenImageBatchLocatorFactory,
+    ScreenSizeFactory,
+)
 from game_automation.portable.application.screen_state_config import (
     ScreenStateConfigGroupSummary,
-    load_screen_state_candidates,
     load_screen_state_config_summary,
     load_screen_state_names,
-    load_screen_state_regions,
 )
 from game_automation.portable.application.script_details import ScriptDetailsResult, describe_script_details
 from game_automation.portable.application.script_resources import (
@@ -47,48 +53,20 @@ from game_automation.portable.domain import (
     Click,
     ImageTarget,
     ImageTemplate,
-    NamedRegion,
     Point,
     Rect,
-    ScreenStateCandidate,
     ScreenStateProbeResult,
     ScreenWindow,
     Script,
 )
 from game_automation.portable.engine.ports import (
     RunLogger,
-    ScreenImageBatchLocator,
-    ScreenImageLocator,
     ScreenStateReader,
 )
-from game_automation.portable.engine.screen_state_probe import probe_screen_state
 from game_automation.portable.scripts_manager import DEFAULT_SCRIPT_CATALOG
 from game_automation.portable.scripts_manager.catalog import ScriptCatalog, ScriptNotFoundError
 
 CommandRunner = Callable[[Sequence[str], Path], subprocess.CompletedProcess[str]]
-ScreenCapture = Callable[[Path], None]
-ScreenCaptureFactory = Callable[[], ScreenCapture]
-ScreenSizeFactory = Callable[[], Point]
-ScreenImageBatchLocatorFactory = Callable[[], ScreenImageBatchLocator]
-
-DEBUG_SCREENSHOT_PATH = Path(".star") / "debug" / "screenshots" / "latest-screen.png"
-DEBUG_REGION_SCREENSHOT_PATH = Path(".star") / "debug" / "screenshots" / "latest-screen-regions.png"
-DEBUG_PROBE_SCREENSHOT_PATH = Path(".star") / "debug" / "screenshots" / "latest-screen-probe.png"
-DEBUG_REGION_CROP_FOLDER = Path(".star") / "debug" / "screenshots" / "regions"
-DEBUG_PROBE_CROP_FOLDER = Path(".star") / "debug" / "screenshots" / "probe-crops"
-BLANK_SCREENSHOT_WARNING = (
-    "warning: captured screenshot appears all black. "
-    "Check macOS Screen Recording permission, foreground window, or desktop session.\n"
-)
-
-
-@dataclass(frozen=True, slots=True)
-class ControlResult:
-    exit_code: int
-    stdout: str = ""
-    stderr: str = ""
-    screenshot_path: str = ""
-
 
 @dataclass(frozen=True, slots=True)
 class ScriptRunStatus:
@@ -352,9 +330,13 @@ class LocalControlApplication:
         self._real_device_factory = real_device_factory
         self._real_color_reader_factory = real_color_reader_factory
         self._real_image_locator_factory = real_image_locator_factory
-        self._real_image_batch_locator_factory = real_image_batch_locator_factory
-        self._screen_capture_factory = screen_capture_factory
-        self._screen_size_factory = screen_size_factory
+        self._screen_diagnostics = ScreenDiagnosticsUseCase(
+            project_root=project_root,
+            real_image_locator_factory=real_image_locator_factory,
+            real_image_batch_locator_factory=real_image_batch_locator_factory,
+            screen_capture_factory=screen_capture_factory,
+            screen_size_factory=screen_size_factory,
+        )
         self._run_lock = threading.Lock()
         self._current_run: _BackgroundScriptRun | None = None
         self._probe_lock = threading.Lock()
@@ -581,10 +563,7 @@ class LocalControlApplication:
         logger: RunLogger | None = None,
     ) -> ScreenStateProbeResult:
         """使用项目图片资源执行一轮界面状态探测。"""
-        return probe_screen_state(
-            self._screen_state_candidates(),
-            image_locator=self._build_screen_image_locator(),
-            batch_image_locator=self._build_screen_image_batch_locator(),
+        return self._screen_diagnostics.probe_screen_state_once(
             min_confidence=min_confidence,
             logger=logger,
         )
@@ -691,212 +670,51 @@ class LocalControlApplication:
 
     def capture_screen_screenshot(self) -> ControlResult:
         """保存一张真实屏幕截图，供 UI 诊断截图权限和画面内容。"""
-        if self._screen_capture_factory is None:
-            return ControlResult(exit_code=1, stderr="screen capture is not configured\n")
-
-        screenshot_path = self.latest_screen_screenshot_path()
-        screenshot_path.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            self._screen_capture_factory()(screenshot_path)
-            warning = _screen_capture_health_warning(screenshot_path)
-        except Exception as exc:
-            return ControlResult(exit_code=1, stderr=f"{exc}\n")
-        return ControlResult(
-            exit_code=0,
-            stdout=f"saved screenshot: {screenshot_path}\n",
-            stderr=warning,
-            screenshot_path=str(screenshot_path),
-        )
+        return self._screen_diagnostics.capture_screen_screenshot()
 
     def diagnose_screen_setup(self, *, min_confidence: float = 0.8) -> ControlResult:
         """组合截图诊断和单轮状态探测，帮助用户判断屏幕识别环境。"""
-        capture_result = self.capture_screen_screenshot()
-        if capture_result.exit_code != 0:
-            return capture_result
-
-        try:
-            probe_result = self.probe_screen_state_once(min_confidence=min_confidence)
-        except ValueError as exc:
-            return ControlResult(
-                exit_code=2,
-                stdout=capture_result.stdout,
-                stderr=capture_result.stderr + f"screen state probe configuration failed: {exc}\n",
-                screenshot_path=capture_result.screenshot_path,
-            )
-        except RuntimeError as exc:
-            return ControlResult(
-                exit_code=1,
-                stdout=capture_result.stdout,
-                stderr=capture_result.stderr + f"screen state probe failed: {exc}\n",
-                screenshot_path=capture_result.screenshot_path,
-            )
-
-        return ControlResult(
-            exit_code=0,
-            stdout=capture_result.stdout + _screen_diagnosis_probe_stdout(probe_result),
-            stderr=capture_result.stderr,
-            screenshot_path=capture_result.screenshot_path,
-        )
+        return self._screen_diagnostics.diagnose_screen_setup(min_confidence=min_confidence)
 
     def capture_screen_region_diagnostics(self) -> ControlResult:
         """保存一张带状态识别区域框的诊断截图。"""
-        context = self._screen_region_capture_context()
-        if isinstance(context, ControlResult):
-            return context
-        regions, screen_size = context
-
-        raw_path = self.latest_screen_screenshot_path()
-        diagnostic_path = self.latest_screen_region_diagnostics_path()
-        raw_path.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            self._screen_capture_factory()(raw_path)
-            warning = _screen_capture_health_warning(raw_path)
-            _draw_region_diagnostics(
-                screenshot_path=raw_path,
-                output_path=diagnostic_path,
-                screen_size=self._screen_size_factory(),
-                regions=regions,
-            )
-        except Exception as exc:
-            return ControlResult(exit_code=1, stderr=f"{exc}\n")
-        return ControlResult(
-            exit_code=0,
-            stdout=f"saved region diagnostics screenshot: {diagnostic_path}\n",
-            stderr=warning,
-            screenshot_path=str(diagnostic_path),
-        )
+        return self._screen_diagnostics.capture_screen_region_diagnostics()
 
     def capture_screen_probe_diagnostics(self, *, min_confidence: float = 0.8) -> ControlResult:
         """保存一张带状态探测候选最佳位置框的诊断截图。"""
-        if self._screen_capture_factory is None:
-            return ControlResult(exit_code=1, stderr="screen capture is not configured\n")
-        if self._screen_size_factory is None:
-            return ControlResult(exit_code=1, stderr="screen size is not configured\n")
-        try:
-            screen_size = self._screen_size_factory()
-        except Exception as exc:
-            return ControlResult(exit_code=1, stderr=f"{exc}\n")
-
-        raw_path = self.latest_screen_screenshot_path()
-        diagnostic_path = self.latest_screen_probe_diagnostics_path()
-        raw_path.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            result = self.probe_screen_state_once(min_confidence=min_confidence)
-            self._screen_capture_factory()(raw_path)
-            warning = _screen_capture_health_warning(raw_path)
-            _draw_probe_diagnostics(
-                screenshot_path=raw_path,
-                output_path=diagnostic_path,
-                screen_size=screen_size,
-                regions=self._screen_state_diagnostic_regions(),
-                result=result,
-            )
-        except ValueError as exc:
-            return ControlResult(exit_code=2, stderr=f"{exc}\n")
-        except Exception as exc:
-            return ControlResult(exit_code=1, stderr=f"{exc}\n")
-        return ControlResult(
-            exit_code=0,
-            stdout=(
-                f"saved probe diagnostics screenshot: {diagnostic_path}\n"
-                f"current_state={result.current_state}\n"
-            ),
-            stderr=warning,
-            screenshot_path=str(diagnostic_path),
+        return self._screen_diagnostics.capture_screen_probe_diagnostics(
+            min_confidence=min_confidence,
         )
 
     def capture_screen_region_crops(self) -> ControlResult:
         """保存当前屏幕中每个状态识别命名区域的裁剪图。"""
-        context = self._screen_region_capture_context()
-        if isinstance(context, ControlResult):
-            return context
-        regions, screen_size = context
-
-        raw_path = self.latest_screen_screenshot_path()
-        crop_root = self.latest_screen_region_crop_folder()
-        raw_path.parent.mkdir(parents=True, exist_ok=True)
-        crop_root.mkdir(parents=True, exist_ok=True)
-        try:
-            self._screen_capture_factory()(raw_path)
-            warning = _screen_capture_health_warning(raw_path)
-            _refresh_crop_output_folder(crop_root)
-            crop_paths = _save_region_crops(
-                screenshot_path=raw_path,
-                output_folder=crop_root,
-                screen_size=screen_size,
-                regions=regions,
-            )
-        except Exception as exc:
-            return ControlResult(exit_code=1, stderr=f"{exc}\n")
-        return ControlResult(
-            exit_code=0,
-            stdout="".join(f"saved region crop: {path}\n" for path in crop_paths),
-            stderr=warning,
-            screenshot_path=str(crop_root),
-        )
+        return self._screen_diagnostics.capture_screen_region_crops()
 
     def capture_screen_probe_crops(self, *, min_confidence: float = 0.8) -> ControlResult:
         """保存一轮状态探测候选最佳位置裁剪图。"""
-        if self._screen_capture_factory is None:
-            return ControlResult(exit_code=1, stderr="screen capture is not configured\n")
-        if self._screen_size_factory is None:
-            return ControlResult(exit_code=1, stderr="screen size is not configured\n")
-        try:
-            screen_size = self._screen_size_factory()
-        except Exception as exc:
-            return ControlResult(exit_code=1, stderr=f"{exc}\n")
-
-        raw_path = self.latest_screen_screenshot_path()
-        crop_root = self.latest_screen_probe_crop_folder()
-        raw_path.parent.mkdir(parents=True, exist_ok=True)
-        crop_root.mkdir(parents=True, exist_ok=True)
-        try:
-            result = self.probe_screen_state_once(min_confidence=min_confidence)
-            self._screen_capture_factory()(raw_path)
-            warning = _screen_capture_health_warning(raw_path)
-            _refresh_crop_output_folder(crop_root)
-            crop_paths = _save_probe_candidate_crops(
-                screenshot_path=raw_path,
-                output_folder=crop_root,
-                screen_size=screen_size,
-                result=result,
-            )
-        except ValueError as exc:
-            return ControlResult(exit_code=2, stderr=f"{exc}\n")
-        except Exception as exc:
-            return ControlResult(exit_code=1, stderr=f"{exc}\n")
-
-        stdout = (
-            "no probe candidate crops saved\n"
-            if not crop_paths
-            else "".join(f"saved probe crop: {path}\n" for path in crop_paths)
-        )
-        return ControlResult(
-            exit_code=0,
-            stdout=stdout,
-            stderr=warning,
-            screenshot_path=str(crop_root),
+        return self._screen_diagnostics.capture_screen_probe_crops(
+            min_confidence=min_confidence,
         )
 
     def latest_screen_screenshot_path(self) -> Path:
         """返回最近一次截屏诊断保存的项目内文件路径。"""
-        return self._project_root / DEBUG_SCREENSHOT_PATH
+        return self._screen_diagnostics.latest_screen_screenshot_path()
 
     def latest_screen_region_diagnostics_path(self) -> Path:
         """返回最近一次区域诊断截图保存的项目内文件路径。"""
-        return self._project_root / DEBUG_REGION_SCREENSHOT_PATH
+        return self._screen_diagnostics.latest_screen_region_diagnostics_path()
 
     def latest_screen_probe_diagnostics_path(self) -> Path:
         """返回最近一次探测诊断截图保存的项目内文件路径。"""
-        return self._project_root / DEBUG_PROBE_SCREENSHOT_PATH
+        return self._screen_diagnostics.latest_screen_probe_diagnostics_path()
 
     def latest_screen_region_crop_folder(self) -> Path:
         """返回最近一次命名区域裁剪图保存的项目内目录。"""
-        return self._project_root / DEBUG_REGION_CROP_FOLDER
+        return self._screen_diagnostics.latest_screen_region_crop_folder()
 
     def latest_screen_probe_crop_folder(self) -> Path:
         """返回最近一次探测候选裁剪图保存的项目内目录。"""
-        return self._project_root / DEBUG_PROBE_CROP_FOLDER
+        return self._screen_diagnostics.latest_screen_probe_crop_folder()
 
     def run_tests(self, task_name: str = "all") -> ControlResult:
         """运行白名单测试任务，并返回 UI 可展示的执行结果。"""
@@ -930,33 +748,6 @@ class LocalControlApplication:
             raise ValueError("image asset does not exist or has unsupported suffix")
         return candidate
 
-    def _screen_state_candidates(self) -> tuple[ScreenStateCandidate, ...]:
-        """优先从状态配置读取候选，没有配置时扫描 assets 图片。"""
-        configured_candidates = load_screen_state_candidates(
-            self._image_asset_root() / SCREEN_STATE_CONFIG_NAME,
-            asset_root=self._image_asset_root(),
-            supported_suffixes=IMAGE_ASSET_SUFFIXES,
-        )
-        if configured_candidates is not None:
-            return configured_candidates
-        return tuple(
-            ScreenStateCandidate(
-                name=Path(asset_name).stem,
-                search=ImageTemplate(str(self._resolve_image_asset(asset_name))),
-            )
-            for asset_name in self.list_image_assets()
-        )
-
-    def _build_screen_image_locator(self) -> ScreenImageLocator | None:
-        """创建真实图像定位 adapter，未装配时返回 None。"""
-        return None if self._real_image_locator_factory is None else self._real_image_locator_factory()
-
-    def _build_screen_image_batch_locator(self) -> ScreenImageBatchLocator | None:
-        """创建真实批量图像定位 adapter，未装配时返回 None。"""
-        if self._real_image_batch_locator_factory is None:
-            return None
-        return self._real_image_batch_locator_factory()
-
     def _build_screen_state_reader(self) -> ScreenStateReader:
         """创建基于当前本地控制配置的界面状态 reader。"""
         return self.build_screen_state_reader()
@@ -985,43 +776,6 @@ class LocalControlApplication:
     def _shared_script_resources(self):
         """读取本地状态配置中可供脚本复用的资源目录。"""
         return load_shared_script_resources(self._project_root)
-
-    def _screen_region_capture_context(self) -> tuple[tuple[NamedRegion, ...], Point] | ControlResult:
-        """读取状态区域诊断所需的配置、截图能力和屏幕尺寸。"""
-        config_path = self._image_asset_root() / SCREEN_STATE_CONFIG_NAME
-        if not config_path.exists():
-            return ControlResult(
-                exit_code=2,
-                stderr="screen state config is required for region diagnostics\n",
-            )
-        try:
-            load_screen_state_candidates(
-                config_path,
-                asset_root=self._image_asset_root(),
-                supported_suffixes=IMAGE_ASSET_SUFFIXES,
-            )
-            regions = load_screen_state_regions(config_path)
-        except ValueError as exc:
-            return ControlResult(exit_code=2, stderr=f"invalid screen state config: {exc}\n")
-        if not regions:
-            return ControlResult(exit_code=2, stderr="screen state config has no named regions\n")
-        if self._screen_capture_factory is None:
-            return ControlResult(exit_code=1, stderr="screen capture is not configured\n")
-        if self._screen_size_factory is None:
-            return ControlResult(exit_code=1, stderr="screen size is not configured\n")
-        try:
-            screen_size = self._screen_size_factory()
-        except Exception as exc:
-            return ControlResult(exit_code=1, stderr=f"{exc}\n")
-        return (regions, screen_size)
-
-    def _screen_state_diagnostic_regions(self) -> tuple[NamedRegion, ...]:
-        """读取探测诊断可选绘制的命名区域。"""
-        config_path = self._image_asset_root() / SCREEN_STATE_CONFIG_NAME
-        if not config_path.exists():
-            return ()
-        return load_screen_state_regions(config_path)
-
 
 def _log_screen_state_probe_result(logger: RunLogger, result: ScreenStateProbeResult) -> None:
     """记录一轮界面状态探测摘要，供 UI 日志展示。"""
@@ -1061,289 +815,11 @@ def _probe_candidate_summary(candidate) -> ScreenStateProbeCandidateSummary:
     )
 
 
-def _screen_diagnosis_probe_stdout(result: ScreenStateProbeResult) -> str:
-    """把单轮状态探测结果格式化为屏幕诊断摘要。"""
-    lines = [
-        f"current_state={result.current_state}",
-        f"elapsed_ms={result.elapsed_ms:.2f}",
-    ]
-    lines.extend(_screen_diagnosis_candidate_line(candidate) for candidate in result.candidates)
-    lines.extend(f"hint={hint}" for hint in result.hints)
-    return "".join(f"{line}\n" for line in lines)
-
-
-def _screen_diagnosis_candidate_line(candidate) -> str:
-    """把单个状态候选格式化为屏幕诊断摘要行。"""
-    name = candidate.candidate.name
-    if candidate.candidate.search_name:
-        name = f"{name}/{candidate.candidate.search_name}"
-    return (
-        f"candidate={name} "
-        f"status={_screen_diagnosis_candidate_status(candidate)} "
-        f"elapsed_ms={candidate.elapsed_ms:.2f} "
-        f"confidence={_screen_diagnosis_optional_confidence(candidate.confidence)} "
-        f"best_confidence={_screen_diagnosis_optional_confidence(candidate.best_confidence)} "
-        f"best_rect={_screen_diagnosis_optional_rect(candidate.best_rect)}"
-    )
-
-
-def _screen_diagnosis_candidate_status(candidate) -> str:
-    """返回屏幕诊断摘要使用的候选状态枚举。"""
-    if candidate.skipped:
-        return "skipped"
-    if candidate.found:
-        return "matched"
-    return "missed"
-
-
-def _screen_diagnosis_optional_confidence(confidence: float | None) -> str:
-    """把可空置信度格式化为屏幕诊断摘要文本。"""
-    return "None" if confidence is None else f"{confidence:.3f}"
-
-
-def _screen_diagnosis_optional_rect(rect: Rect | None) -> str:
-    """把可空矩形格式化为屏幕诊断摘要文本。"""
-    if rect is None:
-        return "None"
-    return f"x={rect.left},y={rect.top},w={rect.width},h={rect.height}"
-
-
 def _wait_for_next_probe_round(cancellation: _CancellationFlag, interval_seconds: float) -> None:
     """等待下一轮探测间隔，同时允许停止请求尽快生效。"""
     deadline = time.monotonic() + max(0, interval_seconds)
     while time.monotonic() < deadline and not cancellation.is_cancelled():
         time.sleep(min(0.05, deadline - time.monotonic()))
-
-
-def _draw_region_diagnostics(
-    *,
-    screenshot_path: Path,
-    output_path: Path,
-    screen_size: Point,
-    regions: tuple[NamedRegion, ...],
-) -> None:
-    """把命名区域绘制到截图上并保存诊断图。"""
-    if screen_size.x <= 0 or screen_size.y <= 0:
-        raise ValueError("screen size must be positive")
-
-    from PIL import Image, ImageDraw, ImageFont
-
-    with Image.open(screenshot_path) as image:
-        diagnostic = image.convert("RGB")
-    draw = ImageDraw.Draw(diagnostic)
-    font = _load_region_label_font(ImageFont)
-    scale_x = diagnostic.width / screen_size.x
-    scale_y = diagnostic.height / screen_size.y
-    for index, region in enumerate(regions, start=1):
-        color = _region_color(index)
-        box = _region_box_in_pixels(region.region, scale_x=scale_x, scale_y=scale_y)
-        draw.rectangle(box, outline=color, width=3)
-        _draw_region_label(draw, font, f"{index}. {region.name}", box, color)
-    diagnostic.save(output_path)
-
-
-def _draw_probe_diagnostics(
-    *,
-    screenshot_path: Path,
-    output_path: Path,
-    screen_size: Point,
-    regions: tuple[NamedRegion, ...],
-    result: ScreenStateProbeResult,
-) -> None:
-    """把命名区域和状态候选最佳位置绘制到截图上并保存。"""
-    if screen_size.x <= 0 or screen_size.y <= 0:
-        raise ValueError("screen size must be positive")
-
-    from PIL import Image, ImageDraw, ImageFont
-
-    with Image.open(screenshot_path) as image:
-        diagnostic = image.convert("RGB")
-    draw = ImageDraw.Draw(diagnostic)
-    font = _load_region_label_font(ImageFont)
-    scale_x = diagnostic.width / screen_size.x
-    scale_y = diagnostic.height / screen_size.y
-    for index, region in enumerate(regions, start=1):
-        color = _region_color(index)
-        box = _region_box_in_pixels(region.region, scale_x=scale_x, scale_y=scale_y)
-        draw.rectangle(box, outline=color, width=2)
-        _draw_region_label(draw, font, f"R{index}. {region.name}", box, color)
-    for index, candidate in enumerate(result.candidates, start=1):
-        if candidate.best_rect is None:
-            continue
-        color = _probe_candidate_color(candidate)
-        box = _region_box_in_pixels(candidate.best_rect, scale_x=scale_x, scale_y=scale_y)
-        draw.rectangle(box, outline=color, width=3)
-        _draw_region_label(draw, font, _probe_candidate_label(index, candidate), box, color)
-    diagnostic.save(output_path)
-
-
-def _probe_candidate_label(index: int, candidate) -> str:
-    """生成探测诊断候选框标签。"""
-    name = candidate.candidate.name
-    if candidate.candidate.search_name:
-        name = f"{name}/{candidate.candidate.search_name}"
-    confidence = "无" if candidate.best_confidence is None else f"{candidate.best_confidence:.3f}"
-    return f"C{index}. {name} {_probe_candidate_status_label(candidate)} {confidence}"
-
-
-def _probe_candidate_status_label(candidate) -> str:
-    """返回探测诊断候选状态标签。"""
-    if candidate.skipped:
-        return "跳过"
-    if candidate.found:
-        return "命中"
-    return "未命中"
-
-
-def _probe_candidate_color(candidate) -> str:
-    """按候选探测状态返回诊断框颜色。"""
-    if candidate.skipped:
-        return "#6b7280"
-    if candidate.found:
-        return "#16a34a"
-    return "#dc2626"
-
-
-def _save_region_crops(
-    *,
-    screenshot_path: Path,
-    output_folder: Path,
-    screen_size: Point,
-    regions: tuple[NamedRegion, ...],
-) -> tuple[Path, ...]:
-    """按命名区域把截图裁剪成独立图片并返回保存路径。"""
-    if screen_size.x <= 0 or screen_size.y <= 0:
-        raise ValueError("screen size must be positive")
-
-    from PIL import Image
-
-    saved_paths = []
-    with Image.open(screenshot_path) as image:
-        scale_x = image.width / screen_size.x
-        scale_y = image.height / screen_size.y
-        for region in regions:
-            box = _region_box_in_pixels(region.region, scale_x=scale_x, scale_y=scale_y)
-            output_path = output_folder / f"{_safe_region_crop_name(region.name)}.png"
-            image.crop(box).save(output_path)
-            saved_paths.append(output_path)
-    return tuple(saved_paths)
-
-
-def _save_probe_candidate_crops(
-    *,
-    screenshot_path: Path,
-    output_folder: Path,
-    screen_size: Point,
-    result: ScreenStateProbeResult,
-) -> tuple[Path, ...]:
-    """按候选最佳位置把截图裁剪成独立图片并返回保存路径。"""
-    if screen_size.x <= 0 or screen_size.y <= 0:
-        raise ValueError("screen size must be positive")
-
-    from PIL import Image
-
-    saved_paths = []
-    with Image.open(screenshot_path) as image:
-        scale_x = image.width / screen_size.x
-        scale_y = image.height / screen_size.y
-        for index, candidate in enumerate(result.candidates, start=1):
-            if candidate.best_rect is None:
-                continue
-            box = _region_box_in_pixels(candidate.best_rect, scale_x=scale_x, scale_y=scale_y)
-            output_path = output_folder / f"{_safe_probe_crop_name(index, candidate)}.png"
-            image.crop(box).save(output_path)
-            saved_paths.append(output_path)
-    return tuple(saved_paths)
-
-
-def _safe_probe_crop_name(index: int, candidate) -> str:
-    """生成不含路径分隔符的探测候选裁剪文件名。"""
-    parts = [f"{index:02d}", candidate.candidate.name]
-    if candidate.candidate.search_name:
-        parts.append(candidate.candidate.search_name)
-    return _safe_region_crop_name("_".join(parts))
-
-
-def _screen_capture_health_warning(path: Path) -> str:
-    """检查已保存截图是否疑似全黑，并返回用户可见警告。"""
-    try:
-        from PIL import Image
-
-        with Image.open(path) as image:
-            extrema = image.convert("RGB").getextrema()
-    except Exception:
-        return ""
-    return BLANK_SCREENSHOT_WARNING if _rgb_extrema_are_near_black(extrema) else ""
-
-
-def _rgb_extrema_are_near_black(
-    extrema: tuple[tuple[int, int], tuple[int, int], tuple[int, int]],
-) -> bool:
-    """判断 RGB 极值是否表示整张截图接近纯黑。"""
-    return all(channel_max <= 2 for _, channel_max in extrema)
-
-
-def _refresh_crop_output_folder(output_folder: Path) -> None:
-    """删除裁剪输出目录中的旧 PNG，让目录只代表本轮导出结果。"""
-    for path in output_folder.glob("*.png"):
-        if path.is_file():
-            path.unlink()
-
-
-def _safe_region_crop_name(name: str) -> str:
-    """把区域名转换成不含路径分隔符的裁剪文件名。"""
-    return "".join("_" if char in {"/", "\\", ":"} else char for char in name).strip() or "region"
-
-
-def _region_box_in_pixels(region: Rect, *, scale_x: float, scale_y: float) -> tuple[int, int, int, int]:
-    """把点坐标矩形换算成截图像素矩形。"""
-    return (
-        round(region.left * scale_x),
-        round(region.top * scale_y),
-        round((region.left + region.width) * scale_x),
-        round((region.top + region.height) * scale_y),
-    )
-
-
-def _draw_region_label(draw, font, label: str, box: tuple[int, int, int, int], color: str) -> None:
-    """在区域框左上角绘制区域名称，字体不支持时使用编号兜底。"""
-    left, top, _, _ = box
-    text = label
-    try:
-        text_box = draw.textbbox((left, top), text, font=font)
-    except UnicodeEncodeError:
-        text = label.split(".", 1)[0]
-        text_box = draw.textbbox((left, top), text, font=font)
-    background = (
-        text_box[0] - 2,
-        text_box[1] - 2,
-        text_box[2] + 2,
-        text_box[3] + 2,
-    )
-    draw.rectangle(background, fill=color)
-    draw.text((left, top), text, fill="#ffffff", font=font)
-
-
-def _load_region_label_font(image_font_module):
-    """加载适合中文区域名的字体，找不到时回退到 Pillow 默认字体。"""
-    candidates = (
-        "/System/Library/Fonts/PingFang.ttc",
-        "/System/Library/Fonts/STHeiti Light.ttc",
-        "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
-        "DejaVuSans.ttf",
-    )
-    for candidate in candidates:
-        try:
-            return image_font_module.truetype(candidate, 14)
-        except OSError:
-            continue
-    return image_font_module.load_default()
-
-
-def _region_color(index: int) -> str:
-    """按区域序号返回稳定的高对比描边颜色。"""
-    colors = ("#ef4444", "#22c55e", "#3b82f6", "#f59e0b", "#a855f7", "#14b8a6")
-    return colors[(index - 1) % len(colors)]
 
 
 def _run_command(command: Sequence[str], cwd: Path) -> subprocess.CompletedProcess[str]:

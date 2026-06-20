@@ -211,7 +211,7 @@ TBD - created by archiving change add-screen-state-probe-ui. Update Purpose afte
 
 ### Requirement: CLI 提供界面状态截图诊断入口
 
-系统 SHALL 提供命令行截图诊断入口，用于帮助用户调试界面状态识别素材和区域。CLI MUST 复用 application 层截图诊断用例，不得在入口层直接截图、绘制区域或解析状态配置。
+系统 SHALL 提供命令行截图诊断入口，用于帮助用户调试界面状态识别素材和区域。CLI MUST 复用 application 层截图诊断用例，不得在入口层直接截图、绘制区域或解析状态配置。application 层 MAY 通过专用屏幕诊断 use case 承载截图诊断编排，但 MUST 保持 CLI 命令名、退出码、stdout 和 stderr 语义稳定。
 
 #### Scenario: 保存当前屏幕截图
 
@@ -236,7 +236,7 @@ TBD - created by archiving change add-screen-state-probe-ui. Update Purpose afte
 
 ### Requirement: CLI 提供界面状态命名区域裁剪导出
 
-系统 SHALL 提供命令行区域裁剪导出入口，用于把当前屏幕中的状态识别命名区域保存为独立图片。裁剪导出 MUST 复用 application 层截图诊断用例和状态配置解析，不得在 CLI 入口层直接截图、裁剪或解析状态配置。
+系统 SHALL 提供命令行区域裁剪导出入口，用于把当前屏幕中的状态识别命名区域保存为独立图片。裁剪导出 MUST 复用 application 层截图诊断用例和状态配置解析，不得在 CLI 入口层直接截图、裁剪或解析状态配置。application 层 MAY 通过专用屏幕诊断 use case 承载裁剪导出编排，但 MUST 保持 CLI 命令名、退出码、stdout 和 stderr 语义稳定。
 
 #### Scenario: 保存命名区域裁剪图
 
@@ -286,7 +286,7 @@ TBD - created by archiving change add-screen-state-probe-ui. Update Purpose afte
 
 ### Requirement: CLI 导出界面探测诊断截图
 
-系统 SHALL 提供 `star capture-probe-diagnostics` 子命令，用于执行一轮界面状态探测并保存带候选最佳匹配框的诊断截图。CLI MUST 复用 application 层用例，不得在入口层执行截图、绘图或图片匹配。
+系统 SHALL 提供 `star capture-probe-diagnostics` 子命令，用于执行一轮界面状态探测并保存带候选最佳匹配框的诊断截图。CLI MUST 复用 application 层用例，不得在入口层执行截图、绘图或图片匹配。application 层 MAY 通过专用屏幕诊断 use case 承载探测诊断编排，但 MUST 保持 CLI 命令名、退出码、stdout 和 stderr 语义稳定。
 
 #### Scenario: 导出探测诊断截图
 
@@ -309,7 +309,7 @@ TBD - created by archiving change add-screen-state-probe-ui. Update Purpose afte
 
 ### Requirement: CLI 导出界面探测候选裁剪图
 
-系统 SHALL 提供 `star capture-probe-crops` 子命令，用于执行一轮界面状态探测并把每个候选的最佳匹配位置导出为独立裁剪图。CLI MUST 复用 application 层用例，不得在入口层执行截图、裁剪或图片匹配。
+系统 SHALL 提供 `star capture-probe-crops` 子命令，用于执行一轮界面状态探测并把每个候选的最佳匹配位置导出为独立裁剪图。CLI MUST 复用 application 层用例，不得在入口层执行截图、裁剪或图片匹配。application 层 MAY 通过专用屏幕诊断 use case 承载候选裁剪编排，但 MUST 保持 CLI 命令名、退出码、stdout 和 stderr 语义稳定。
 
 #### Scenario: 导出候选裁剪图
 
