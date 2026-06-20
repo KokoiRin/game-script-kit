@@ -9,7 +9,10 @@ from __future__ import annotations
 import argparse
 import sys
 
-from game_automation.platform.local_desktop.composition import run_script_on_local_desktop
+from game_automation.platform.local_desktop.composition import (
+    build_local_control_application,
+    run_script_on_local_desktop,
+)
 from game_automation.portable.application.project_assets import (
     IMAGE_ASSET_SUFFIXES,
     PROJECT_ROOT,
@@ -89,6 +92,22 @@ def _run_details(args: argparse.Namespace) -> int:
     return details.exit_code
 
 
+def _run_probe_state(args: argparse.Namespace) -> int:
+    """执行一轮本机界面状态探测。"""
+    try:
+        result = build_local_control_application().probe_screen_state_once(
+            min_confidence=args.min_confidence,
+        )
+    except ValueError as exc:
+        print(f"screen state probe configuration failed: {exc}", file=sys.stderr)
+        return 2
+    except RuntimeError as exc:
+        print(f"screen state probe failed: {exc}", file=sys.stderr)
+        return 1
+    _print_screen_state_probe_result(result)
+    return 0
+
+
 def _describe_script(script) -> ScriptDetailsResult:
     """生成 CLI 复用的脚本详情。"""
     return describe_script_details(
@@ -152,6 +171,39 @@ def _readiness_status_label(status: str) -> str:
     return "[未知]"
 
 
+def _print_screen_state_probe_result(result) -> None:
+    """把单次界面状态探测结果打印成 CLI 文本。"""
+    print(f"当前状态：{result.current_state}")
+    print(f"总耗时：{result.elapsed_ms:.2f}ms")
+    print("候选：")
+    if not result.candidates:
+        print("- 无")
+        return
+    for candidate in result.candidates:
+        print(f"- {_screen_state_candidate_line(candidate)}")
+
+
+def _screen_state_candidate_line(candidate) -> str:
+    """把单个状态候选结果转换成一行 CLI 文本。"""
+    name = candidate.candidate.name
+    if candidate.candidate.search_name:
+        name = f"{name} / {candidate.candidate.search_name}"
+    confidence = "无" if candidate.confidence is None else f"{candidate.confidence:.3f}"
+    return (
+        f"{name}：{_candidate_status_label(candidate)}；"
+        f"耗时 {candidate.elapsed_ms:.2f}ms；置信度 {confidence}"
+    )
+
+
+def _candidate_status_label(candidate) -> str:
+    """把候选命中状态转换成 CLI 展示文本。"""
+    if candidate.skipped:
+        return "跳过"
+    if candidate.found:
+        return "命中"
+    return "未命中"
+
+
 def _run_recorder(args: argparse.Namespace) -> int:
     """启动坐标记录工具。"""
     from game_automation.platform.desktop.adapters import (
@@ -204,6 +256,14 @@ def main(argv: list[str] | None = None) -> int:
     details_parser = subparsers.add_parser("details", help="Show a named script's steps and dependencies.")
     details_parser.add_argument("name", help="Script name to inspect.")
 
+    probe_parser = subparsers.add_parser("probe-state", help="Probe the current screen state once.")
+    probe_parser.add_argument(
+        "--min-confidence",
+        type=float,
+        default=0.8,
+        help="Minimum image match confidence for this probe.",
+    )
+
     run_parser = subparsers.add_parser("run", help="Run a named script.")
     run_parser.add_argument("name", help="Script name to run.")
     mode = run_parser.add_mutually_exclusive_group()
@@ -246,6 +306,8 @@ def main(argv: list[str] | None = None) -> int:
         return _run_list()
     elif args.command == "details":
         return _run_details(args)
+    elif args.command == "probe-state":
+        return _run_probe_state(args)
     elif args.command == "run":
         return _run_script(args)
     elif args.command == "recorder":

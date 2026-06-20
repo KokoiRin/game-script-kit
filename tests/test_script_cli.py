@@ -16,6 +16,9 @@ from game_automation.portable.domain import (
     ScreenWindow,
     Script,
     SearchRef,
+    ScreenStateCandidate,
+    ScreenStateCandidateResult,
+    ScreenStateProbeResult,
     TargetCatalog,
 )
 from game_automation.portable.engine.ports import InputDevice
@@ -554,6 +557,106 @@ def test_star_cli_rejects_script_images_without_dry_run(capsys) -> None:
     captured = capsys.readouterr()
     assert captured.out == ""
     assert "--dry-run-script-images requires --dry-run" in captured.err
+
+
+def test_star_cli_probe_state_outputs_current_state(monkeypatch, capsys) -> None:
+    """验证 probe-state 子命令输出当前状态和候选结果。"""
+    calls = []
+
+    class FakeApp:
+        def probe_screen_state_once(self, *, min_confidence=0.8, logger=None):
+            """记录最低置信度并返回固定状态探测结果。"""
+            calls.append(min_confidence)
+            return ScreenStateProbeResult(
+                candidates=(
+                    ScreenStateCandidateResult(
+                        candidate=ScreenStateCandidate(
+                            "主页",
+                            ImageTemplate("assets/主页.png"),
+                            search_name="主页标识",
+                        ),
+                        match=ImageMatch(Rect(10, 20, 30, 40), confidence=0.91),
+                        elapsed_ms=4.0,
+                    ),
+                    ScreenStateCandidateResult(
+                        candidate=ScreenStateCandidate(
+                            "人物",
+                            ImageTemplate("assets/人物.png"),
+                            search_name="人物标识",
+                        ),
+                        match=None,
+                        elapsed_ms=3.0,
+                    ),
+                ),
+                elapsed_ms=7.0,
+            )
+
+    monkeypatch.setattr(cli, "build_local_control_application", lambda: FakeApp())
+
+    assert main(["probe-state"]) == 0
+
+    captured = capsys.readouterr()
+    assert captured.err == ""
+    assert calls == [0.8]
+    assert captured.out.splitlines() == [
+        "当前状态：主页",
+        "总耗时：7.00ms",
+        "候选：",
+        "- 主页 / 主页标识：命中；耗时 4.00ms；置信度 0.910",
+        "- 人物 / 人物标识：未命中；耗时 3.00ms；置信度 无",
+    ]
+
+
+def test_star_cli_probe_state_uses_min_confidence(monkeypatch, capsys) -> None:
+    """验证 probe-state 子命令会传递最低置信度。"""
+    calls = []
+
+    class FakeApp:
+        def probe_screen_state_once(self, *, min_confidence=0.8, logger=None):
+            """记录调用参数并返回未知状态。"""
+            calls.append(min_confidence)
+            return ScreenStateProbeResult(candidates=(), elapsed_ms=1.5)
+
+    monkeypatch.setattr(cli, "build_local_control_application", lambda: FakeApp())
+
+    assert main(["probe-state", "--min-confidence", "0.75"]) == 0
+
+    assert calls == [0.75]
+    assert "当前状态：未知" in capsys.readouterr().out
+
+
+def test_star_cli_probe_state_reports_configuration_error(monkeypatch, capsys) -> None:
+    """验证 probe-state 会报告状态配置错误。"""
+
+    class FakeApp:
+        def probe_screen_state_once(self, *, min_confidence=0.8, logger=None):
+            """模拟配置解析失败。"""
+            raise ValueError("bad screen state config")
+
+    monkeypatch.setattr(cli, "build_local_control_application", lambda: FakeApp())
+
+    assert main(["probe-state"]) == 2
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "screen state probe configuration failed: bad screen state config" in captured.err
+
+
+def test_star_cli_probe_state_reports_runtime_error(monkeypatch, capsys) -> None:
+    """验证 probe-state 会报告截图或图像定位运行错误。"""
+
+    class FakeApp:
+        def probe_screen_state_once(self, *, min_confidence=0.8, logger=None):
+            """模拟图像定位 adapter 不可用。"""
+            raise RuntimeError("image locator unavailable")
+
+    monkeypatch.setattr(cli, "build_local_control_application", lambda: FakeApp())
+
+    assert main(["probe-state"]) == 1
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "screen state probe failed: image locator unavailable" in captured.err
 
 
 def test_star_cli_reports_click_image_demo_missing_target(capsys) -> None:
