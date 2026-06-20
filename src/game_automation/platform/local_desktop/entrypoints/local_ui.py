@@ -170,6 +170,26 @@ def create_local_control_server(
                     payload["screenshot_url"] = f"/api/debug-screenshot?version={screenshot_version}"
                 self._send_json(payload)
                 return
+            if self.path == "/api/capture-probe-diagnostics":
+                payload = self._read_json()
+                min_confidence = _parse_min_confidence(payload)
+                if min_confidence is None:
+                    self._send_json(
+                        {
+                            "exit_code": 2,
+                            "stdout": "",
+                            "stderr": "invalid probe diagnostics request: min_confidence must be a number\n",
+                        }
+                    )
+                    return
+                result = control_app.capture_screen_probe_diagnostics(min_confidence=min_confidence)
+                result_payload = _result_to_payload(result)
+                if result.screenshot_path:
+                    screenshot_version += 1
+                    latest_screenshot_path = result.screenshot_path
+                    result_payload["screenshot_url"] = f"/api/debug-screenshot?version={screenshot_version}"
+                self._send_json(result_payload)
+                return
             if self.path == "/api/run-tests":
                 payload = self._read_json()
                 result = control_app.run_tests(str(payload.get("task", "all")))

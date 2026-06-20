@@ -1243,6 +1243,81 @@ def test_local_control_captures_screen_region_diagnostics(tmp_path) -> None:
         assert diagnostic.getpixel((20, 10)) != (255, 255, 255)
 
 
+def test_local_control_captures_screen_probe_diagnostics(tmp_path) -> None:
+    """验证 UI 用例可生成带候选最佳匹配框的探测诊断截图。"""
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    (assets / "screen-states.json").write_text(
+        """
+        {
+          "groups": [
+            {
+              "state": "主页",
+              "searches": [
+                {"name": "主页标题", "image": "home.png"}
+              ]
+            }
+          ]
+        }
+        """,
+        encoding="utf-8",
+    )
+    Image.new("RGB", (4, 4), "black").save(assets / "home.png")
+    batch_requests = []
+
+    class FakeBatchLocator:
+        def locate_requests(self, requests, *, logger=None, stop_on_first_match=False):
+            """记录探测请求并返回未命中候选的最佳位置。"""
+            batch_requests.append(tuple(requests))
+            return (
+                ImageBatchMatchResult(
+                    requests[0].template,
+                    None,
+                    elapsed_ms=4.0,
+                    best_confidence=0.7,
+                    best_rect=Rect(10, 5, 20, 10),
+                ),
+            )
+
+    def screen_capture(path):
+        """保存一张 2x 缩放的测试截图。"""
+        Image.new("RGB", (200, 100), "white").save(path)
+
+    app = LocalControlApplication(
+        project_root=tmp_path,
+        screen_capture_factory=lambda: screen_capture,
+        screen_size_factory=lambda: Point(100, 50),
+        real_image_batch_locator_factory=FakeBatchLocator,
+    )
+
+    result = app.capture_screen_probe_diagnostics(min_confidence=0.75)
+
+    diagnostic_path = tmp_path / ".star" / "debug" / "screenshots" / "latest-screen-probe.png"
+    assert result.exit_code == 0
+    assert result.stderr == ""
+    assert result.stdout == (
+        f"saved probe diagnostics screenshot: {diagnostic_path}\n"
+        "current_state=未知\n"
+    )
+    assert result.screenshot_path == str(diagnostic_path)
+    assert batch_requests[0][0].min_confidence == 0.75
+    with Image.open(diagnostic_path) as diagnostic:
+        assert diagnostic.size == (200, 100)
+        assert diagnostic.getpixel((20, 10)) != (255, 255, 255)
+
+
+def test_local_control_probe_diagnostics_requires_screen_capture(tmp_path) -> None:
+    """验证探测诊断缺少截图能力时返回清晰错误。"""
+    (tmp_path / "assets").mkdir()
+    app = LocalControlApplication(project_root=tmp_path)
+
+    result = app.capture_screen_probe_diagnostics()
+
+    assert result.exit_code == 1
+    assert result.stdout == ""
+    assert "screen capture is not configured" in result.stderr
+
+
 def test_local_control_captures_screen_region_crops(tmp_path) -> None:
     """验证 UI 用例可把命名状态区域裁剪为独立图片。"""
     assets = tmp_path / "assets"

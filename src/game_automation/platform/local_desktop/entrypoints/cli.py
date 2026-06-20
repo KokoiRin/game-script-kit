@@ -156,6 +156,15 @@ def _run_capture_region_diagnostics() -> int:
     return _print_control_result(build_local_control_application().capture_screen_region_diagnostics())
 
 
+def _run_capture_probe_diagnostics(args: argparse.Namespace) -> int:
+    """保存一张带状态探测候选框的诊断截图。"""
+    return _print_control_result(
+        build_local_control_application().capture_screen_probe_diagnostics(
+            min_confidence=args.min_confidence,
+        )
+    )
+
+
 def _run_capture_region_crops() -> int:
     """保存当前屏幕中每个状态识别命名区域的裁剪图。"""
     return _print_control_result(build_local_control_application().capture_screen_region_crops())
@@ -391,6 +400,16 @@ def main(argv: list[str] | None = None) -> int:
         "capture-region-diagnostics",
         help="Capture the current screen with configured screen-state regions drawn.",
     )
+    probe_diagnostics_parser = subparsers.add_parser(
+        "capture-probe-diagnostics",
+        help="Capture the current screen with screen-state probe best matches drawn.",
+    )
+    probe_diagnostics_parser.add_argument(
+        "--min-confidence",
+        type=float,
+        default=0.8,
+        help="Minimum image match confidence for this probe.",
+    )
     subparsers.add_parser(
         "capture-region-crops",
         help="Capture each configured screen-state region as a separate image.",
@@ -449,6 +468,8 @@ def main(argv: list[str] | None = None) -> int:
         return _run_capture_screen()
     elif args.command == "capture-region-diagnostics":
         return _run_capture_region_diagnostics()
+    elif args.command == "capture-probe-diagnostics":
+        return _run_capture_probe_diagnostics(args)
     elif args.command == "capture-region-crops":
         return _run_capture_region_crops()
     elif args.command == "run":
