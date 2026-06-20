@@ -43,13 +43,20 @@ class ScreenStateCandidateResult:
     match: ImageMatch | None
     elapsed_ms: float
     skipped: bool = False
+    best_confidence: float | None = None
 
     def __post_init__(self) -> None:
-        """校验单个候选探测耗时和跳过状态必须自洽。"""
+        """校验单个候选探测耗时、跳过状态和最佳置信度必须自洽。"""
         if self.elapsed_ms < 0:
             raise ValueError("screen state candidate elapsed_ms cannot be negative")
         if self.skipped and self.match is not None:
             raise ValueError("skipped screen state candidate cannot contain a match")
+        if self.skipped and self.best_confidence is not None:
+            raise ValueError("skipped screen state candidate cannot contain best confidence")
+        if self.best_confidence is not None and not 0 <= self.best_confidence <= 1:
+            raise ValueError("screen state candidate best confidence must be between 0 and 1")
+        if self.match is not None and self.best_confidence is None:
+            object.__setattr__(self, "best_confidence", self.match.confidence)
 
     @property
     def found(self) -> bool:

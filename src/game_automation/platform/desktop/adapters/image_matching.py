@@ -45,13 +45,14 @@ class PyAutoGuiScreenImageLocator(ScreenImageLocator):
             template_image = self._load_template_image(template, numpy)
             template_load_ms = _elapsed_ms(template_started_at)
             match_started_at = perf_counter()
-            match = _locate_template(
+            located = _locate_template(
                 cv2=cv2,
                 numpy=numpy,
                 screenshot=screenshot,
                 template=template_image,
                 min_confidence=min_confidence,
             )
+            match = located.match
             match_ms = _elapsed_ms(match_started_at)
             _log_match_stages(
                 logger,
@@ -133,7 +134,7 @@ class PyAutoGuiScreenImageLocator(ScreenImageLocator):
                 )
                 search_array = screenshot_array if request.region is None else numpy.array(search_screen.image)
                 match_started_at = perf_counter()
-                match = _locate_template(
+                located = _locate_template(
                     cv2=cv2,
                     numpy=numpy,
                     screenshot=search_screen,
@@ -141,6 +142,7 @@ class PyAutoGuiScreenImageLocator(ScreenImageLocator):
                     template=template_image,
                     min_confidence=request.min_confidence,
                 )
+                match = located.match
                 one_match_ms = _elapsed_ms(match_started_at)
                 match_ms += one_match_ms
                 results.append(
@@ -148,6 +150,7 @@ class PyAutoGuiScreenImageLocator(ScreenImageLocator):
                         template=template,
                         match=match,
                         elapsed_ms=one_match_ms,
+                        best_confidence=located.best_confidence,
                     )
                 )
                 if stop_on_first_match and match is not None:
@@ -222,6 +225,12 @@ class CapturedScreen:
 class LoadedTemplateImage:
     image: Image.Image
     array: object
+
+
+@dataclass(frozen=True, slots=True)
+class LocatedTemplate:
+    match: ImageMatch | None
+    best_confidence: float | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -330,10 +339,10 @@ def _locate_template(
     template: LoadedTemplateImage,
     min_confidence: float,
     screenshot_array: object | None = None,
-) -> ImageMatch | None:
+) -> LocatedTemplate:
     """用 OpenCV 模板匹配返回满足阈值的最佳匹配。"""
     if template.image.width > screenshot.image.width or template.image.height > screenshot.image.height:
-        return None
+        return LocatedTemplate(match=None, best_confidence=None)
 
     if screenshot_array is None:
         screenshot_array = numpy.array(screenshot.image)
@@ -341,11 +350,11 @@ def _locate_template(
     _, max_score, _, max_location = cv2.minMaxLoc(result)
     confidence = float(max_score)
     if confidence < min_confidence:
-        return None
+        return LocatedTemplate(match=None, best_confidence=confidence)
 
     left_pixels = int(max_location[0]) + screenshot.origin_left_pixels
     top_pixels = int(max_location[1]) + screenshot.origin_top_pixels
-    return ImageMatch(
+    match = ImageMatch(
         rect=Rect(
             left=round(left_pixels / screenshot.pixels_per_point_x),
             top=round(top_pixels / screenshot.pixels_per_point_y),
@@ -354,6 +363,7 @@ def _locate_template(
         ),
         confidence=confidence,
     )
+    return LocatedTemplate(match=match, best_confidence=confidence)
 
 
 def _log_match_stages(
