@@ -12,6 +12,7 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
 IMAGE_ASSET_FOLDER = "assets"
 IMAGE_ASSET_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".webp"})
+SCRIPT_FOLDER = "scripts"
 SCREEN_STATE_CONFIG_NAME = "screen-states.json"
 
 
@@ -23,3 +24,8 @@ def image_asset_root(project_root: Path = PROJECT_ROOT) -> Path:
 def screen_state_config_path(project_root: Path = PROJECT_ROOT) -> Path:
     """返回项目状态识别配置文件路径。"""
     return image_asset_root(project_root) / SCREEN_STATE_CONFIG_NAME
+
+
+def script_root(project_root: Path = PROJECT_ROOT) -> Path:
+    """返回项目用户脚本目录路径。"""
+    return project_root / SCRIPT_FOLDER
