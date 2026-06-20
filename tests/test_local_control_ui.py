@@ -23,6 +23,7 @@ from game_automation.portable.application.screen_state_config import (
     ScreenStateConfigGroupSummary,
     ScreenStateConfigSearchSummary,
 )
+from game_automation.portable.domain import Rect
 from game_automation.platform.local_desktop.entrypoints.local_ui import create_local_control_server
 
 
@@ -148,7 +149,9 @@ def test_local_ui_serves_static_assets() -> None:
     assert "candidate.search_name" in script
     assert "${candidate.name} / ${candidate.search_name}" in script
     assert "candidate.best_confidence" in script
+    assert "candidate.best_rect" in script
     assert "最佳置信度" in script
+    assert "最佳位置" in script
     assert "暂无候选结果" in script
     assert "命中" in script
     assert "跳过" in script
@@ -427,6 +430,7 @@ def test_local_ui_gets_screen_state_probe_status_over_http() -> None:
                 "elapsed_ms": 4.0,
                 "confidence": 0.91,
                 "best_confidence": 0.91,
+                "best_rect": {"left": 10, "top": 20, "width": 30, "height": 40},
             },
             {
                 "name": "人物",
@@ -435,6 +439,7 @@ def test_local_ui_gets_screen_state_probe_status_over_http() -> None:
                 "elapsed_ms": 3.0,
                 "confidence": None,
                 "best_confidence": 0.73,
+                "best_rect": {"left": 50, "top": 60, "width": 30, "height": 40},
             },
         ],
     }
@@ -754,6 +759,7 @@ class FakeControlApplication:
                     0.91,
                     search_name="主页标题",
                     best_confidence=0.91,
+                    best_rect=Rect(10, 20, 30, 40),
                 ),
                 ScreenStateProbeCandidateSummary(
                     "人物",
@@ -762,6 +768,7 @@ class FakeControlApplication:
                     None,
                     search_name="人物标题",
                     best_confidence=0.73,
+                    best_rect=Rect(50, 60, 30, 40),
                 ),
             ),
         )

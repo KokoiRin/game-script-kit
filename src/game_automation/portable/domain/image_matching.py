@@ -103,19 +103,24 @@ class ImageBatchMatchResult:
     elapsed_ms: float
     skipped: bool = False
     best_confidence: float | None = None
+    best_rect: Rect | None = None
 
     def __post_init__(self) -> None:
-        """校验批量匹配中单个模板耗时、跳过状态和最佳置信度。"""
+        """校验批量匹配中单个模板耗时、跳过状态和最佳诊断信息。"""
         if self.elapsed_ms < 0:
             raise ValueError("image batch match elapsed_ms cannot be negative")
         if self.skipped and self.match is not None:
             raise ValueError("skipped image batch result cannot contain a match")
         if self.skipped and self.best_confidence is not None:
             raise ValueError("skipped image batch result cannot contain best confidence")
+        if self.skipped and self.best_rect is not None:
+            raise ValueError("skipped image batch result cannot contain best rect")
         if self.best_confidence is not None and not 0 <= self.best_confidence <= 1:
             raise ValueError("image batch best confidence must be between 0 and 1")
         if self.match is not None and self.best_confidence is None:
             object.__setattr__(self, "best_confidence", self.match.confidence)
+        if self.match is not None and self.best_rect is None:
+            object.__setattr__(self, "best_rect", self.match.rect)
 
     @classmethod
     def skipped_result(cls, template: ImageTemplate) -> "ImageBatchMatchResult":

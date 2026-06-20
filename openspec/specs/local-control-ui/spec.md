@@ -152,7 +152,7 @@ pixel matching.
 
 ### Requirement: UI 提供界面状态探测 tab
 
-本地控制 UI SHALL 提供独立的界面状态探测 tab，让用户在不运行脚本的情况下持续观察当前界面状态。HTTP adapter MUST 只把探测启动、停止和状态查询请求委托给 application 层。界面状态候选展示 MUST 包含候选状态、耗时、命中置信度和最佳匹配置信度。
+本地控制 UI SHALL 提供独立的界面状态探测 tab，让用户在不运行脚本的情况下持续观察当前界面状态。HTTP adapter MUST 只把探测启动、停止和状态查询请求委托给 application 层。界面状态候选展示 MUST 包含候选状态、耗时、命中置信度、最佳匹配置信度和最佳匹配位置。
 
 #### Scenario: 页面展示界面探测入口
 
@@ -180,6 +180,12 @@ pixel matching.
 - **THEN** HTTP JSON 的候选 object 包含 `best_confidence`
 - **AND** UI 候选列表展示该候选的最佳置信度
 - **AND** 未命中候选的命中置信度可以为 `null`
+
+#### Scenario: 展示候选最佳位置
+
+- **WHEN** 页面轮询 `/api/screen-state-probe` 且候选结果包含 `best_rect`
+- **THEN** HTTP JSON 的候选 object 包含 `best_rect`
+- **AND** UI 候选列表展示该候选的最佳位置
 
 ### Requirement: UI 生成状态区域诊断截图
 本地控制 UI SHALL 提供状态区域诊断入口，根据当前屏幕截图和 `assets/screen-states.json` 中的命名区域生成带区域框的诊断图片。HTTP adapter MUST 只把请求委托给 application 层，UI MUST 展示退出码、输出信息和诊断图片。

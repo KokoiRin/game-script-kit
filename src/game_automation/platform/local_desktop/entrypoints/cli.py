@@ -269,6 +269,7 @@ def _screen_state_candidate_payload(candidate) -> dict[str, object]:
         "elapsed_ms": candidate.elapsed_ms,
         "confidence": candidate.confidence,
         "best_confidence": candidate.best_confidence,
+        "best_rect": _rect_payload(candidate.best_rect),
     }
 
 
@@ -279,10 +280,26 @@ def _screen_state_candidate_line(candidate) -> str:
         name = f"{name} / {candidate.candidate.search_name}"
     confidence = _format_optional_confidence(candidate.confidence)
     best_confidence = _format_optional_confidence(candidate.best_confidence)
+    best_rect = _format_optional_rect(candidate.best_rect)
     return (
         f"{name}：{_candidate_status_label(candidate)}；"
-        f"耗时 {candidate.elapsed_ms:.2f}ms；置信度 {confidence}；最佳置信度 {best_confidence}"
+        f"耗时 {candidate.elapsed_ms:.2f}ms；置信度 {confidence}；"
+        f"最佳置信度 {best_confidence}；最佳位置 {best_rect}"
     )
+
+
+def _rect_payload(rect) -> dict[str, int] | None:
+    """把可空矩形转换成 JSON payload。"""
+    if rect is None:
+        return None
+    return {"left": rect.left, "top": rect.top, "width": rect.width, "height": rect.height}
+
+
+def _format_optional_rect(rect) -> str:
+    """把可空矩形格式化为 CLI 文本。"""
+    if rect is None:
+        return "无"
+    return f"x={rect.left},y={rect.top},w={rect.width},h={rect.height}"
 
 
 def _format_optional_confidence(confidence: float | None) -> str:
