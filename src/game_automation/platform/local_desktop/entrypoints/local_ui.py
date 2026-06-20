@@ -331,6 +331,7 @@ def _probe_candidates_to_payload(candidates) -> list[dict[str, object]]:
             "status": candidate.status,
             "elapsed_ms": candidate.elapsed_ms,
             "confidence": candidate.confidence,
+            "best_confidence": candidate.best_confidence,
         }
         for candidate in candidates
     ]

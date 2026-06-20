@@ -147,6 +147,8 @@ def test_local_ui_serves_static_assets() -> None:
     assert "renderCandidateName" in script
     assert "candidate.search_name" in script
     assert "${candidate.name} / ${candidate.search_name}" in script
+    assert "candidate.best_confidence" in script
+    assert "最佳置信度" in script
     assert "暂无候选结果" in script
     assert "命中" in script
     assert "跳过" in script
@@ -424,13 +426,15 @@ def test_local_ui_gets_screen_state_probe_status_over_http() -> None:
                 "status": "matched",
                 "elapsed_ms": 4.0,
                 "confidence": 0.91,
+                "best_confidence": 0.91,
             },
             {
                 "name": "人物",
                 "search_name": "人物标题",
-                "status": "skipped",
-                "elapsed_ms": 0.0,
+                "status": "missed",
+                "elapsed_ms": 3.0,
                 "confidence": None,
+                "best_confidence": 0.73,
             },
         ],
     }
@@ -743,8 +747,22 @@ class FakeControlApplication:
                 skipped_counts=(("技能", 2),),
             ),
             candidates=(
-                ScreenStateProbeCandidateSummary("主页", "matched", 4.0, 0.91, search_name="主页标题"),
-                ScreenStateProbeCandidateSummary("人物", "skipped", 0.0, None, search_name="人物标题"),
+                ScreenStateProbeCandidateSummary(
+                    "主页",
+                    "matched",
+                    4.0,
+                    0.91,
+                    search_name="主页标题",
+                    best_confidence=0.91,
+                ),
+                ScreenStateProbeCandidateSummary(
+                    "人物",
+                    "missed",
+                    3.0,
+                    None,
+                    search_name="人物标题",
+                    best_confidence=0.73,
+                ),
             ),
         )
 
