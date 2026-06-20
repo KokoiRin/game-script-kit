@@ -36,6 +36,7 @@ class ScriptDetailsResult:
     name: str
     steps: tuple[str, ...] = ()
     dependencies: tuple[str, ...] = ()
+    state_dependencies: tuple[str, ...] = ()
     readiness: tuple[tuple[str, str, str], ...] = ()
     stderr: str = ""
 
@@ -53,6 +54,7 @@ def describe_script_details(
         name=script.name,
         steps=_describe_steps(script.steps),
         dependencies=_describe_dependencies(script.steps),
+        state_dependencies=_collect_state_dependencies(script.steps),
         readiness=_describe_readiness(
             script.steps,
             asset_root=asset_root,
@@ -157,6 +159,35 @@ def _describe_readiness(
                 )
             )
     return tuple(dict.fromkeys(checks))
+
+
+def _collect_state_dependencies(steps: tuple[Step, ...]) -> tuple[str, ...]:
+    """按脚本阅读顺序收集去重后的界面状态依赖。"""
+    states: list[str] = []
+    for step in steps:
+        _collect_step_state_dependencies(step, states)
+    return tuple(dict.fromkeys(states))
+
+
+def _collect_step_state_dependencies(step: Step, states: list[str]) -> None:
+    """收集单个步骤内直接或嵌套条件引用的界面状态。"""
+    if isinstance(step, If):
+        _collect_condition_state_dependencies(step.condition, states)
+        for child in (*step.then_steps, *step.else_steps):
+            _collect_step_state_dependencies(child, states)
+        return
+    if isinstance(step, Repeat):
+        for child in step.steps:
+            _collect_step_state_dependencies(child, states)
+        return
+    if isinstance(step, WaitUntil):
+        _collect_condition_state_dependencies(step.condition, states)
+
+
+def _collect_condition_state_dependencies(condition, states: list[str]) -> None:
+    """收集条件中的界面状态依赖。"""
+    if isinstance(condition, ScreenStateIs):
+        states.append(condition.state)
 
 
 def _screen_state_readiness(

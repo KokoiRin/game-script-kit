@@ -57,6 +57,7 @@ def test_local_ui_serves_control_page() -> None:
     assert 'list="screen-state-suggestions"' in html
     assert 'id="screen-state-suggestions"' in html
     assert 'id="use-probed-screen-state"' in html
+    assert 'id="use-script-screen-state"' in html
     assert 'id="run-script"' in html
     assert 'id="stop-script"' in html
     assert 'id="image-asset-select"' in html
@@ -102,9 +103,14 @@ def test_local_ui_serves_static_assets() -> None:
     assert 'document.querySelector("#dry-run-screen-state")' in script
     assert 'document.querySelector("#screen-state-suggestions")' in script
     assert 'document.querySelector("#use-probed-screen-state")' in script
+    assert 'document.querySelector("#use-script-screen-state")' in script
     assert 'latestScreenState = state' in script
     assert 'dryRunScreenStateInput.value = latestScreenState' in script
     assert "没有可用探测状态" in script
+    assert "scriptStateDependencies" in script
+    assert "payload.state_dependencies" in script
+    assert "已使用脚本状态" in script
+    assert "当前脚本没有状态依赖" in script
     assert "依赖检查：" in script
     assert 'fetch("/api/screen-state-names"' in script
     assert 'fetch(`/api/script-details?name=${encodeURIComponent(scriptSelect.value)}`)' in script
@@ -170,6 +176,7 @@ def test_local_ui_gets_script_details_over_http() -> None:
         "name": "conditional-color-demo",
         "steps": ['If ScreenStateIs("主页")', "  then Click Point(x=100, y=200)"],
         "dependencies": ["状态: 主页"],
+        "state_dependencies": ["主页"],
         "readiness": [
             {"label": "状态: 主页", "status": "ok", "message": "状态已配置"},
         ],
@@ -529,6 +536,7 @@ class FakeControlApplication:
             name=name,
             steps=('If ScreenStateIs("主页")', "  then Click Point(x=100, y=200)"),
             dependencies=("状态: 主页",),
+            state_dependencies=("主页",),
             readiness=(("状态: 主页", "ok", "状态已配置"),),
         )
 

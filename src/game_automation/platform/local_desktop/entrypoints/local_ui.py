@@ -254,6 +254,7 @@ def _script_details_to_payload(details) -> dict[str, object]:
         "name": details.name,
         "steps": list(details.steps),
         "dependencies": list(details.dependencies),
+        "state_dependencies": list(details.state_dependencies),
         "readiness": [
             {"label": label, "status": status, "message": message}
             for label, status, message in details.readiness
