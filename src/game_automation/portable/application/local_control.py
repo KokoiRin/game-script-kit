@@ -104,6 +104,7 @@ class ScriptDetailsResult:
     name: str
     steps: tuple[str, ...] = ()
     dependencies: tuple[str, ...] = ()
+    readiness: tuple[tuple[str, str, str], ...] = ()
     stderr: str = ""
 
 
@@ -343,6 +344,11 @@ class LocalControlApplication:
             name=script.name,
             steps=_describe_steps(script.steps),
             dependencies=_describe_dependencies(script.steps),
+            readiness=_describe_readiness(
+                script.steps,
+                asset_root=self._image_asset_root(),
+                state_names=self._configured_screen_state_names_for_readiness(),
+            ),
         )
 
     def run_named_script(
@@ -728,6 +734,13 @@ class LocalControlApplication:
             return None
         return status.current_state
 
+    def _configured_screen_state_names_for_readiness(self) -> tuple[str, ...] | None:
+        """读取状态名用于详情检查，配置不可用时返回 None。"""
+        try:
+            return load_screen_state_names(self._image_asset_root() / SCREEN_STATE_CONFIG_NAME)
+        except ValueError:
+            return None
+
 
 def _log_screen_state_probe_result(logger: RunLogger, result: ScreenStateProbeResult) -> None:
     """记录一轮界面状态探测摘要，供 UI 日志展示。"""
@@ -818,6 +831,53 @@ def _describe_dependencies(steps: tuple[Step, ...]) -> tuple[str, ...]:
     for step in steps:
         _collect_step_dependencies(step, dependencies)
     return tuple(dict.fromkeys(dependencies))
+
+
+def _describe_readiness(
+    steps: tuple[Step, ...],
+    *,
+    asset_root: Path,
+    state_names: tuple[str, ...] | None,
+) -> tuple[tuple[str, str, str], ...]:
+    """生成脚本详情中的运行前依赖检查结果。"""
+    checks = []
+    for dependency in _describe_dependencies(steps):
+        if dependency.startswith("状态: "):
+            checks.append(_screen_state_readiness(dependency, state_names=state_names))
+        elif dependency.startswith("图片: "):
+            checks.append(_image_readiness(dependency, asset_root=asset_root))
+    return tuple(dict.fromkeys(checks))
+
+
+def _screen_state_readiness(
+    dependency: str,
+    *,
+    state_names: tuple[str, ...] | None,
+) -> tuple[str, str, str]:
+    """检查脚本引用的界面状态是否能从配置中确认。"""
+    state = dependency.removeprefix("状态: ")
+    if state_names is None:
+        return dependency, "unknown", "状态配置不可用，无法确认"
+    if state in state_names:
+        return dependency, "ok", "状态已配置"
+    return dependency, "missing", "状态未配置"
+
+
+def _image_readiness(dependency: str, *, asset_root: Path) -> tuple[str, str, str]:
+    """检查脚本引用的 assets 图片是否存在。"""
+    image = dependency.removeprefix("图片: ")
+    image_path = Path(image)
+    if image_path.is_absolute() or image_path.parts[:1] != (IMAGE_ASSET_FOLDER,) or ".." in image_path.parts:
+        return dependency, "unknown", "图片不在项目 assets 目录，无法确认"
+    candidate = (asset_root.parent / image_path).resolve()
+    resolved_asset_root = asset_root.resolve()
+    try:
+        candidate.relative_to(resolved_asset_root)
+    except ValueError:
+        return dependency, "unknown", "图片不在项目 assets 目录，无法确认"
+    if candidate.is_file() and candidate.suffix.lower() in IMAGE_ASSET_SUFFIXES:
+        return dependency, "ok", "图片文件可用"
+    return dependency, "missing", "图片文件不存在或后缀不受支持"
 
 
 def _collect_step_dependencies(step: Step, dependencies: list[str]) -> None:

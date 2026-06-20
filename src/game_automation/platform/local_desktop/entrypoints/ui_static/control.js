@@ -181,7 +181,25 @@
           lines.push(`- ${dependency}`);
         }
       }
+      lines.push("依赖检查：");
+      if ((payload.readiness || []).length === 0) {
+        lines.push("- 无可检查依赖");
+      } else {
+        for (const item of payload.readiness || []) {
+          lines.push(`- ${renderReadinessStatus(item.status)} ${item.label}：${item.message}`);
+        }
+      }
       scriptDetails.textContent = lines.join("\n");
+    }
+
+    function renderReadinessStatus(status) {
+      if (status === "ok") {
+        return "[OK]";
+      }
+      if (status === "missing") {
+        return "[缺失]";
+      }
+      return "[未知]";
     }
 
     async function loadImageAssets() {
