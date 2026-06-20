@@ -31,7 +31,11 @@ from game_automation.portable.domain import (
     WaitUntil,
 )
 from game_automation.portable.engine.ports import InputDevice
-from game_automation.portable.application.local_control import LocalControlApplication, PROJECT_ROOT
+from game_automation.portable.application.local_control import (
+    LocalControlApplication,
+    PROJECT_ROOT,
+    ScreenStateProbeCandidateSummary,
+)
 from game_automation.portable.scripts_manager.catalog import ScriptCatalog
 
 
@@ -580,6 +584,57 @@ def test_local_control_reuses_running_background_screen_state_for_real_script(tm
     assert clicks == [Point(100, 200)]
     assert len(batch_requests) == requests_after_probe
     assert "screen state reader reused background probe current_state=主页" in result.stdout
+
+
+def test_local_control_background_probe_status_includes_latest_candidates(tmp_path) -> None:
+    """验证后台界面探测状态包含最近一轮候选结果。"""
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    (assets / "主页.png").write_bytes(b"fake")
+    (assets / "人物.png").write_bytes(b"fake")
+    (assets / "screen-states.json").write_text(
+        json.dumps(
+            {
+                "groups": [
+                    {"state": "主页", "searches": [{"name": "主页标题", "image": "主页.png"}]},
+                    {"state": "人物", "searches": [{"name": "人物标题", "image": "人物.png"}]},
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    class FakeBatchLocator:
+        def locate_requests(self, requests, *, logger=None, stop_on_first_match=False):
+            """返回主页命中，并模拟早停后人物候选被跳过。"""
+            return (
+                ImageBatchMatchResult(
+                    requests[0].template,
+                    ImageMatch(Rect(10, 20, 30, 40), confidence=0.91),
+                    elapsed_ms=4.0,
+                ),
+                ImageBatchMatchResult(
+                    requests[1].template,
+                    None,
+                    elapsed_ms=0.0,
+                    skipped=True,
+                ),
+            )
+
+    app = LocalControlApplication(
+        project_root=tmp_path,
+        real_image_batch_locator_factory=FakeBatchLocator,
+    )
+
+    app.start_screen_state_probe(interval_seconds=30)
+    status = _wait_until_probe_state(app, "主页")
+    app.stop_screen_state_probe()
+
+    assert status.candidates == (
+        ScreenStateProbeCandidateSummary("主页", "matched", 4.0, 0.91),
+        ScreenStateProbeCandidateSummary("人物", "skipped", 0.0, None),
+    )
 
 
 def test_local_control_falls_back_to_probe_when_background_state_is_unknown(tmp_path) -> None:

@@ -285,6 +285,7 @@ def _probe_status_to_payload(status) -> dict[str, object]:
         "stdout": status.stdout,
         "stderr": status.stderr,
         "stats": _probe_stats_to_payload(status.stats),
+        "candidates": _probe_candidates_to_payload(status.candidates),
     }
 
 
@@ -319,6 +320,19 @@ def _probe_stats_to_payload(stats) -> dict[str, object]:
         "matched_counts": dict(stats.matched_counts),
         "skipped_counts": dict(stats.skipped_counts),
     }
+
+
+def _probe_candidates_to_payload(candidates) -> list[dict[str, object]]:
+    """把后台界面探测候选摘要转换成 HTTP JSON payload。"""
+    return [
+        {
+            "name": candidate.name,
+            "status": candidate.status,
+            "elapsed_ms": candidate.elapsed_ms,
+            "confidence": candidate.confidence,
+        }
+        for candidate in candidates
+    ]
 
 
 def _parse_min_confidence(payload: dict[str, object]) -> float | None:

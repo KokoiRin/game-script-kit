@@ -27,6 +27,7 @@
     const screenStateConfigSummary = document.querySelector("#screen-state-config-summary");
     const screenStateCurrent = document.querySelector("#screen-state-current");
     const screenStateStats = document.querySelector("#screen-state-stats");
+    const screenStateCandidates = document.querySelector("#screen-state-candidates");
     const screenStateLog = document.querySelector("#screen-state-log");
     const startScreenStateProbeButton = document.querySelector("#start-screen-state-probe");
     const stopScreenStateProbeButton = document.querySelector("#stop-screen-state-probe");
@@ -101,6 +102,7 @@
         screenStateCurrent.textContent = `当前状态：${state}，退出码：${result.exit_code}`;
       }
       screenStateStats.textContent = renderScreenStateStats(result.stats);
+      screenStateCandidates.textContent = renderScreenStateCandidates(result.candidates);
       screenStateLog.textContent = `${result.stdout || ""}${result.stderr || ""}`;
       if (currentScriptDetailsPayload) {
         renderScriptDetails(currentScriptDetailsPayload);
@@ -125,6 +127,35 @@
       return Object.entries(counts)
         .map(([name, count]) => `${name} ${count}`)
         .join("，");
+    }
+
+    function renderScreenStateCandidates(candidates) {
+      const items = candidates || [];
+      if (items.length === 0) {
+        return "暂无候选结果";
+      }
+      return items.map((candidate) => {
+        const elapsed = candidate.elapsed_ms === null || candidate.elapsed_ms === undefined
+          ? "无"
+          : `${Number(candidate.elapsed_ms).toFixed(2)}ms`;
+        const confidence = candidate.confidence === null || candidate.confidence === undefined
+          ? "无"
+          : Number(candidate.confidence).toFixed(3);
+        return `${candidate.name}：${renderCandidateStatus(candidate.status)}；耗时 ${elapsed}；置信度 ${confidence}`;
+      }).join("\n");
+    }
+
+    function renderCandidateStatus(status) {
+      if (status === "matched") {
+        return "命中";
+      }
+      if (status === "skipped") {
+        return "跳过";
+      }
+      if (status === "missed") {
+        return "未命中";
+      }
+      return "未知";
     }
 
     function useProbedScreenState() {

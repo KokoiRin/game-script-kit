@@ -98,6 +98,14 @@ class ScreenStateProbeStats:
 
 
 @dataclass(frozen=True, slots=True)
+class ScreenStateProbeCandidateSummary:
+    name: str
+    status: str
+    elapsed_ms: float
+    confidence: float | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class ScreenStateProbeStatus:
     running: bool
     current_state: str = "未知"
@@ -105,6 +113,7 @@ class ScreenStateProbeStatus:
     stdout: str = ""
     stderr: str = ""
     stats: ScreenStateProbeStats = ScreenStateProbeStats()
+    candidates: tuple[ScreenStateProbeCandidateSummary, ...] = ()
 
 
 class _CancellationFlag:
@@ -250,6 +259,7 @@ class _BackgroundScreenStateProbe:
         self._last_elapsed_ms: float | None = None
         self._matched_counts: dict[str, int] = {}
         self._skipped_counts: dict[str, int] = {}
+        self._candidates: tuple[ScreenStateProbeCandidateSummary, ...] = ()
 
     def record_result(self, result: ScreenStateProbeResult) -> None:
         """记录最近一轮界面状态探测结果并累计会话统计。"""
@@ -265,6 +275,10 @@ class _BackgroundScreenStateProbe:
                 if candidate.skipped:
                     name = candidate.candidate.name
                     self._skipped_counts[name] = self._skipped_counts.get(name, 0) + 1
+            self._candidates = tuple(
+                _probe_candidate_summary(candidate)
+                for candidate in result.candidates
+            )
 
     def finish(self, exit_code: int) -> None:
         """记录后台界面状态探测结束状态。"""
@@ -288,6 +302,7 @@ class _BackgroundScreenStateProbe:
                     matched_counts=tuple(self._matched_counts.items()),
                     skipped_counts=tuple(self._skipped_counts.items()),
                 ),
+                candidates=self._candidates,
             )
 
 
@@ -795,6 +810,22 @@ def _log_screen_state_probe_result(logger: RunLogger, result: ScreenStateProbeRe
             f"confidence={candidate.confidence} "
             f"elapsed_ms={candidate.elapsed_ms:.2f}"
         )
+
+
+def _probe_candidate_summary(candidate) -> ScreenStateProbeCandidateSummary:
+    """把领域候选结果转换成 UI 用例状态快照摘要。"""
+    if candidate.skipped:
+        status = "skipped"
+    elif candidate.found:
+        status = "matched"
+    else:
+        status = "missed"
+    return ScreenStateProbeCandidateSummary(
+        name=candidate.candidate.name,
+        status=status,
+        elapsed_ms=candidate.elapsed_ms,
+        confidence=candidate.confidence,
+    )
 
 
 def _wait_for_next_probe_round(cancellation: _CancellationFlag, interval_seconds: float) -> None:
