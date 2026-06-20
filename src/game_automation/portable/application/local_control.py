@@ -25,8 +25,30 @@ from game_automation.portable.application.script_run import (
 from game_automation.portable.application.screen_state_config import load_screen_state_candidates
 from game_automation.portable.application.screen_state_config import load_screen_state_names
 from game_automation.portable.application.screen_state_config import load_screen_state_regions
-from game_automation.portable.domain import Click, ImageTarget, ImageTemplate, ScreenWindow, Script
-from game_automation.portable.domain import NamedRegion, Point, Rect, ScreenStateCandidate, ScreenStateProbeResult
+from game_automation.portable.domain import (
+    Click,
+    ColorIs,
+    Drag,
+    If,
+    ImageExists,
+    ImageRef,
+    ImageTarget,
+    ImageTemplate,
+    NamedRegion,
+    OffsetTarget,
+    Point,
+    PointRef,
+    Rect,
+    Repeat,
+    ScreenStateCandidate,
+    ScreenStateIs,
+    ScreenStateProbeResult,
+    ScreenWindow,
+    Script,
+    Step,
+    Wait,
+    WaitUntil,
+)
 from game_automation.portable.engine.ports import (
     RunLogger,
     ScreenImageBatchLocator,
@@ -73,6 +95,15 @@ class ScreenStateProbeStatus:
     current_state: str = "未知"
     exit_code: int | None = None
     stdout: str = ""
+    stderr: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class ScriptDetailsResult:
+    exit_code: int
+    name: str
+    steps: tuple[str, ...] = ()
+    dependencies: tuple[str, ...] = ()
     stderr: str = ""
 
 
@@ -300,6 +331,19 @@ class LocalControlApplication:
         except ValueError:
             return ()
         return () if names is None else names
+
+    def describe_script(self, name: str) -> ScriptDetailsResult:
+        """返回 UI 可展示的脚本步骤和依赖摘要。"""
+        try:
+            script = self._catalog.get(name)
+        except ScriptNotFoundError as exc:
+            return ScriptDetailsResult(exit_code=1, name=name, stderr=str(exc))
+        return ScriptDetailsResult(
+            exit_code=0,
+            name=script.name,
+            steps=_describe_steps(script.steps),
+            dependencies=_describe_dependencies(script.steps),
+        )
 
     def run_named_script(
         self,
@@ -700,6 +744,122 @@ def _log_screen_state_probe_result(logger: RunLogger, result: ScreenStateProbeRe
             f"confidence={candidate.confidence} "
             f"elapsed_ms={candidate.elapsed_ms:.2f}"
         )
+
+
+def _describe_steps(steps: tuple[Step, ...], *, indent: str = "") -> tuple[str, ...]:
+    """把脚本步骤树转换成 UI 可展示的摘要行。"""
+    lines: list[str] = []
+    for step in steps:
+        lines.extend(_describe_step(step, indent=indent))
+    return tuple(lines)
+
+
+def _describe_step(step: Step, *, indent: str) -> tuple[str, ...]:
+    """把单个脚本步骤转换成摘要行。"""
+    if isinstance(step, Click):
+        return (f"{indent}Click {_describe_target(step.point)}",)
+    if isinstance(step, Drag):
+        return (
+            f"{indent}Drag {step.start} -> {step.end} duration={step.duration_seconds:g}s",
+        )
+    if isinstance(step, Wait):
+        return (f"{indent}Wait {step.duration_seconds:g}s",)
+    if isinstance(step, Repeat):
+        return (
+            f"{indent}Repeat {step.times} times",
+            *_describe_steps(step.steps, indent=f"{indent}  "),
+        )
+    if isinstance(step, If):
+        lines = [f"{indent}If {_describe_condition(step.condition)}"]
+        lines.extend(f"{indent}  then {line}" for line in _describe_steps(step.then_steps))
+        if step.else_steps:
+            lines.extend(f"{indent}  else {line}" for line in _describe_steps(step.else_steps))
+        return tuple(lines)
+    if isinstance(step, WaitUntil):
+        return (
+            f"{indent}WaitUntil {_describe_condition(step.condition)} "
+            f"timeout={step.timeout_seconds:g}s interval={step.interval_seconds:g}s",
+        )
+    return (f"{indent}{step}",)
+
+
+def _describe_condition(condition) -> str:
+    """把条件转换成接近脚本写法的摘要文本。"""
+    if isinstance(condition, ScreenStateIs):
+        return f'ScreenStateIs("{condition.state}")'
+    if isinstance(condition, ImageExists):
+        return f"ImageExists({_describe_image(condition.template)}, min_confidence={condition.min_confidence:g})"
+    if isinstance(condition, ColorIs):
+        return f"ColorIs({condition.point}, {condition.expected})"
+    return str(condition)
+
+
+def _describe_target(target) -> str:
+    """把点击目标转换成接近脚本写法的摘要文本。"""
+    if isinstance(target, PointRef):
+        return f'PointRef("{target.name}")'
+    if isinstance(target, ImageTarget):
+        return f"ImageTarget({_describe_image(target.template)}, min_confidence={target.min_confidence:g})"
+    if isinstance(target, OffsetTarget):
+        return f"{_describe_target(target.base)} offset {target.offset}"
+    return str(target)
+
+
+def _describe_image(image: ImageTemplate | ImageRef) -> str:
+    """把图片模板或图片引用转换成摘要文本。"""
+    if isinstance(image, ImageRef):
+        return f'ImageRef("{image.name}")'
+    return image.path
+
+
+def _describe_dependencies(steps: tuple[Step, ...]) -> tuple[str, ...]:
+    """收集脚本运行前最值得用户检查的外部依赖。"""
+    dependencies: list[str] = []
+    for step in steps:
+        _collect_step_dependencies(step, dependencies)
+    return tuple(dict.fromkeys(dependencies))
+
+
+def _collect_step_dependencies(step: Step, dependencies: list[str]) -> None:
+    """收集单个步骤涉及的状态、图片、点位和颜色依赖。"""
+    if isinstance(step, Click):
+        _collect_target_dependencies(step.point, dependencies)
+        return
+    if isinstance(step, If):
+        _collect_condition_dependencies(step.condition, dependencies)
+        for child in (*step.then_steps, *step.else_steps):
+            _collect_step_dependencies(child, dependencies)
+        return
+    if isinstance(step, Repeat):
+        for child in step.steps:
+            _collect_step_dependencies(child, dependencies)
+        return
+    if isinstance(step, WaitUntil):
+        _collect_condition_dependencies(step.condition, dependencies)
+
+
+def _collect_condition_dependencies(condition, dependencies: list[str]) -> None:
+    """收集条件中涉及的外部依赖。"""
+    if isinstance(condition, ScreenStateIs):
+        dependencies.append(f"状态: {condition.state}")
+        return
+    if isinstance(condition, ImageExists):
+        dependencies.append(f"图片: {_describe_image(condition.template)}")
+        return
+    if isinstance(condition, ColorIs):
+        dependencies.append(f"颜色: {condition.expected} @ {condition.point}")
+
+
+def _collect_target_dependencies(target, dependencies: list[str]) -> None:
+    """收集点击目标中涉及的外部依赖。"""
+    if isinstance(target, PointRef):
+        dependencies.append(f"点位: {target.name}")
+        return
+    if isinstance(target, ImageTarget):
+        dependencies.append(f"图片: {_describe_image(target.template)}")
+        return
+    if isinstance(target, OffsetTarget):
+        _collect_target_dependencies(target.base, dependencies)
 
 
 def _wait_for_next_probe_round(cancellation: _CancellationFlag, interval_seconds: float) -> None:

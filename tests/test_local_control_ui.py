@@ -10,7 +10,12 @@ import http.client
 import json
 import threading
 
-from game_automation.portable.application.local_control import ControlResult, ScreenStateProbeStatus, ScriptRunStatus
+from game_automation.portable.application.local_control import (
+    ControlResult,
+    ScreenStateProbeStatus,
+    ScriptDetailsResult,
+    ScriptRunStatus,
+)
 from game_automation.platform.local_desktop.entrypoints.local_ui import create_local_control_server
 
 
@@ -46,6 +51,7 @@ def test_local_ui_serves_control_page() -> None:
     assert 'href="/static/control.css"' in html
     assert 'src="/static/control.js"' in html
     assert 'id="script-select"' in html
+    assert 'id="script-details"' in html
     assert 'id="dry-run-enabled" type="checkbox" checked' in html
     assert 'id="dry-run-screen-state"' in html
     assert 'list="screen-state-suggestions"' in html
@@ -92,6 +98,7 @@ def test_local_ui_serves_static_assets() -> None:
     assert "height: 280px" in css
     assert "resize: vertical" in css
     assert 'document.querySelector("#screen-state-confidence")' in script
+    assert 'document.querySelector("#script-details")' in script
     assert 'document.querySelector("#dry-run-screen-state")' in script
     assert 'document.querySelector("#screen-state-suggestions")' in script
     assert 'document.querySelector("#use-probed-screen-state")' in script
@@ -99,6 +106,7 @@ def test_local_ui_serves_static_assets() -> None:
     assert 'dryRunScreenStateInput.value = latestScreenState' in script
     assert "没有可用探测状态" in script
     assert 'fetch("/api/screen-state-names"' in script
+    assert 'fetch(`/api/script-details?name=${encodeURIComponent(scriptSelect.value)}`)' in script
     assert 'fetch("/api/start-screen-state-probe"' in script
     assert 'fetch("/api/capture-region-diagnostics"' in script
 
@@ -136,6 +144,33 @@ def test_local_ui_lists_screen_state_names_over_http() -> None:
         server.server_close()
 
     assert payload == {"states": ["主页", "人物"]}
+
+
+def test_local_ui_gets_script_details_over_http() -> None:
+    """验证 UI HTTP 接口可以返回脚本详情。"""
+    app = FakeControlApplication()
+    server = create_local_control_server(host="127.0.0.1", port=0, app=app)
+    thread = threading.Thread(target=server.serve_forever)
+    thread.start()
+    try:
+        payload = _request_json(
+            server.server_address,
+            "GET",
+            "/api/script-details?name=conditional-color-demo",
+        )
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+    assert app.script_detail_requests == ["conditional-color-demo"]
+    assert payload == {
+        "exit_code": 0,
+        "name": "conditional-color-demo",
+        "steps": ['If ScreenStateIs("主页")', "  then Click Point(x=100, y=200)"],
+        "dependencies": ["状态: 主页"],
+        "stderr": "",
+    }
 
 
 def test_local_ui_runs_script_over_http() -> None:
@@ -457,6 +492,7 @@ class FakeControlApplication:
         self.start_requests: list[dict[str, object]] = []
         self.status_requests = 0
         self.stop_requests = 0
+        self.script_detail_requests: list[str] = []
         self.test_requests: list[str] = []
         self.image_click_requests: list[dict[str, object]] = []
         self.capture_requests = 0
@@ -480,6 +516,16 @@ class FakeControlApplication:
     def list_screen_state_names(self) -> tuple[str, ...]:
         """返回 fake 界面状态候选。"""
         return ("主页", "人物")
+
+    def describe_script(self, name: str) -> ScriptDetailsResult:
+        """返回 fake 脚本详情。"""
+        self.script_detail_requests.append(name)
+        return ScriptDetailsResult(
+            exit_code=0,
+            name=name,
+            steps=('If ScreenStateIs("主页")', "  then Click Point(x=100, y=200)"),
+            dependencies=("状态: 主页",),
+        )
 
     def start_named_script(
         self,

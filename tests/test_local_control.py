@@ -81,6 +81,43 @@ def test_local_control_runs_state_script_with_dry_run_screen_state() -> None:
     assert result.stdout == "click Point(x=100, y=200)\n"
 
 
+def test_local_control_describes_state_script_dependencies() -> None:
+    """验证 UI 用例可以生成状态驱动脚本详情。"""
+    script = Script(
+        name="state-branch",
+        window=ScreenWindow(),
+        steps=(
+            If(
+                condition=ScreenStateIs("主页"),
+                then_steps=(Click(Point(100, 200)),),
+                else_steps=(Wait(0.5),),
+            ),
+        ),
+    )
+    app = LocalControlApplication(catalog=ScriptCatalog((script,)))
+
+    details = app.describe_script("state-branch")
+
+    assert details.exit_code == 0
+    assert details.name == "state-branch"
+    assert details.stderr == ""
+    assert any('If ScreenStateIs("主页")' in step for step in details.steps)
+    assert details.dependencies == ("状态: 主页",)
+
+
+def test_local_control_describes_unknown_script() -> None:
+    """验证未知脚本详情请求返回清晰错误。"""
+    app = LocalControlApplication(catalog=ScriptCatalog((_build_state_branch_script(),)))
+
+    details = app.describe_script("missing")
+
+    assert details.exit_code == 1
+    assert details.name == "missing"
+    assert details.steps == ()
+    assert details.dependencies == ()
+    assert details.stderr == "unknown script: missing"
+
+
 def test_local_control_background_state_script_uses_dry_run_screen_state() -> None:
     """验证后台脚本运行也会使用 dry-run 模拟状态。"""
     script = Script(
