@@ -78,6 +78,9 @@
       border-radius: 8px;
       padding: 14px;
     }
+    .script-details-panel {
+      margin-top: 12px;
+    }
     label {
       display: grid;
       gap: 6px;
@@ -150,6 +153,12 @@
       white-space: pre-wrap;
       font-size: 13px;
       line-height: 1.45;
+    }
+    #script-details {
+      height: 150px;
+      background: #ffffff;
+      color: #15171a;
+      border-color: #d8dde5;
     }
     .debug-preview {
       display: none;

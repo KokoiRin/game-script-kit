@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+from urllib.parse import parse_qs, urlparse
 import webbrowser
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -48,7 +49,8 @@ def create_local_control_server(
     class LocalControlHandler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
             """处理控制页面、脚本列表和图片资源列表读取请求。"""
-            path = self.path.split("?", 1)[0]
+            parsed_url = urlparse(self.path)
+            path = parsed_url.path
             if path == "/":
                 self._send_ui_asset("index.html")
                 return
@@ -57,6 +59,11 @@ def create_local_control_server(
                 return
             if path == "/api/scripts":
                 self._send_json({"scripts": list(control_app.list_scripts())})
+                return
+            if path == "/api/script-details":
+                query = parse_qs(parsed_url.query)
+                name = query.get("name", [""])[0]
+                self._send_json(_script_details_to_payload(control_app.describe_script(name)))
                 return
             if path == "/api/image-assets":
                 self._send_json(
@@ -237,6 +244,17 @@ def _status_to_payload(status) -> dict[str, object]:
         "exit_code": status.exit_code,
         "stdout": status.stdout,
         "stderr": status.stderr,
+    }
+
+
+def _script_details_to_payload(details) -> dict[str, object]:
+    """把脚本详情转换成 HTTP JSON payload。"""
+    return {
+        "exit_code": details.exit_code,
+        "name": details.name,
+        "steps": list(details.steps),
+        "dependencies": list(details.dependencies),
+        "stderr": details.stderr,
     }
 
 

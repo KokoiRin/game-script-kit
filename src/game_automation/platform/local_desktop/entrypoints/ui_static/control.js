@@ -1,6 +1,7 @@
     const tabButtons = document.querySelectorAll(".tab-button");
     const tabPanels = document.querySelectorAll(".tab-panel");
     const scriptSelect = document.querySelector("#script-select");
+    const scriptDetails = document.querySelector("#script-details");
     const dryRunCheckbox = document.querySelector("#dry-run-enabled");
     const colorInput = document.querySelector("#dry-run-color");
     const dryRunScreenStateInput = document.querySelector("#dry-run-screen-state");
@@ -150,6 +151,37 @@
         option.textContent = name;
         scriptSelect.appendChild(option);
       }
+      await loadScriptDetails();
+    }
+
+    async function loadScriptDetails() {
+      if (!scriptSelect.value) {
+        scriptDetails.textContent = "";
+        return;
+      }
+      const response = await fetch(`/api/script-details?name=${encodeURIComponent(scriptSelect.value)}`);
+      const payload = await response.json();
+      renderScriptDetails(payload);
+    }
+
+    function renderScriptDetails(payload) {
+      if (payload.exit_code !== 0) {
+        scriptDetails.textContent = payload.stderr || "脚本详情读取失败";
+        return;
+      }
+      const lines = [`脚本：${payload.name}`, "步骤："];
+      for (const step of payload.steps || []) {
+        lines.push(`- ${step}`);
+      }
+      lines.push("依赖：");
+      if ((payload.dependencies || []).length === 0) {
+        lines.push("- 无");
+      } else {
+        for (const dependency of payload.dependencies || []) {
+          lines.push(`- ${dependency}`);
+        }
+      }
+      scriptDetails.textContent = lines.join("\n");
     }
 
     async function loadImageAssets() {
@@ -342,6 +374,7 @@
     setupTabs();
     runScriptButton.addEventListener("click", runScript);
     stopScriptButton.addEventListener("click", stopScript);
+    scriptSelect.addEventListener("change", loadScriptDetails);
     useProbedScreenStateButton.addEventListener("click", useProbedScreenState);
     runTestsButton.addEventListener("click", runTests);
     refreshImagesButton.addEventListener("click", loadImageAssets);
