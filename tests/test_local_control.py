@@ -302,6 +302,115 @@ def test_local_control_runs_script_with_screen_state_condition(tmp_path) -> None
     assert "screen state probe round current_state=主页" in result.stdout
 
 
+def test_local_control_reuses_running_background_screen_state_for_real_script(tmp_path) -> None:
+    """验证真实脚本优先复用运行中的后台界面状态。"""
+    _write_home_state_config(tmp_path)
+    clicks = []
+    batch_requests = []
+    script = _build_state_branch_script()
+
+    class FakeDevice(InputDevice):
+        def click(self, target: Point) -> None:
+            """记录真实点击坐标。"""
+            clicks.append(target)
+
+        def drag_to(self, start: Point, end: Point, duration_seconds: float = 0.0) -> None:
+            """状态分支脚本不会拖拽。"""
+
+        def wait(self, duration_seconds: float) -> None:
+            """状态命中后不会等待。"""
+
+    class FakeBatchLocator:
+        def locate_requests(self, requests, *, logger=None, stop_on_first_match=False):
+            """记录状态探测请求并返回主页命中。"""
+            batch_requests.append(tuple(requests))
+            return (
+                ImageBatchMatchResult(
+                    requests[0].template,
+                    ImageMatch(Rect(10, 20, 30, 40), confidence=0.91),
+                    elapsed_ms=4.0,
+                ),
+            )
+
+    app = LocalControlApplication(
+        catalog=ScriptCatalog((script,)),
+        project_root=tmp_path,
+        real_device_factory=FakeDevice,
+        real_image_batch_locator_factory=FakeBatchLocator,
+    )
+
+    app.start_screen_state_probe(interval_seconds=30)
+    running = _wait_until_probe_state(app, "主页")
+    requests_after_probe = len(batch_requests)
+    result = app.run_named_script("state-aware", dry_run=False)
+    app.stop_screen_state_probe()
+
+    assert running.current_state == "主页"
+    assert result.exit_code == 0
+    assert result.stderr == ""
+    assert clicks == [Point(100, 200)]
+    assert len(batch_requests) == requests_after_probe
+    assert "screen state reader reused background probe current_state=主页" in result.stdout
+
+
+def test_local_control_falls_back_to_probe_when_background_state_is_unknown(tmp_path) -> None:
+    """验证后台状态不可用时真实脚本仍执行即时探测。"""
+    _write_home_state_config(tmp_path)
+    clicks = []
+    batch_requests = []
+    script = _build_state_branch_script()
+
+    class FakeDevice(InputDevice):
+        def click(self, target: Point) -> None:
+            """记录真实点击坐标。"""
+            clicks.append(target)
+
+        def drag_to(self, start: Point, end: Point, duration_seconds: float = 0.0) -> None:
+            """状态分支脚本不会拖拽。"""
+
+        def wait(self, duration_seconds: float) -> None:
+            """状态命中后不会等待。"""
+
+    class FakeBatchLocator:
+        def locate_requests(self, requests, *, logger=None, stop_on_first_match=False):
+            """第一次返回未知，第二次返回主页命中。"""
+            batch_requests.append(tuple(requests))
+            if len(batch_requests) == 1:
+                return (
+                    ImageBatchMatchResult(
+                        requests[0].template,
+                        None,
+                        elapsed_ms=4.0,
+                    ),
+                )
+            return (
+                ImageBatchMatchResult(
+                    requests[0].template,
+                    ImageMatch(Rect(10, 20, 30, 40), confidence=0.91),
+                    elapsed_ms=4.0,
+                ),
+            )
+
+    app = LocalControlApplication(
+        catalog=ScriptCatalog((script,)),
+        project_root=tmp_path,
+        real_device_factory=FakeDevice,
+        real_image_batch_locator_factory=FakeBatchLocator,
+    )
+
+    app.start_screen_state_probe(interval_seconds=30)
+    running = _wait_until_probe_output_contains(app, "current_state=未知")
+    result = app.run_named_script("state-aware", dry_run=False)
+    app.stop_screen_state_probe()
+
+    assert running.current_state == "未知"
+    assert result.exit_code == 0
+    assert result.stderr == ""
+    assert clicks == [Point(100, 200)]
+    assert len(batch_requests) == 2
+    assert "screen state probe round current_state=主页" in result.stdout
+
+
 def test_local_control_lists_image_assets_from_project_assets_folder(tmp_path) -> None:
     """验证 UI 用例只列出图片资源目录里的支持图片文件。"""
     assets = tmp_path / "assets"
@@ -599,3 +708,61 @@ def _wait_until_finished(app: LocalControlApplication):
             return status
         time.sleep(0.01)
     raise AssertionError("background script did not finish")
+
+
+def _write_home_state_config(project_root) -> None:
+    """写入只包含主页状态的测试配置。"""
+    assets = project_root / "assets"
+    assets.mkdir()
+    (assets / "主页.png").write_bytes(b"fake")
+    (assets / "screen-states.json").write_text(
+        json.dumps(
+            {
+                "groups": [
+                    {
+                        "state": "主页",
+                        "searches": [{"name": "主页标题", "image": "主页.png"}],
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+
+def _build_state_branch_script() -> Script:
+    """构造命中主页状态时点击的测试脚本。"""
+    return Script(
+        name="state-aware",
+        window=ScreenWindow(),
+        steps=(
+            If(
+                condition=ScreenStateIs("主页"),
+                then_steps=(Click(Point(100, 200)),),
+                else_steps=(Wait(0.5),),
+            ),
+        ),
+    )
+
+
+def _wait_until_probe_state(app: LocalControlApplication, expected_state: str):
+    """轮询等待后台界面探测进入指定状态。"""
+    deadline = time.monotonic() + 2
+    while time.monotonic() < deadline:
+        status = app.current_screen_state_probe()
+        if status.running and status.current_state == expected_state:
+            return status
+        time.sleep(0.01)
+    raise AssertionError(f"screen state probe did not reach {expected_state}")
+
+
+def _wait_until_probe_output_contains(app: LocalControlApplication, expected_text: str):
+    """轮询等待后台界面探测日志包含指定文本。"""
+    deadline = time.monotonic() + 2
+    while time.monotonic() < deadline:
+        status = app.current_screen_state_probe()
+        if status.running and expected_text in status.stdout:
+            return status
+        time.sleep(0.01)
+    raise AssertionError(f"screen state probe output did not contain {expected_text}")
