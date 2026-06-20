@@ -13,17 +13,22 @@ from game_automation.portable.domain import (
     ImageExists,
     ImageMatch,
     ImageRef,
+    ImageSearchSpec,
     ImageTemplate,
     ImageTarget,
     NamedImage,
+    NamedImageSearch,
     NamedPoint,
+    NamedRegion,
     OffsetTarget,
     Point,
     PointRef,
     Rect,
+    RegionRef,
     Repeat,
     ScreenWindow,
     ScreenStateIs,
+    SearchRef,
     Script,
     TargetCatalog,
     Wait,
@@ -568,6 +573,71 @@ def test_runner_resolves_named_image_target_before_clicking() -> None:
 
     assert device.actions[0].target == Point(25, 40)
     assert locator.calls == [(ImageTemplate("assets/start.png"), None, 0.8)]
+
+
+def test_runner_resolves_named_image_search_target_before_clicking() -> None:
+    """验证图片目标可以引用命名搜索规格。"""
+    device = FakeInputDevice()
+    locator = SequenceImageLocator([ImageMatch(Rect(10, 20, 30, 40), confidence=0.9)])
+    script = Script(
+        name="named-image-search-click-runner",
+        window=AreaWindow(Rect(100, 200, 800, 600)),
+        steps=(Click(ImageTarget(SearchRef("开始按钮"))),),
+        resources=TargetCatalog(
+            images=(NamedImage("开始", ImageTemplate("assets/start.png")),),
+            regions=(NamedRegion("按钮区", Rect(10, 20, 30, 40)),),
+            searches=(
+                NamedImageSearch(
+                    "开始按钮",
+                    ImageSearchSpec(ImageRef("开始"), RegionRef("按钮区"), min_confidence=0.8),
+                ),
+            ),
+        ),
+    )
+
+    ScriptRunner(device=device, image_locator=locator).run(script)
+
+    assert device.actions[0].target == Point(25, 40)
+    assert locator.calls == [
+        (ImageTemplate("assets/start.png"), Rect(110, 220, 30, 40), 0.8)
+    ]
+
+
+def test_runner_overrides_named_image_search_target_region() -> None:
+    """验证图片目标显式区域会覆盖命名搜索区域。"""
+    device = FakeInputDevice()
+    locator = SequenceImageLocator([ImageMatch(Rect(10, 20, 30, 40), confidence=0.9)])
+    script = Script(
+        name="named-image-search-click-region-runner",
+        window=AreaWindow(Rect(100, 200, 800, 600)),
+        steps=(
+            Click(
+                ImageTarget(
+                    SearchRef("开始按钮"),
+                    region=Rect(1, 2, 30, 40),
+                    min_confidence=0.9,
+                )
+            ),
+        ),
+        resources=TargetCatalog(
+            searches=(
+                NamedImageSearch(
+                    "开始按钮",
+                    ImageSearchSpec(
+                        ImageTemplate("assets/start.png"),
+                        region=Rect(10, 20, 30, 40),
+                        min_confidence=0.8,
+                    ),
+                ),
+            ),
+        ),
+    )
+
+    ScriptRunner(device=device, image_locator=locator).run(script)
+
+    assert locator.calls == [
+        (ImageTemplate("assets/start.png"), Rect(101, 202, 30, 40), 0.9)
+    ]
 
 
 def test_runner_reports_unknown_named_image_target() -> None:

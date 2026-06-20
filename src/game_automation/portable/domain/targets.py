@@ -10,20 +10,20 @@ from dataclasses import dataclass, field
 
 from game_automation.portable.domain.geometry import Point, Rect
 from game_automation.portable.domain.image_matching import ImageTemplate
-from game_automation.portable.domain.point_aliases import ImageRef
+from game_automation.portable.domain.point_aliases import ImageRef, ImageSearchSpec, SearchRef
 
 
 @dataclass(frozen=True, slots=True)
 class ImageTarget:
-    template: ImageTemplate | ImageRef
+    template: ImageTemplate | ImageRef | ImageSearchSpec | SearchRef
     region: Rect | None = None
-    min_confidence: float = 1.0
+    min_confidence: float | None = None
     offset: Point = field(default_factory=lambda: Point(0, 0))
     anchor: str = "center"
 
     def __post_init__(self) -> None:
         """校验图片目标最低匹配置信度必须大于 0 且不超过 1。"""
-        if not 0 < self.min_confidence <= 1:
+        if self.min_confidence is not None and not 0 < self.min_confidence <= 1:
             raise ValueError("image target min_confidence must be greater than 0 and at most 1")
         from game_automation.portable.domain.image_matching import ImageMatch
 

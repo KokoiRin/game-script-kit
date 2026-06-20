@@ -79,12 +79,12 @@ def test_actions_do_not_expose_move_or_mouse_button() -> None:
 
 
 def test_image_target_preserves_template_and_defaults() -> None:
-    """验证图片目标会保留模板并默认点击匹配中心。"""
+    """验证图片目标会保留模板并默认继承搜索置信度。"""
     target = ImageTarget(ImageTemplate("assets/start.png"))
 
     assert target.template == ImageTemplate("assets/start.png")
     assert target.region is None
-    assert target.min_confidence == 1.0
+    assert target.min_confidence is None
     assert target.offset == Point(0, 0)
     assert target.anchor == "center"
 
@@ -215,12 +215,12 @@ def test_color_condition_rejects_invalid_tolerance() -> None:
 
 
 def test_image_exists_condition_preserves_template_and_defaults() -> None:
-    """验证图片存在条件会保留模板并默认全屏精确匹配。"""
+    """验证图片存在条件会保留模板并默认继承搜索置信度。"""
     condition = ImageExists(template=ImageTemplate("assets/start.png"))
 
     assert condition.template == ImageTemplate("assets/start.png")
     assert condition.region is None
-    assert condition.min_confidence == 1.0
+    assert condition.min_confidence is None
 
 
 def test_image_exists_condition_preserves_region_and_min_confidence() -> None:

@@ -18,12 +18,14 @@ from game_automation.portable.domain import (
     If,
     ImageExists,
     ImageRef,
+    ImageSearchSpec,
     ImageTarget,
     ImageTemplate,
     OffsetTarget,
     PointRef,
     Repeat,
     ScreenStateIs,
+    SearchRef,
     Script,
     Step,
     Wait,
@@ -144,7 +146,10 @@ def _describe_condition(condition) -> str:
     if isinstance(condition, ScreenStateIs):
         return f'ScreenStateIs("{condition.state}")'
     if isinstance(condition, ImageExists):
-        return f"ImageExists({_describe_image(condition.template)}, min_confidence={condition.min_confidence:g})"
+        return (
+            f"ImageExists({_describe_image(condition.template)}, "
+            f"min_confidence={_effective_image_min_confidence(condition.min_confidence):g})"
+        )
     if isinstance(condition, ColorIs):
         return f"ColorIs({condition.point}, {condition.expected})"
     return str(condition)
@@ -155,14 +160,26 @@ def _describe_target(target) -> str:
     if isinstance(target, PointRef):
         return f'PointRef("{target.name}")'
     if isinstance(target, ImageTarget):
-        return f"ImageTarget({_describe_image(target.template)}, min_confidence={target.min_confidence:g})"
+        return (
+            f"ImageTarget({_describe_image(target.template)}, "
+            f"min_confidence={_effective_image_min_confidence(target.min_confidence):g})"
+        )
     if isinstance(target, OffsetTarget):
         return f"{_describe_target(target.base)} offset {target.offset}"
     return str(target)
 
 
-def _describe_image(image: ImageTemplate | ImageRef) -> str:
-    """把图片模板或图片引用转换成摘要文本。"""
+def _effective_image_min_confidence(min_confidence: float | None) -> float:
+    """把未显式指定的图片置信度展示为执行期默认值。"""
+    return 1.0 if min_confidence is None else min_confidence
+
+
+def _describe_image(image: ImageTemplate | ImageRef | ImageSearchSpec | SearchRef) -> str:
+    """把图片模板、图片引用或搜索引用转换成摘要文本。"""
     if isinstance(image, ImageRef):
         return f'ImageRef("{image.name}")'
+    if isinstance(image, SearchRef):
+        return f'SearchRef("{image.name}")'
+    if isinstance(image, ImageSearchSpec):
+        return f"ImageSearchSpec({_describe_image(image.image)})"
     return image.path

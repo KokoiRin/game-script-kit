@@ -17,11 +17,14 @@ from game_automation.portable.domain import (
     ImageExists,
     ImageRef,
     ImageMatch,
+    ImageSearchSpec,
     ImageTarget,
     ImageTemplate,
     NamedImage,
+    NamedImageSearch,
     Point,
     Rect,
+    SearchRef,
     Repeat,
     ScreenStateIs,
     ScreenWindow,
@@ -135,6 +138,36 @@ def test_local_control_runs_named_image_script_with_dry_run_images() -> None:
     assert result.stdout.splitlines()[-1] == "click Point(x=0, y=0)"
 
 
+def test_local_control_runs_named_image_search_script_with_dry_run_images() -> None:
+    """验证 UI 用例可用解析后的图片路径 dry-run 命名搜索脚本。"""
+    script = Script(
+        name="named-search-click",
+        window=ScreenWindow(),
+        resources=TargetCatalog(
+            images=(NamedImage("离开", ImageTemplate("assets/离开.png")),),
+            searches=(
+                NamedImageSearch(
+                    "离开按钮",
+                    ImageSearchSpec(ImageRef("离开"), min_confidence=0.8),
+                ),
+            ),
+        ),
+        steps=(Click(ImageTarget(SearchRef("离开按钮"))),),
+    )
+    app = LocalControlApplication(catalog=ScriptCatalog((script,)))
+
+    result = app.run_named_script(
+        "named-search-click",
+        dry_run=True,
+        dry_run_images=("assets/离开.png",),
+    )
+
+    assert result.exit_code == 0
+    assert result.stderr == ""
+    assert "image match template=assets/离开.png" in result.stdout
+    assert result.stdout.splitlines()[-1] == "click Point(x=0, y=0)"
+
+
 def test_local_control_describes_state_script_dependencies(tmp_path) -> None:
     """验证 UI 用例可以生成状态驱动脚本详情和可用依赖检查。"""
     assets = tmp_path / "assets"
@@ -204,6 +237,35 @@ def test_local_control_describes_named_image_dependencies() -> None:
     assert details.image_dependencies == ("assets/离开.png", "assets/重来.png")
 
 
+def test_local_control_describes_named_image_search_dependencies() -> None:
+    """验证 UI 用例会把命名搜索依赖解析成 dry-run 可用图片路径。"""
+    script = Script(
+        name="named-search-branch",
+        window=ScreenWindow(),
+        resources=TargetCatalog(
+            images=(NamedImage("离开", ImageTemplate("assets/离开.png")),),
+            searches=(
+                NamedImageSearch(
+                    "离开按钮",
+                    ImageSearchSpec(ImageRef("离开"), min_confidence=0.8),
+                ),
+            ),
+        ),
+        steps=(
+            If(
+                condition=ImageExists(SearchRef("离开按钮")),
+                then_steps=(Click(ImageTarget(SearchRef("离开按钮"))),),
+            ),
+        ),
+    )
+    app = LocalControlApplication(catalog=ScriptCatalog((script,)))
+
+    details = app.describe_script("named-search-branch")
+
+    assert details.dependencies == ('图片: SearchRef("离开按钮")',)
+    assert details.image_dependencies == ("assets/离开.png",)
+
+
 def test_local_control_checks_named_image_readiness(tmp_path) -> None:
     """验证命名图片依赖会按解析后的 assets 路径检查可用性。"""
     assets = tmp_path / "assets"
@@ -221,6 +283,34 @@ def test_local_control_checks_named_image_readiness(tmp_path) -> None:
 
     assert details.readiness == (
         ('图片: ImageRef("离开")', "ok", "命名图片已配置，图片文件可用：assets/离开.png"),
+    )
+
+
+def test_local_control_checks_named_image_search_readiness(tmp_path) -> None:
+    """验证命名搜索依赖会按解析后的 assets 路径检查可用性。"""
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    (assets / "离开.png").write_bytes(b"fake")
+    script = Script(
+        name="named-search-ready",
+        window=ScreenWindow(),
+        resources=TargetCatalog(
+            images=(NamedImage("离开", ImageTemplate("assets/离开.png")),),
+            searches=(
+                NamedImageSearch(
+                    "离开按钮",
+                    ImageSearchSpec(ImageRef("离开"), min_confidence=0.8),
+                ),
+            ),
+        ),
+        steps=(Click(ImageTarget(SearchRef("离开按钮"))),),
+    )
+    app = LocalControlApplication(catalog=ScriptCatalog((script,)), project_root=tmp_path)
+
+    details = app.describe_script("named-search-ready")
+
+    assert details.readiness == (
+        ('图片: SearchRef("离开按钮")', "ok", "命名搜索已配置，图片文件可用：assets/离开.png"),
     )
 
 
@@ -269,6 +359,22 @@ def test_local_control_reports_unknown_named_image_readiness() -> None:
 
     assert details.readiness == (
         ('图片: ImageRef("缺失")', "missing", "命名图片未配置"),
+    )
+
+
+def test_local_control_reports_unknown_named_image_search_readiness() -> None:
+    """验证未知命名搜索依赖会报告命名搜索未配置。"""
+    script = Script(
+        name="unknown-named-search",
+        window=ScreenWindow(),
+        steps=(Click(ImageTarget(SearchRef("缺失搜索"))),),
+    )
+    app = LocalControlApplication(catalog=ScriptCatalog((script,)))
+
+    details = app.describe_script("unknown-named-search")
+
+    assert details.readiness == (
+        ('图片: SearchRef("缺失搜索")', "missing", "命名搜索未配置"),
     )
 
 

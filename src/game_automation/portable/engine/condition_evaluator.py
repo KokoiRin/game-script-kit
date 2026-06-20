@@ -84,7 +84,8 @@ def _evaluate_image_exists(
         condition.template,
         image_locator=image_locator,
         resources=resources,
-        region=_resolve_region(window, condition.region),
+        region=condition.region,
+        region_resolver=lambda region: _resolve_region(window, region),
         min_confidence=condition.min_confidence,
         logger=logger,
     )
