@@ -73,6 +73,7 @@ def test_local_ui_serves_control_page() -> None:
     assert 'id="click-image"' in html
     assert 'id="capture-screen"' in html
     assert 'id="capture-region-diagnostics"' in html
+    assert 'id="capture-probe-diagnostics"' in html
     assert 'id="debug-screenshot"' in html
     assert 'id="run-tests"' in html
     assert 'id="screen-state-tab"' in html
@@ -143,6 +144,7 @@ def test_local_ui_serves_static_assets() -> None:
     assert 'fetch(`/api/script-details?name=${encodeURIComponent(scriptSelect.value)}`)' in script
     assert 'fetch("/api/start-screen-state-probe"' in script
     assert 'fetch("/api/capture-region-diagnostics"' in script
+    assert 'fetch("/api/capture-probe-diagnostics"' in script
     assert "renderScreenStateStats" in script
     assert "renderScreenStateCandidates" in script
     assert "renderCandidateName" in script
@@ -597,6 +599,37 @@ def test_local_ui_captures_region_diagnostics_over_http() -> None:
     }
 
 
+def test_local_ui_captures_probe_diagnostics_over_http() -> None:
+    """验证 UI HTTP 接口把探测诊断请求委托给 application。"""
+    app = FakeControlApplication()
+    server = create_local_control_server(host="127.0.0.1", port=0, app=app)
+    thread = threading.Thread(target=server.serve_forever)
+    thread.start()
+    try:
+        payload = _request_json(
+            server.server_address,
+            "POST",
+            "/api/capture-probe-diagnostics",
+            {"min_confidence": 0.75},
+        )
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+    assert app.probe_diagnostics_requests == [0.75]
+    assert payload == {
+        "exit_code": 0,
+        "stdout": (
+            "saved probe diagnostics screenshot: /tmp/latest-screen-probe.png\n"
+            "current_state=未知\n"
+        ),
+        "stderr": "",
+        "screenshot_path": "/tmp/latest-screen-probe.png",
+        "screenshot_url": "/api/debug-screenshot?version=1",
+    }
+
+
 def test_local_ui_runs_tests_over_http() -> None:
     """验证 UI HTTP 接口可以触发固定测试任务。"""
     app = FakeControlApplication()
@@ -634,6 +667,7 @@ class FakeControlApplication:
         self.image_click_requests: list[dict[str, object]] = []
         self.capture_requests = 0
         self.region_diagnostics_requests = 0
+        self.probe_diagnostics_requests: list[float] = []
         self.probe_start_requests: list[dict[str, object]] = []
         self.probe_status_requests = 0
         self.probe_stop_requests = 0
@@ -817,6 +851,19 @@ class FakeControlApplication:
             stdout="saved region diagnostics screenshot: /tmp/latest-screen-regions.png\n",
             stderr="",
             screenshot_path="/tmp/latest-screen-regions.png",
+        )
+
+    def capture_screen_probe_diagnostics(self, *, min_confidence: float = 0.8) -> ControlResult:
+        """记录 fake 探测诊断请求。"""
+        self.probe_diagnostics_requests.append(min_confidence)
+        return ControlResult(
+            exit_code=0,
+            stdout=(
+                "saved probe diagnostics screenshot: /tmp/latest-screen-probe.png\n"
+                "current_state=未知\n"
+            ),
+            stderr="",
+            screenshot_path="/tmp/latest-screen-probe.png",
         )
 
 

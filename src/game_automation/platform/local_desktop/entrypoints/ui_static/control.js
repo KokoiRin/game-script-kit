@@ -19,6 +19,7 @@
     const clickImageButton = document.querySelector("#click-image");
     const captureScreenButton = document.querySelector("#capture-screen");
     const captureRegionDiagnosticsButton = document.querySelector("#capture-region-diagnostics");
+    const captureProbeDiagnosticsButton = document.querySelector("#capture-probe-diagnostics");
     const imageConfidenceInput = document.querySelector("#image-confidence");
     const debugPreview = document.querySelector("#debug-preview");
     const debugScreenshot = document.querySelector("#debug-screenshot");
@@ -46,6 +47,7 @@
       refreshImagesButton.disabled = isBusy;
       captureScreenButton.disabled = isBusy;
       captureRegionDiagnosticsButton.disabled = isBusy;
+      captureProbeDiagnosticsButton.disabled = isBusy;
       clickImageButton.disabled = isBusy || !imageAssetSelect.value;
       useProbedScreenStateButton.disabled = isBusy;
       useScriptScreenStateButton.disabled = isBusy;
@@ -501,6 +503,24 @@
       }
     }
 
+    async function captureProbeDiagnostics() {
+      setBusy(true);
+      statusEl.textContent = "正在生成探测诊断...";
+      outputEl.textContent = "";
+      try {
+        const response = await fetch("/api/capture-probe-diagnostics", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({
+            min_confidence: Number.parseFloat(screenStateConfidenceInput.value)
+          })
+        });
+        renderResult("探测诊断", await response.json());
+      } finally {
+        setBusy(false);
+      }
+    }
+
     async function startScreenStateProbe() {
       activeScreenStateProbe = true;
       setScreenStateBusy(true);
@@ -558,6 +578,7 @@
     refreshImagesButton.addEventListener("click", loadImageAssets);
     captureScreenButton.addEventListener("click", captureScreen);
     captureRegionDiagnosticsButton.addEventListener("click", captureRegionDiagnostics);
+    captureProbeDiagnosticsButton.addEventListener("click", captureProbeDiagnostics);
     clickImageButton.addEventListener("click", clickImage);
     startScreenStateProbeButton.addEventListener("click", startScreenStateProbe);
     stopScreenStateProbeButton.addEventListener("click", stopScreenStateProbe);

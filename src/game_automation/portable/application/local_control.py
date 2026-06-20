@@ -72,6 +72,7 @@ ScreenImageBatchLocatorFactory = Callable[[], ScreenImageBatchLocator]
 
 DEBUG_SCREENSHOT_PATH = Path(".star") / "debug" / "screenshots" / "latest-screen.png"
 DEBUG_REGION_SCREENSHOT_PATH = Path(".star") / "debug" / "screenshots" / "latest-screen-regions.png"
+DEBUG_PROBE_SCREENSHOT_PATH = Path(".star") / "debug" / "screenshots" / "latest-screen-probe.png"
 DEBUG_REGION_CROP_FOLDER = Path(".star") / "debug" / "screenshots" / "regions"
 
 
@@ -715,6 +716,43 @@ class LocalControlApplication:
             screenshot_path=str(diagnostic_path),
         )
 
+    def capture_screen_probe_diagnostics(self, *, min_confidence: float = 0.8) -> ControlResult:
+        """保存一张带状态探测候选最佳位置框的诊断截图。"""
+        if self._screen_capture_factory is None:
+            return ControlResult(exit_code=1, stderr="screen capture is not configured\n")
+        if self._screen_size_factory is None:
+            return ControlResult(exit_code=1, stderr="screen size is not configured\n")
+        try:
+            screen_size = self._screen_size_factory()
+        except Exception as exc:
+            return ControlResult(exit_code=1, stderr=f"{exc}\n")
+
+        raw_path = self.latest_screen_screenshot_path()
+        diagnostic_path = self.latest_screen_probe_diagnostics_path()
+        raw_path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            result = self.probe_screen_state_once(min_confidence=min_confidence)
+            self._screen_capture_factory()(raw_path)
+            _draw_probe_diagnostics(
+                screenshot_path=raw_path,
+                output_path=diagnostic_path,
+                screen_size=screen_size,
+                regions=self._screen_state_diagnostic_regions(),
+                result=result,
+            )
+        except ValueError as exc:
+            return ControlResult(exit_code=2, stderr=f"{exc}\n")
+        except Exception as exc:
+            return ControlResult(exit_code=1, stderr=f"{exc}\n")
+        return ControlResult(
+            exit_code=0,
+            stdout=(
+                f"saved probe diagnostics screenshot: {diagnostic_path}\n"
+                f"current_state={result.current_state}\n"
+            ),
+            screenshot_path=str(diagnostic_path),
+        )
+
     def capture_screen_region_crops(self) -> ControlResult:
         """保存当前屏幕中每个状态识别命名区域的裁剪图。"""
         context = self._screen_region_capture_context()
@@ -749,6 +787,10 @@ class LocalControlApplication:
     def latest_screen_region_diagnostics_path(self) -> Path:
         """返回最近一次区域诊断截图保存的项目内文件路径。"""
         return self._project_root / DEBUG_REGION_SCREENSHOT_PATH
+
+    def latest_screen_probe_diagnostics_path(self) -> Path:
+        """返回最近一次探测诊断截图保存的项目内文件路径。"""
+        return self._project_root / DEBUG_PROBE_SCREENSHOT_PATH
 
     def latest_screen_region_crop_folder(self) -> Path:
         """返回最近一次命名区域裁剪图保存的项目内目录。"""
@@ -871,6 +913,13 @@ class LocalControlApplication:
             return ControlResult(exit_code=1, stderr=f"{exc}\n")
         return (regions, screen_size)
 
+    def _screen_state_diagnostic_regions(self) -> tuple[NamedRegion, ...]:
+        """读取探测诊断可选绘制的命名区域。"""
+        config_path = self._image_asset_root() / SCREEN_STATE_CONFIG_NAME
+        if not config_path.exists():
+            return ()
+        return load_screen_state_regions(config_path)
+
 
 def _log_screen_state_probe_result(logger: RunLogger, result: ScreenStateProbeResult) -> None:
     """记录一轮界面状态探测摘要，供 UI 日志展示。"""
@@ -942,6 +991,68 @@ def _draw_region_diagnostics(
         draw.rectangle(box, outline=color, width=3)
         _draw_region_label(draw, font, f"{index}. {region.name}", box, color)
     diagnostic.save(output_path)
+
+
+def _draw_probe_diagnostics(
+    *,
+    screenshot_path: Path,
+    output_path: Path,
+    screen_size: Point,
+    regions: tuple[NamedRegion, ...],
+    result: ScreenStateProbeResult,
+) -> None:
+    """把命名区域和状态候选最佳位置绘制到截图上并保存。"""
+    if screen_size.x <= 0 or screen_size.y <= 0:
+        raise ValueError("screen size must be positive")
+
+    from PIL import Image, ImageDraw, ImageFont
+
+    with Image.open(screenshot_path) as image:
+        diagnostic = image.convert("RGB")
+    draw = ImageDraw.Draw(diagnostic)
+    font = _load_region_label_font(ImageFont)
+    scale_x = diagnostic.width / screen_size.x
+    scale_y = diagnostic.height / screen_size.y
+    for index, region in enumerate(regions, start=1):
+        color = _region_color(index)
+        box = _region_box_in_pixels(region.region, scale_x=scale_x, scale_y=scale_y)
+        draw.rectangle(box, outline=color, width=2)
+        _draw_region_label(draw, font, f"R{index}. {region.name}", box, color)
+    for index, candidate in enumerate(result.candidates, start=1):
+        if candidate.best_rect is None:
+            continue
+        color = _probe_candidate_color(candidate)
+        box = _region_box_in_pixels(candidate.best_rect, scale_x=scale_x, scale_y=scale_y)
+        draw.rectangle(box, outline=color, width=3)
+        _draw_region_label(draw, font, _probe_candidate_label(index, candidate), box, color)
+    diagnostic.save(output_path)
+
+
+def _probe_candidate_label(index: int, candidate) -> str:
+    """生成探测诊断候选框标签。"""
+    name = candidate.candidate.name
+    if candidate.candidate.search_name:
+        name = f"{name}/{candidate.candidate.search_name}"
+    confidence = "无" if candidate.best_confidence is None else f"{candidate.best_confidence:.3f}"
+    return f"C{index}. {name} {_probe_candidate_status_label(candidate)} {confidence}"
+
+
+def _probe_candidate_status_label(candidate) -> str:
+    """返回探测诊断候选状态标签。"""
+    if candidate.skipped:
+        return "跳过"
+    if candidate.found:
+        return "命中"
+    return "未命中"
+
+
+def _probe_candidate_color(candidate) -> str:
+    """按候选探测状态返回诊断框颜色。"""
+    if candidate.skipped:
+        return "#6b7280"
+    if candidate.found:
+        return "#16a34a"
+    return "#dc2626"
 
 
 def _save_region_crops(
