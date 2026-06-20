@@ -3,6 +3,7 @@
 import json
 from types import ModuleType
 
+from game_automation.portable.application.local_control import ControlResult
 from game_automation.portable.domain import (
     Click,
     Color,
@@ -43,6 +44,83 @@ def test_star_cli_lists_available_scripts(capsys) -> None:
         "click-image-demo",
         "click-leave-or-retry-loop",
     ]
+
+
+def test_star_cli_capture_screen_outputs_application_result(monkeypatch, capsys) -> None:
+    """验证 capture-screen 子命令复用 application 截图诊断结果。"""
+    calls = []
+
+    class FakeApp:
+        def capture_screen_screenshot(self):
+            """返回固定截图诊断结果。"""
+            calls.append("capture")
+            return ControlResult(exit_code=0, stdout="saved screenshot: .star/debug/screenshots/latest-screen.png\n")
+
+    monkeypatch.setattr(cli, "build_local_control_application", lambda: FakeApp())
+
+    assert main(["capture-screen"]) == 0
+
+    captured = capsys.readouterr()
+    assert captured.out == "saved screenshot: .star/debug/screenshots/latest-screen.png\n"
+    assert captured.err == ""
+    assert calls == ["capture"]
+
+
+def test_star_cli_capture_screen_reports_application_error(monkeypatch, capsys) -> None:
+    """验证 capture-screen 会把 application 错误写入 stderr。"""
+
+    class FakeApp:
+        def capture_screen_screenshot(self):
+            """返回固定截图失败结果。"""
+            return ControlResult(exit_code=1, stderr="screen capture is not configured\n")
+
+    monkeypatch.setattr(cli, "build_local_control_application", lambda: FakeApp())
+
+    assert main(["capture-screen"]) == 1
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == "screen capture is not configured\n"
+
+
+def test_star_cli_capture_region_diagnostics_outputs_application_result(monkeypatch, capsys) -> None:
+    """验证 capture-region-diagnostics 子命令复用 application 区域诊断结果。"""
+    calls = []
+
+    class FakeApp:
+        def capture_screen_region_diagnostics(self):
+            """返回固定区域诊断结果。"""
+            calls.append("capture-regions")
+            return ControlResult(
+                exit_code=0,
+                stdout="saved region diagnostics screenshot: .star/debug/screenshots/latest-screen-regions.png\n",
+            )
+
+    monkeypatch.setattr(cli, "build_local_control_application", lambda: FakeApp())
+
+    assert main(["capture-region-diagnostics"]) == 0
+
+    captured = capsys.readouterr()
+    assert captured.out == "saved region diagnostics screenshot: .star/debug/screenshots/latest-screen-regions.png\n"
+    assert captured.err == ""
+    assert calls == ["capture-regions"]
+
+
+def test_star_cli_capture_region_diagnostics_reports_application_error(monkeypatch, capsys) -> None:
+    """验证 capture-region-diagnostics 会把 application 错误写入 stderr。"""
+
+    class FakeApp:
+        def capture_screen_region_diagnostics(self):
+            """返回固定区域诊断失败结果。"""
+            return ControlResult(exit_code=2, stderr="screen state config has no named regions\n")
+
+    monkeypatch.setattr(cli, "build_local_control_application", lambda: FakeApp())
+
+    assert main(["capture-region-diagnostics"]) == 2
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == "screen state config has no named regions\n"
 
 
 def test_star_cli_runs_named_script_with_dry_run(capsys) -> None:
