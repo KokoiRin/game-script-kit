@@ -1410,6 +1410,12 @@ def test_local_control_captures_screen_probe_crops(tmp_path) -> None:
         encoding="utf-8",
     )
     Image.new("RGB", (4, 4), "black").save(assets / "home.png")
+    crop_root = tmp_path / ".star" / "debug" / "screenshots" / "probe-crops"
+    crop_root.mkdir(parents=True)
+    stale_crop = crop_root / "stale.png"
+    stale_crop.write_bytes(b"old")
+    keep_note = crop_root / "keep.txt"
+    keep_note.write_text("manual note", encoding="utf-8")
     batch_requests = []
 
     class FakeBatchLocator:
@@ -1439,13 +1445,15 @@ def test_local_control_captures_screen_probe_crops(tmp_path) -> None:
 
     result = app.capture_screen_probe_crops(min_confidence=0.75)
 
-    crop_root = tmp_path / ".star" / "debug" / "screenshots" / "probe-crops"
     crop_path = crop_root / "01_主页_主页标题.png"
     assert result.exit_code == 0
     assert result.stderr == ""
     assert result.stdout == f"saved probe crop: {crop_path}\n"
     assert result.screenshot_path == str(crop_root)
     assert batch_requests[0][0].min_confidence == 0.75
+    assert not stale_crop.exists()
+    assert keep_note.read_text(encoding="utf-8") == "manual note"
+    assert sorted(path.name for path in crop_root.glob("*.png")) == ["01_主页_主页标题.png"]
     with Image.open(crop_path) as crop:
         assert crop.size == (40, 20)
 
@@ -1522,6 +1530,10 @@ def test_local_control_probe_crops_reports_no_saved_candidates(tmp_path) -> None
         encoding="utf-8",
     )
     Image.new("RGB", (4, 4), "black").save(assets / "home.png")
+    crop_root = tmp_path / ".star" / "debug" / "screenshots" / "probe-crops"
+    crop_root.mkdir(parents=True)
+    stale_crop = crop_root / "stale.png"
+    stale_crop.write_bytes(b"old")
 
     class FakeBatchLocator:
         def locate_requests(self, requests, *, logger=None, stop_on_first_match=False):
@@ -1541,11 +1553,12 @@ def test_local_control_probe_crops_reports_no_saved_candidates(tmp_path) -> None
 
     result = app.capture_screen_probe_crops()
 
-    crop_root = tmp_path / ".star" / "debug" / "screenshots" / "probe-crops"
     assert result.exit_code == 0
     assert result.stderr == ""
     assert result.stdout == "no probe candidate crops saved\n"
     assert result.screenshot_path == str(crop_root)
+    assert not stale_crop.exists()
+    assert list(crop_root.glob("*.png")) == []
 
 
 def test_local_control_probe_crops_requires_screen_capture(tmp_path) -> None:
@@ -1582,6 +1595,12 @@ def test_local_control_captures_screen_region_crops(tmp_path) -> None:
         encoding="utf-8",
     )
     Image.new("RGB", (4, 4), "black").save(assets / "home.png")
+    crop_root = tmp_path / ".star" / "debug" / "screenshots" / "regions"
+    crop_root.mkdir(parents=True)
+    stale_crop = crop_root / "stale.png"
+    stale_crop.write_bytes(b"old")
+    keep_note = crop_root / "keep.txt"
+    keep_note.write_text("manual note", encoding="utf-8")
 
     def screen_capture(path):
         """保存一张 2x 缩放的测试截图。"""
@@ -1595,7 +1614,6 @@ def test_local_control_captures_screen_region_crops(tmp_path) -> None:
 
     result = app.capture_screen_region_crops()
 
-    crop_root = tmp_path / ".star" / "debug" / "screenshots" / "regions"
     home_crop = crop_root / "主页标题.png"
     normal_crop = crop_root / "普通标题.png"
     assert result.exit_code == 0
@@ -1605,6 +1623,9 @@ def test_local_control_captures_screen_region_crops(tmp_path) -> None:
         f"saved region crop: {normal_crop}",
     ]
     assert result.screenshot_path == str(crop_root)
+    assert not stale_crop.exists()
+    assert keep_note.read_text(encoding="utf-8") == "manual note"
+    assert sorted(path.name for path in crop_root.glob("*.png")) == ["主页标题.png", "普通标题.png"]
     with Image.open(home_crop) as crop:
         assert crop.size == (60, 40)
     with Image.open(normal_crop) as crop:
