@@ -135,6 +135,7 @@ def test_local_ui_serves_static_assets() -> None:
     assert "payload.state_dependencies" in script
     assert "payload.state_decisions" in script
     assert "payload.state_waits" in script
+    assert "payload.point_dependencies" in script
     assert "scriptImageDependencies" in script
     assert "payload.image_dependencies" in script
     assert "dry_run_images: scriptImageDependencies" in script
@@ -144,6 +145,8 @@ def test_local_ui_serves_static_assets() -> None:
     assert "没有状态决策" in script
     assert "状态等待：" in script
     assert "没有状态等待" in script
+    assert "点位依赖：" in script
+    assert "没有点位依赖" in script
     assert "renderStateWaitPreview" in script
     assert "当前：已满足" in script
     assert "currentScriptDetailsPayload" in script
@@ -285,6 +288,7 @@ def test_local_ui_gets_script_details_over_http() -> None:
         ],
         "dependencies": ["状态: 主页"],
         "state_dependencies": ["主页"],
+        "point_dependencies": ["头像"],
         "state_waits": ["主页"],
         "state_decisions": [
             {
@@ -898,6 +902,7 @@ class FakeControlApplication:
             ),
             dependencies=("状态: 主页",),
             state_dependencies=("主页",),
+            point_dependencies=("头像",),
             state_waits=("主页",),
             state_decisions=(
                 ("主页", ("Click Point(x=100, y=200)",), ("Wait 0.5s",)),

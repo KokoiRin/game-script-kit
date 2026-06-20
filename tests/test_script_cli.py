@@ -13,6 +13,7 @@ from game_automation.portable.domain import (
     ImageTemplate,
     NamedImageSearch,
     Point,
+    PointRef,
     Rect,
     ScreenWindow,
     Script,
@@ -347,6 +348,23 @@ def test_star_cli_details_uses_screen_state_search_ref(monkeypatch, tmp_path, ca
     assert 'Click ImageTarget(SearchRef("离开按钮"), min_confidence=1)' in output
     assert f"- {assets / '离开.png'}" in output
     assert "命名搜索已配置，图片文件可用" in output
+
+
+def test_star_cli_details_shows_point_dependencies(monkeypatch, capsys) -> None:
+    """验证 details 子命令会展示结构化点位依赖。"""
+    script = Script(
+        name="point-dependency-cli",
+        window=ScreenWindow(),
+        steps=(Click(PointRef("头像")), Click(PointRef("头像")), Click(Point(100, 200))),
+    )
+    monkeypatch.setattr(cli, "DEFAULT_SCRIPT_CATALOG", ScriptCatalog((script,)))
+
+    assert main(["details", "point-dependency-cli"]) == 0
+
+    output = capsys.readouterr().out
+    assert "点位依赖：" in output
+    assert "- 头像" in output
+    assert "- Point(x=100, y=200)" not in output
 
 
 def test_star_cli_shows_wait_until_screen_state_details(capsys) -> None:

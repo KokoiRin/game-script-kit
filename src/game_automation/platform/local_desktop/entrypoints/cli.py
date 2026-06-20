@@ -231,8 +231,9 @@ def _print_script_details(details: ScriptDetailsResult) -> None:
     print(f"脚本：{details.name}")
     _print_section("步骤", details.steps)
     _print_section("状态等待", tuple(f"等待状态: {state}" for state in details.state_waits))
-    _print_section("依赖", details.dependencies)
+    _print_section("点位依赖", details.point_dependencies)
     _print_section("图片依赖", details.image_dependencies)
+    _print_section("依赖", details.dependencies)
     _print_section(
         "依赖检查",
         tuple(
