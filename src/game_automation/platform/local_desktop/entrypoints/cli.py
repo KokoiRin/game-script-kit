@@ -146,6 +146,25 @@ def _run_probe_state(args: argparse.Namespace) -> int:
     return 0
 
 
+def _run_capture_screen() -> int:
+    """保存一张当前屏幕诊断截图。"""
+    return _print_control_result(build_local_control_application().capture_screen_screenshot())
+
+
+def _run_capture_region_diagnostics() -> int:
+    """保存一张带状态识别区域框的诊断截图。"""
+    return _print_control_result(build_local_control_application().capture_screen_region_diagnostics())
+
+
+def _print_control_result(result) -> int:
+    """把 application 控制结果映射为 CLI stdout、stderr 和退出码。"""
+    if result.stdout:
+        print(result.stdout, end="")
+    if result.stderr:
+        print(result.stderr, file=sys.stderr, end="")
+    return result.exit_code
+
+
 def _describe_script(script) -> ScriptDetailsResult:
     """生成 CLI 复用的脚本详情。"""
     return describe_script_details(
@@ -338,6 +357,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     probe_parser.add_argument("--json", action="store_true", help="Print machine-readable JSON.")
 
+    subparsers.add_parser("capture-screen", help="Capture the current screen for diagnostics.")
+    subparsers.add_parser(
+        "capture-region-diagnostics",
+        help="Capture the current screen with configured screen-state regions drawn.",
+    )
+
     run_parser = subparsers.add_parser("run", help="Run a named script.")
     run_parser.add_argument("name", help="Script name to run.")
     mode = run_parser.add_mutually_exclusive_group()
@@ -387,6 +412,10 @@ def main(argv: list[str] | None = None) -> int:
         return _run_details(args)
     elif args.command == "probe-state":
         return _run_probe_state(args)
+    elif args.command == "capture-screen":
+        return _run_capture_screen()
+    elif args.command == "capture-region-diagnostics":
+        return _run_capture_region_diagnostics()
     elif args.command == "run":
         return _run_script(args)
     elif args.command == "recorder":
