@@ -28,6 +28,7 @@ from game_automation.portable.application.screen_state_config import (
     load_screen_state_config_summary,
     load_screen_state_names,
     load_screen_state_regions,
+    load_screen_state_target_catalog,
 )
 from game_automation.portable.application.script_details import ScriptDetailsResult, describe_script_details
 from game_automation.portable.domain import (
@@ -41,6 +42,7 @@ from game_automation.portable.domain import (
     ScreenStateProbeResult,
     ScreenWindow,
     Script,
+    TargetCatalog,
 )
 from game_automation.portable.engine.ports import (
     RunLogger,
@@ -383,9 +385,11 @@ class LocalControlApplication:
     def describe_script(self, name: str) -> ScriptDetailsResult:
         """返回 UI 可展示的脚本步骤和依赖摘要。"""
         try:
-            script = self._catalog.get(name)
+            script = self._script_with_shared_resources(self._catalog.get(name))
         except ScriptNotFoundError as exc:
             return ScriptDetailsResult(exit_code=1, name=name, stderr=str(exc))
+        except (LookupError, ValueError) as exc:
+            return ScriptDetailsResult(exit_code=2, name=name, stderr=f"{exc}\n")
         return describe_script_details(
             script,
             asset_root=self._image_asset_root(),
@@ -404,9 +408,11 @@ class LocalControlApplication:
     ) -> ControlResult:
         """按名称运行脚本，并捕获入口层可展示的输出。"""
         try:
-            script = self._catalog.get(name)
+            script = self._script_with_shared_resources(self._catalog.get(name))
         except ScriptNotFoundError as exc:
             return ControlResult(exit_code=1, stderr=str(exc))
+        except (LookupError, ValueError) as exc:
+            return ControlResult(exit_code=2, stderr=f"script resource configuration failed: {exc}\n")
 
         stdout = io.StringIO()
         stderr = io.StringIO()
@@ -453,9 +459,15 @@ class LocalControlApplication:
                     stderr=current.stderr + "script is already running\n",
                 )
             try:
-                script = self._catalog.get(name)
+                script = self._script_with_shared_resources(self._catalog.get(name))
             except ScriptNotFoundError as exc:
                 return ScriptRunStatus(running=False, exit_code=1, stderr=str(exc))
+            except (LookupError, ValueError) as exc:
+                return ScriptRunStatus(
+                    running=False,
+                    exit_code=2,
+                    stderr=f"script resource configuration failed: {exc}\n",
+                )
 
             session = _BackgroundScriptRun()
             self._current_run = session
@@ -794,6 +806,45 @@ class LocalControlApplication:
             return load_screen_state_names(self._image_asset_root() / SCREEN_STATE_CONFIG_NAME)
         except ValueError:
             return None
+
+    def _script_with_shared_resources(self, script: Script) -> Script:
+        """把状态配置里的共享搜索资源合并进脚本资源目录。"""
+        shared = self._shared_script_resources()
+        if shared is None:
+            return script
+        resources = _merge_target_catalogs(shared, script.resources)
+        if resources == script.resources:
+            return script
+        return Script(
+            name=script.name,
+            window=script.window,
+            steps=script.steps,
+            resources=resources,
+        )
+
+    def _shared_script_resources(self) -> TargetCatalog | None:
+        """读取本地状态配置中可供脚本复用的资源目录。"""
+        return load_screen_state_target_catalog(
+            self._image_asset_root() / SCREEN_STATE_CONFIG_NAME,
+            asset_root=self._image_asset_root(),
+            supported_suffixes=IMAGE_ASSET_SUFFIXES,
+        )
+
+
+def _merge_target_catalogs(shared: TargetCatalog, local: TargetCatalog) -> TargetCatalog:
+    """合并共享和脚本局部资源，局部资源覆盖同名共享资源。"""
+    return TargetCatalog(
+        points=_merge_named_resources(shared.points, local.points),
+        images=_merge_named_resources(shared.images, local.images),
+        regions=_merge_named_resources(shared.regions, local.regions),
+        searches=_merge_named_resources(shared.searches, local.searches),
+    )
+
+
+def _merge_named_resources(shared, local):
+    """按名称合并资源元组，保留局部资源的覆盖权。"""
+    local_names = {item.name for item in local}
+    return (*tuple(item for item in shared if item.name not in local_names), *local)
 
 
 def _log_screen_state_probe_result(logger: RunLogger, result: ScreenStateProbeResult) -> None:

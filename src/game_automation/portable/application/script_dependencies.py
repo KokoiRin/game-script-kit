@@ -348,13 +348,12 @@ def _image_readiness(
     if dependency.template is None:
         return dependency.label, "missing", _missing_image_dependency_message(dependency)
     image_path = Path(dependency.template.path)
-    if (
-        image_path.is_absolute()
-        or image_path.parts[:1] != (asset_root.name,)
-        or ".." in image_path.parts
-    ):
+    if image_path.is_absolute():
+        candidate = image_path.resolve()
+    elif image_path.parts[:1] == (asset_root.name,) and ".." not in image_path.parts:
+        candidate = (asset_root.parent / image_path).resolve()
+    else:
         return dependency.label, "unknown", "图片不在项目 assets 目录，无法确认"
-    candidate = (asset_root.parent / image_path).resolve()
     resolved_asset_root = asset_root.resolve()
     try:
         candidate.relative_to(resolved_asset_root)

@@ -38,6 +38,12 @@ class ScreenStateConfigGroupSummary:
     searches: tuple[ScreenStateConfigSearchSummary, ...]
 
 
+@dataclass(frozen=True, slots=True)
+class _ParsedScreenStateConfig:
+    catalog: TargetCatalog
+    candidate_refs: tuple[tuple[str, str], ...]
+
+
 def load_screen_state_candidates(
     config_path: Path,
     *,
@@ -49,54 +55,36 @@ def load_screen_state_candidates(
     if data is None:
         return None
 
-    regions = _parse_regions(data.get("regions", {}))
-    searches: list[NamedImageSearch] = []
-    candidate_refs: list[tuple[str, str]] = []
-    groups = data.get("groups")
-    if not isinstance(groups, list) or not groups:
-        raise ValueError("screen state config groups must be a non-empty list")
-
-    for group_index, group in enumerate(groups):
-        if not isinstance(group, dict):
-            raise ValueError("screen state group must be an object")
-        state = _required_text(group, "state", "screen state group state")
-        search_items = group.get("searches")
-        if not isinstance(search_items, list) or not search_items:
-            raise ValueError(f"screen state group searches must be non-empty: {state}")
-        for search_index, search_item in enumerate(search_items):
-            if not isinstance(search_item, dict):
-                raise ValueError("screen state search must be an object")
-            search_name = search_item.get("name")
-            if search_name is None:
-                search_name = f"{state}:{search_index + 1}"
-            if not isinstance(search_name, str) or not search_name.strip():
-                raise ValueError("screen state search name cannot be empty")
-            image_path = _resolve_asset_image(
-                _required_text(search_item, "image", "screen state search image"),
-                asset_root=asset_root,
-                supported_suffixes=supported_suffixes,
-            )
-            searches.append(
-                NamedImageSearch(
-                    search_name,
-                    ImageSearchSpec(
-                        ImageTemplate(str(image_path)),
-                        region=_parse_region_ref(search_item.get("region")),
-                        min_confidence=_parse_optional_confidence(search_item.get("min_confidence")),
-                    ),
-                )
-            )
-            candidate_refs.append((state, search_name))
-
-    catalog = TargetCatalog(regions=tuple(regions), searches=tuple(searches))
+    parsed = _parse_screen_state_config(
+        data,
+        asset_root=asset_root,
+        supported_suffixes=supported_suffixes,
+    )
     return tuple(
         ScreenStateCandidate(
             state,
-            catalog.resolve_search(SearchRef(search_name)),
+            parsed.catalog.resolve_search(SearchRef(search_name)),
             search_name=search_name,
         )
-        for state, search_name in candidate_refs
+        for state, search_name in parsed.candidate_refs
     )
+
+
+def load_screen_state_target_catalog(
+    config_path: Path,
+    *,
+    asset_root: Path,
+    supported_suffixes: frozenset[str],
+) -> TargetCatalog | None:
+    """读取状态配置并转换成脚本可复用的共享资源目录。"""
+    data = _load_screen_state_config(config_path)
+    if data is None:
+        return None
+    return _parse_screen_state_config(
+        data,
+        asset_root=asset_root,
+        supported_suffixes=supported_suffixes,
+    ).catalog
 
 
 def load_screen_state_regions(config_path: Path) -> tuple[NamedRegion, ...] | None:
@@ -173,6 +161,61 @@ def load_screen_state_config_summary(
     return tuple(summaries)
 
 
+def _parse_screen_state_config(
+    data: dict[str, Any],
+    *,
+    asset_root: Path,
+    supported_suffixes: frozenset[str],
+) -> _ParsedScreenStateConfig:
+    """解析状态配置中可执行搜索所需的资源目录和候选引用。"""
+    regions = _parse_regions(data.get("regions", {}))
+    searches: list[NamedImageSearch] = []
+    candidate_refs: list[tuple[str, str]] = []
+    groups = data.get("groups")
+    if not isinstance(groups, list) or not groups:
+        raise ValueError("screen state config groups must be a non-empty list")
+
+    for group in groups:
+        if not isinstance(group, dict):
+            raise ValueError("screen state group must be an object")
+        state = _required_text(group, "state", "screen state group state")
+        search_items = group.get("searches")
+        if not isinstance(search_items, list) or not search_items:
+            raise ValueError(f"screen state group searches must be non-empty: {state}")
+        for search_index, search_item in enumerate(search_items):
+            if not isinstance(search_item, dict):
+                raise ValueError("screen state search must be an object")
+            search_name = _screen_state_search_name(state, search_item, search_index=search_index)
+            searches.append(
+                NamedImageSearch(
+                    search_name,
+                    ImageSearchSpec(
+                        ImageTemplate(
+                            str(
+                                _resolve_asset_image(
+                                    _required_text(
+                                        search_item,
+                                        "image",
+                                        "screen state search image",
+                                    ),
+                                    asset_root=asset_root,
+                                    supported_suffixes=supported_suffixes,
+                                )
+                            )
+                        ),
+                        region=_parse_region_ref(search_item.get("region")),
+                        min_confidence=_parse_optional_confidence(search_item.get("min_confidence")),
+                    ),
+                )
+            )
+            candidate_refs.append((state, search_name))
+
+    return _ParsedScreenStateConfig(
+        catalog=TargetCatalog(regions=tuple(regions), searches=tuple(searches)),
+        candidate_refs=tuple(candidate_refs),
+    )
+
+
 def _load_screen_state_config(config_path: Path) -> dict[str, Any] | None:
     """读取状态配置 JSON object，不存在时返回 None。"""
     if not config_path.exists():
@@ -198,11 +241,7 @@ def _screen_state_search_summary(
     """把单个搜索项转换成用户可读摘要并复用配置校验规则。"""
     if not isinstance(search_item, dict):
         raise ValueError("screen state search must be an object")
-    search_name = search_item.get("name")
-    if search_name is None:
-        search_name = f"{state}:{search_index + 1}"
-    if not isinstance(search_name, str) or not search_name.strip():
-        raise ValueError("screen state search name cannot be empty")
+    search_name = _screen_state_search_name(state, search_item, search_index=search_index)
     image = _required_text(search_item, "image", "screen state search image")
     _resolve_asset_image(image, asset_root=asset_root, supported_suffixes=supported_suffixes)
     region_ref = _parse_region_ref(search_item.get("region"))
@@ -212,6 +251,21 @@ def _screen_state_search_summary(
         region=_summarize_region(region_ref, region_names=region_names),
         min_confidence=_parse_optional_confidence(search_item.get("min_confidence")),
     )
+
+
+def _screen_state_search_name(
+    state: str,
+    search_item: dict[str, Any],
+    *,
+    search_index: int,
+) -> str:
+    """解析搜索项名称，缺省时使用状态名和序号生成稳定名称。"""
+    search_name = search_item.get("name")
+    if search_name is None:
+        search_name = f"{state}:{search_index + 1}"
+    if not isinstance(search_name, str) or not search_name.strip():
+        raise ValueError("screen state search name cannot be empty")
+    return search_name
 
 
 def _summarize_region(region: Rect | RegionRef | None, *, region_names: set[str]) -> str:
