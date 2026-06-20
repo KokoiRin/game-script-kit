@@ -18,11 +18,14 @@ UNKNOWN_SCREEN_STATE = "未知"
 class ScreenStateCandidate:
     name: str
     search: ImageSearchSpec | ImageTemplate
+    search_name: str | None = None
 
     def __post_init__(self) -> None:
         """校验界面状态候选名称必须非空。"""
         if not self.name.strip():
             raise ValueError("screen state candidate name cannot be empty")
+        if self.search_name is not None and not self.search_name.strip():
+            raise ValueError("screen state candidate search_name cannot be empty")
         if isinstance(self.search, ImageTemplate):
             object.__setattr__(self, "search", ImageSearchSpec(self.search))
 

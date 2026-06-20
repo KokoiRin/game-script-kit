@@ -90,7 +90,11 @@ def load_screen_state_candidates(
 
     catalog = TargetCatalog(regions=tuple(regions), searches=tuple(searches))
     return tuple(
-        ScreenStateCandidate(state, catalog.resolve_search(SearchRef(search_name)))
+        ScreenStateCandidate(
+            state,
+            catalog.resolve_search(SearchRef(search_name)),
+            search_name=search_name,
+        )
         for state, search_name in candidate_refs
     )
 
