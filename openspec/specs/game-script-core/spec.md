@@ -188,7 +188,7 @@
 - **THEN** 它会按现有条件等待语义轮询并在条件满足后继续执行后续步骤
 
 ### Requirement: ScriptRunner 评估界面状态条件
-引擎层 `ScriptRunner` SHALL 支持通过 `ScreenStateReader` 端口评估 `ScreenStateIs` 条件。runner MUST 保持平台无关，不得直接读取状态配置文件、启动 UI 或创建桌面图像匹配 adapter。
+引擎层 `ScriptRunner` SHALL 支持通过 `ScreenStateReader` 端口评估 `ScreenStateIs` 条件。runner MUST 保持平台无关，不得直接读取状态配置文件、启动 UI 或创建桌面图像匹配 adapter。外层 application MAY 提供带缓存策略的 `ScreenStateReader` 实现。
 
 #### Scenario: 界面状态条件为真
 - **WHEN** `ScreenStateReader` 返回当前状态 `主页`

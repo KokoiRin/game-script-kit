@@ -161,6 +161,15 @@ class _LocalScreenStateReader(ScreenStateReader):
         logger: RunLogger | None = None,
     ) -> str:
         """执行一轮状态探测并返回当前状态名称。"""
+        background_state = self._app._running_background_screen_state()
+        if background_state is not None:
+            if logger is not None:
+                logger.log(
+                    "screen state reader reused background probe "
+                    f"current_state={background_state}"
+                )
+            return background_state
+
         result = self._app.probe_screen_state_once(
             min_confidence=min_confidence,
             logger=logger,
@@ -664,6 +673,16 @@ class LocalControlApplication:
     def _build_screen_state_reader(self) -> ScreenStateReader:
         """创建基于当前本地控制配置的界面状态 reader。"""
         return _LocalScreenStateReader(self)
+
+    def _running_background_screen_state(self) -> str | None:
+        """返回运行中后台探测的有效状态，没有可用状态时返回 None。"""
+        with self._probe_lock:
+            if self._current_probe is None or self._current_probe.cancellation.is_cancelled():
+                return None
+            status = self._current_probe.snapshot()
+        if not status.running or status.current_state == "未知":
+            return None
+        return status.current_state
 
 
 def _log_screen_state_probe_result(logger: RunLogger, result: ScreenStateProbeResult) -> None:
