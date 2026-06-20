@@ -456,6 +456,40 @@ def test_probe_screen_state_prefers_batch_locator_and_preserves_candidate_order(
     ]
 
 
+def test_probe_screen_state_preserves_batch_best_confidence_for_missed_candidate() -> None:
+    """验证批量界面探测会保留未命中候选的最佳置信度。"""
+    candidates = (ScreenStateCandidate("人物", ImageTemplate("assets/character.png")),)
+
+    class FailingSingleLocator:
+        def locate(self, template, *, region=None, min_confidence=1.0, logger=None):
+            """batch 可用时不应回退到单图定位。"""
+            raise AssertionError("single image locator should not be called")
+
+    class FakeBatchLocator:
+        def locate_requests(self, requests, *, logger=None, stop_on_first_match=False):
+            """返回低于阈值但带最佳置信度的批量结果。"""
+            return (
+                ImageBatchMatchResult(
+                    requests[0].template,
+                    None,
+                    elapsed_ms=3.0,
+                    best_confidence=0.62,
+                ),
+            )
+
+    result = probe_screen_state(
+        candidates,
+        image_locator=FailingSingleLocator(),
+        batch_image_locator=FakeBatchLocator(),
+        min_confidence=0.8,
+    )
+
+    assert result.current_state == "未知"
+    assert result.candidates[0].found is False
+    assert result.candidates[0].confidence is None
+    assert result.candidates[0].best_confidence == 0.62
+
+
 def test_local_control_runs_background_screen_state_probe(tmp_path) -> None:
     """验证 application 可后台循环探测界面状态并追加日志。"""
     assets = tmp_path / "assets"

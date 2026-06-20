@@ -174,6 +174,28 @@ def test_screen_image_locator_batch_matches_requests_with_independent_regions(tm
     assert results[1].match.rect == Rect(left=82, top=52, width=8, height=6)
 
 
+def test_screen_image_locator_batch_keeps_best_confidence_when_below_threshold(tmp_path) -> None:
+    """验证批量匹配未达阈值时仍保留 OpenCV 最佳分数。"""
+    template = _build_template_image()
+    template_path = tmp_path / "button.png"
+    template.save(template_path)
+    screenshot = Image.new("RGB", (40, 30), "white")
+
+    results = PyAutoGuiScreenImageLocator(backend=ScreenshotBackend(screenshot)).locate_requests(
+        (
+            ImageSearchRequest(
+                ImageTemplate(str(template_path)),
+                min_confidence=0.99,
+            ),
+        )
+    )
+
+    assert results[0].found is False
+    assert results[0].confidence is None
+    assert results[0].best_confidence is not None
+    assert 0 <= results[0].best_confidence < 0.99
+
+
 def test_screen_image_locator_batch_converts_screenshot_to_array_once(tmp_path, monkeypatch) -> None:
     """验证批量定位只把同一张截图转换为一次 OpenCV 数组。"""
     cv2, numpy = image_matching_adapter._load_cv_modules()

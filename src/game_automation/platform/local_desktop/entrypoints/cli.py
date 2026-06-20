@@ -268,6 +268,7 @@ def _screen_state_candidate_payload(candidate) -> dict[str, object]:
         "status": _candidate_status_value(candidate),
         "elapsed_ms": candidate.elapsed_ms,
         "confidence": candidate.confidence,
+        "best_confidence": candidate.best_confidence,
     }
 
 
@@ -276,11 +277,17 @@ def _screen_state_candidate_line(candidate) -> str:
     name = candidate.candidate.name
     if candidate.candidate.search_name:
         name = f"{name} / {candidate.candidate.search_name}"
-    confidence = "无" if candidate.confidence is None else f"{candidate.confidence:.3f}"
+    confidence = _format_optional_confidence(candidate.confidence)
+    best_confidence = _format_optional_confidence(candidate.best_confidence)
     return (
         f"{name}：{_candidate_status_label(candidate)}；"
-        f"耗时 {candidate.elapsed_ms:.2f}ms；置信度 {confidence}"
+        f"耗时 {candidate.elapsed_ms:.2f}ms；置信度 {confidence}；最佳置信度 {best_confidence}"
     )
+
+
+def _format_optional_confidence(confidence: float | None) -> str:
+    """把可空置信度格式化为 CLI 文本。"""
+    return "无" if confidence is None else f"{confidence:.3f}"
 
 
 def _candidate_status_label(candidate) -> str:
