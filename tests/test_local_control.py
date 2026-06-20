@@ -919,6 +919,7 @@ def test_local_control_background_probe_status_includes_latest_candidates(tmp_pa
             0.91,
             search_name="主页标题",
             best_confidence=0.91,
+            best_rect=Rect(10, 20, 30, 40),
         ),
         ScreenStateProbeCandidateSummary("人物", "skipped", 0.0, None, search_name="人物标题"),
     )

@@ -114,6 +114,7 @@ class ScreenStateProbeCandidateSummary:
     confidence: float | None = None
     search_name: str | None = None
     best_confidence: float | None = None
+    best_rect: Rect | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -885,6 +886,7 @@ def _log_screen_state_probe_result(logger: RunLogger, result: ScreenStateProbeRe
             f"found={candidate.found} "
             f"confidence={candidate.confidence} "
             f"best_confidence={candidate.best_confidence} "
+            f"best_rect={candidate.best_rect} "
             f"elapsed_ms={candidate.elapsed_ms:.2f}"
         )
 
@@ -904,6 +906,7 @@ def _probe_candidate_summary(candidate) -> ScreenStateProbeCandidateSummary:
         confidence=candidate.confidence,
         search_name=candidate.candidate.search_name,
         best_confidence=candidate.best_confidence,
+        best_rect=candidate.best_rect,
     )
 
 

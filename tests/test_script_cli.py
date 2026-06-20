@@ -838,6 +838,7 @@ def test_star_cli_probe_state_outputs_current_state(monkeypatch, capsys) -> None
                         match=None,
                         elapsed_ms=3.0,
                         best_confidence=0.73,
+                        best_rect=Rect(50, 60, 30, 40),
                     ),
                 ),
                 elapsed_ms=7.0,
@@ -854,8 +855,8 @@ def test_star_cli_probe_state_outputs_current_state(monkeypatch, capsys) -> None
         "当前状态：主页",
         "总耗时：7.00ms",
         "候选：",
-        "- 主页 / 主页标识：命中；耗时 4.00ms；置信度 0.910；最佳置信度 0.910",
-        "- 人物 / 人物标识：未命中；耗时 3.00ms；置信度 无；最佳置信度 0.730",
+        "- 主页 / 主页标识：命中；耗时 4.00ms；置信度 0.910；最佳置信度 0.910；最佳位置 x=10,y=20,w=30,h=40",
+        "- 人物 / 人物标识：未命中；耗时 3.00ms；置信度 无；最佳置信度 0.730；最佳位置 x=50,y=60,w=30,h=40",
     ]
 
 
@@ -887,6 +888,7 @@ def test_star_cli_probe_state_outputs_json(monkeypatch, capsys) -> None:
                         match=None,
                         elapsed_ms=3.0,
                         best_confidence=0.73,
+                        best_rect=Rect(50, 60, 30, 40),
                     ),
                     ScreenStateCandidateResult(
                         candidate=ScreenStateCandidate("装备", ImageTemplate("assets/装备.png")),
@@ -917,6 +919,7 @@ def test_star_cli_probe_state_outputs_json(monkeypatch, capsys) -> None:
                 "elapsed_ms": 4.0,
                 "confidence": 0.91,
                 "best_confidence": 0.91,
+                "best_rect": {"left": 10, "top": 20, "width": 30, "height": 40},
             },
             {
                 "name": "人物",
@@ -925,6 +928,7 @@ def test_star_cli_probe_state_outputs_json(monkeypatch, capsys) -> None:
                 "elapsed_ms": 3.0,
                 "confidence": None,
                 "best_confidence": 0.73,
+                "best_rect": {"left": 50, "top": 60, "width": 30, "height": 40},
             },
             {
                 "name": "装备",
@@ -933,6 +937,7 @@ def test_star_cli_probe_state_outputs_json(monkeypatch, capsys) -> None:
                 "elapsed_ms": 0.0,
                 "confidence": None,
                 "best_confidence": None,
+                "best_rect": None,
             },
         ],
     }

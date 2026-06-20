@@ -456,8 +456,8 @@ def test_probe_screen_state_prefers_batch_locator_and_preserves_candidate_order(
     ]
 
 
-def test_probe_screen_state_preserves_batch_best_confidence_for_missed_candidate() -> None:
-    """验证批量界面探测会保留未命中候选的最佳置信度。"""
+def test_probe_screen_state_preserves_batch_best_diagnostics_for_missed_candidate() -> None:
+    """验证批量界面探测会保留未命中候选的最佳诊断信息。"""
     candidates = (ScreenStateCandidate("人物", ImageTemplate("assets/character.png")),)
 
     class FailingSingleLocator:
@@ -474,6 +474,7 @@ def test_probe_screen_state_preserves_batch_best_confidence_for_missed_candidate
                     None,
                     elapsed_ms=3.0,
                     best_confidence=0.62,
+                    best_rect=Rect(10, 20, 30, 40),
                 ),
             )
 
@@ -488,6 +489,7 @@ def test_probe_screen_state_preserves_batch_best_confidence_for_missed_candidate
     assert result.candidates[0].found is False
     assert result.candidates[0].confidence is None
     assert result.candidates[0].best_confidence == 0.62
+    assert result.candidates[0].best_rect == Rect(10, 20, 30, 40)
 
 
 def test_local_control_runs_background_screen_state_probe(tmp_path) -> None:

@@ -175,7 +175,7 @@ def test_screen_image_locator_batch_matches_requests_with_independent_regions(tm
 
 
 def test_screen_image_locator_batch_keeps_best_confidence_when_below_threshold(tmp_path) -> None:
-    """验证批量匹配未达阈值时仍保留 OpenCV 最佳分数。"""
+    """验证批量匹配未达阈值时仍保留 OpenCV 最佳分数和位置。"""
     template = _build_template_image()
     template_path = tmp_path / "button.png"
     template.save(template_path)
@@ -194,6 +194,7 @@ def test_screen_image_locator_batch_keeps_best_confidence_when_below_threshold(t
     assert results[0].confidence is None
     assert results[0].best_confidence is not None
     assert 0 <= results[0].best_confidence < 0.99
+    assert results[0].best_rect is not None
 
 
 def test_screen_image_locator_batch_converts_screenshot_to_array_once(tmp_path, monkeypatch) -> None:

@@ -92,6 +92,7 @@ def _screen_state_results_from_batch(
             elapsed_ms=batch_result.elapsed_ms,
             skipped=batch_result.skipped,
             best_confidence=batch_result.best_confidence,
+            best_rect=batch_result.best_rect,
         )
         for candidate, batch_result in zip(candidates, batch_results, strict=True)
     )

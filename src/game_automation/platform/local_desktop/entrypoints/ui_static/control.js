@@ -140,8 +140,16 @@
           : `${Number(candidate.elapsed_ms).toFixed(2)}ms`;
         const confidence = formatConfidence(candidate.confidence);
         const bestConfidence = formatConfidence(candidate.best_confidence);
-        return `${renderCandidateName(candidate)}：${renderCandidateStatus(candidate.status)}；耗时 ${elapsed}；置信度 ${confidence}；最佳置信度 ${bestConfidence}`;
+        const bestRect = formatRect(candidate.best_rect);
+        return `${renderCandidateName(candidate)}：${renderCandidateStatus(candidate.status)}；耗时 ${elapsed}；置信度 ${confidence}；最佳置信度 ${bestConfidence}；最佳位置 ${bestRect}`;
       }).join("\n");
+    }
+
+    function formatRect(rect) {
+      if (!rect) {
+        return "无";
+      }
+      return `x=${rect.left},y=${rect.top},w=${rect.width},h=${rect.height}`;
     }
 
     function formatConfidence(confidence) {

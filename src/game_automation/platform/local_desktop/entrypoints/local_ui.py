@@ -332,9 +332,17 @@ def _probe_candidates_to_payload(candidates) -> list[dict[str, object]]:
             "elapsed_ms": candidate.elapsed_ms,
             "confidence": candidate.confidence,
             "best_confidence": candidate.best_confidence,
+            "best_rect": _rect_to_payload(candidate.best_rect),
         }
         for candidate in candidates
     ]
+
+
+def _rect_to_payload(rect) -> dict[str, int] | None:
+    """把可空矩形转换成 HTTP JSON payload。"""
+    if rect is None:
+        return None
+    return {"left": rect.left, "top": rect.top, "width": rect.width, "height": rect.height}
 
 
 def _parse_min_confidence(payload: dict[str, object]) -> float | None:

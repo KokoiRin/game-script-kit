@@ -151,6 +151,7 @@ class PyAutoGuiScreenImageLocator(ScreenImageLocator):
                         match=match,
                         elapsed_ms=one_match_ms,
                         best_confidence=located.best_confidence,
+                        best_rect=located.best_rect,
                     )
                 )
                 if stop_on_first_match and match is not None:
@@ -231,6 +232,7 @@ class LoadedTemplateImage:
 class LocatedTemplate:
     match: ImageMatch | None
     best_confidence: float | None
+    best_rect: Rect | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -342,28 +344,29 @@ def _locate_template(
 ) -> LocatedTemplate:
     """用 OpenCV 模板匹配返回满足阈值的最佳匹配。"""
     if template.image.width > screenshot.image.width or template.image.height > screenshot.image.height:
-        return LocatedTemplate(match=None, best_confidence=None)
+        return LocatedTemplate(match=None, best_confidence=None, best_rect=None)
 
     if screenshot_array is None:
         screenshot_array = numpy.array(screenshot.image)
     result = cv2.matchTemplate(screenshot_array, template.array, cv2.TM_CCOEFF_NORMED)
     _, max_score, _, max_location = cv2.minMaxLoc(result)
     confidence = float(max_score)
-    if confidence < min_confidence:
-        return LocatedTemplate(match=None, best_confidence=confidence)
-
     left_pixels = int(max_location[0]) + screenshot.origin_left_pixels
     top_pixels = int(max_location[1]) + screenshot.origin_top_pixels
+    best_rect = Rect(
+        left=round(left_pixels / screenshot.pixels_per_point_x),
+        top=round(top_pixels / screenshot.pixels_per_point_y),
+        width=round(template.image.width / screenshot.pixels_per_point_x),
+        height=round(template.image.height / screenshot.pixels_per_point_y),
+    )
+    if confidence < min_confidence:
+        return LocatedTemplate(match=None, best_confidence=confidence, best_rect=best_rect)
+
     match = ImageMatch(
-        rect=Rect(
-            left=round(left_pixels / screenshot.pixels_per_point_x),
-            top=round(top_pixels / screenshot.pixels_per_point_y),
-            width=round(template.image.width / screenshot.pixels_per_point_x),
-            height=round(template.image.height / screenshot.pixels_per_point_y),
-        ),
+        rect=best_rect,
         confidence=confidence,
     )
-    return LocatedTemplate(match=match, best_confidence=confidence)
+    return LocatedTemplate(match=match, best_confidence=confidence, best_rect=best_rect)
 
 
 def _log_match_stages(
