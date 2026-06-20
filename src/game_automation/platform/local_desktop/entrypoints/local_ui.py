@@ -190,6 +190,25 @@ def create_local_control_server(
                     result_payload["screenshot_url"] = f"/api/debug-screenshot?version={screenshot_version}"
                 self._send_json(result_payload)
                 return
+            if self.path == "/api/capture-region-crops":
+                result = control_app.capture_screen_region_crops()
+                self._send_json(_result_to_payload(result))
+                return
+            if self.path == "/api/capture-probe-crops":
+                payload = self._read_json()
+                min_confidence = _parse_min_confidence(payload)
+                if min_confidence is None:
+                    self._send_json(
+                        {
+                            "exit_code": 2,
+                            "stdout": "",
+                            "stderr": "invalid probe crops request: min_confidence must be a number\n",
+                        }
+                    )
+                    return
+                result = control_app.capture_screen_probe_crops(min_confidence=min_confidence)
+                self._send_json(_result_to_payload(result))
+                return
             if self.path == "/api/run-tests":
                 payload = self._read_json()
                 result = control_app.run_tests(str(payload.get("task", "all")))

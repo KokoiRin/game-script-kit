@@ -20,6 +20,8 @@
     const captureScreenButton = document.querySelector("#capture-screen");
     const captureRegionDiagnosticsButton = document.querySelector("#capture-region-diagnostics");
     const captureProbeDiagnosticsButton = document.querySelector("#capture-probe-diagnostics");
+    const captureRegionCropsButton = document.querySelector("#capture-region-crops");
+    const captureProbeCropsButton = document.querySelector("#capture-probe-crops");
     const imageConfidenceInput = document.querySelector("#image-confidence");
     const debugPreview = document.querySelector("#debug-preview");
     const debugScreenshot = document.querySelector("#debug-screenshot");
@@ -48,6 +50,8 @@
       captureScreenButton.disabled = isBusy;
       captureRegionDiagnosticsButton.disabled = isBusy;
       captureProbeDiagnosticsButton.disabled = isBusy;
+      captureRegionCropsButton.disabled = isBusy;
+      captureProbeCropsButton.disabled = isBusy;
       clickImageButton.disabled = isBusy || !imageAssetSelect.value;
       useProbedScreenStateButton.disabled = isBusy;
       useScriptScreenStateButton.disabled = isBusy;
@@ -521,6 +525,40 @@
       }
     }
 
+    async function captureRegionCrops() {
+      setBusy(true);
+      statusEl.textContent = "正在导出区域裁剪...";
+      outputEl.textContent = "";
+      try {
+        const response = await fetch("/api/capture-region-crops", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({})
+        });
+        renderResult("区域裁剪", await response.json());
+      } finally {
+        setBusy(false);
+      }
+    }
+
+    async function captureProbeCrops() {
+      setBusy(true);
+      statusEl.textContent = "正在导出候选裁剪...";
+      outputEl.textContent = "";
+      try {
+        const response = await fetch("/api/capture-probe-crops", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({
+            min_confidence: Number.parseFloat(screenStateConfidenceInput.value)
+          })
+        });
+        renderResult("候选裁剪", await response.json());
+      } finally {
+        setBusy(false);
+      }
+    }
+
     async function startScreenStateProbe() {
       activeScreenStateProbe = true;
       setScreenStateBusy(true);
@@ -579,6 +617,8 @@
     captureScreenButton.addEventListener("click", captureScreen);
     captureRegionDiagnosticsButton.addEventListener("click", captureRegionDiagnostics);
     captureProbeDiagnosticsButton.addEventListener("click", captureProbeDiagnostics);
+    captureRegionCropsButton.addEventListener("click", captureRegionCrops);
+    captureProbeCropsButton.addEventListener("click", captureProbeCrops);
     clickImageButton.addEventListener("click", clickImage);
     startScreenStateProbeButton.addEventListener("click", startScreenStateProbe);
     stopScreenStateProbeButton.addEventListener("click", stopScreenStateProbe);
