@@ -42,6 +42,9 @@ def _run_script(args: argparse.Namespace) -> int:
     if args.dry_run_script_images and not args.dry_run:
         print("--dry-run-script-images requires --dry-run", file=sys.stderr)
         return 2
+    dry_run_screen_state_error = _validate_dry_run_screen_state_args(args)
+    if dry_run_screen_state_error != 0:
+        return dry_run_screen_state_error
     try:
         script = DEFAULT_SCRIPT_CATALOG.get(args.name)
     except ScriptNotFoundError as exc:
@@ -64,16 +67,47 @@ def _run_script(args: argparse.Namespace) -> int:
             print(f"script details configuration failed: {exc}", file=sys.stderr)
             return 2
 
+    dry_run_screen_state_result = _resolve_dry_run_screen_state(args)
+    if dry_run_screen_state_result[0] != 0:
+        return dry_run_screen_state_result[0]
+    dry_run_screen_state = dry_run_screen_state_result[1]
+
     result = run_script_on_local_desktop(
         script,
         dry_run=args.dry_run,
         dry_run_color=args.dry_run_color,
         dry_run_images=dry_run_images,
-        dry_run_screen_state=args.dry_run_screen_state,
+        dry_run_screen_state=dry_run_screen_state,
     )
     if result.error_message is not None:
         print(result.error_message, file=sys.stderr)
     return result.exit_code
+
+
+def _validate_dry_run_screen_state_args(args: argparse.Namespace) -> int:
+    """校验 CLI dry-run 状态来源参数是否自洽。"""
+    if args.dry_run_probed_screen_state and not args.dry_run:
+        print("--dry-run-probed-screen-state requires --dry-run", file=sys.stderr)
+        return 2
+    if args.dry_run_probed_screen_state and args.dry_run_screen_state is not None:
+        print("--dry-run-probed-screen-state conflicts with --dry-run-screen-state", file=sys.stderr)
+        return 2
+    return 0
+
+
+def _resolve_dry_run_screen_state(args: argparse.Namespace) -> tuple[int, str]:
+    """解析 CLI dry-run 状态来源。"""
+    if not args.dry_run_probed_screen_state:
+        return (0, "未知" if args.dry_run_screen_state is None else args.dry_run_screen_state)
+    try:
+        result = build_local_control_application().probe_screen_state_once()
+    except ValueError as exc:
+        print(f"screen state probe configuration failed: {exc}", file=sys.stderr)
+        return (2, "未知")
+    except RuntimeError as exc:
+        print(f"screen state probe failed: {exc}", file=sys.stderr)
+        return (1, "未知")
+    return (0, result.current_state)
 
 
 def _run_details(args: argparse.Namespace) -> int:
@@ -327,8 +361,13 @@ def main(argv: list[str] | None = None) -> int:
     )
     run_parser.add_argument(
         "--dry-run-screen-state",
-        default="未知",
+        default=None,
         help="Fixed screen state used when dry-running screen-state conditions.",
+    )
+    run_parser.add_argument(
+        "--dry-run-probed-screen-state",
+        action="store_true",
+        help="Probe current screen state once and use it for dry-run screen-state conditions.",
     )
 
     recorder_parser = subparsers.add_parser("recorder", help="Record screen coordinates.")
