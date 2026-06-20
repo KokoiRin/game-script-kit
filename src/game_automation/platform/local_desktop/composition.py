@@ -9,7 +9,13 @@ from __future__ import annotations
 from game_automation.portable.application.local_control import LocalControlApplication, ScreenCapture
 from game_automation.portable.application.script_run import ScriptRunResult, run_script
 from game_automation.portable.domain import Point, Script
-from game_automation.portable.engine.ports import InputDevice, PixelColorReader, ScreenImageBatchLocator, ScreenImageLocator
+from game_automation.portable.engine.ports import (
+    InputDevice,
+    PixelColorReader,
+    ScreenImageBatchLocator,
+    ScreenImageLocator,
+    ScreenStateReader,
+)
 
 
 def run_script_on_local_desktop(
@@ -30,6 +36,7 @@ def run_script_on_local_desktop(
         real_device_factory=build_real_input_device,
         real_color_reader_factory=build_real_color_reader,
         real_image_locator_factory=build_real_screen_image_locator,
+        real_screen_state_reader_factory=build_real_screen_state_reader,
     )
 
 
@@ -71,6 +78,11 @@ def build_real_screen_image_batch_locator() -> ScreenImageBatchLocator:
     from game_automation.platform.desktop.adapters import PyAutoGuiScreenImageLocator
 
     return PyAutoGuiScreenImageLocator()
+
+
+def build_real_screen_state_reader() -> ScreenStateReader:
+    """创建复用本地控制状态探测能力的真实界面状态 reader。"""
+    return build_local_control_application().build_screen_state_reader()
 
 
 def build_real_screen_capture() -> ScreenCapture:

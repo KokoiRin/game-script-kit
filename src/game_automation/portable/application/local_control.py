@@ -569,6 +569,10 @@ class LocalControlApplication:
             logger=logger,
         )
 
+    def build_screen_state_reader(self) -> ScreenStateReader:
+        """创建可供脚本运行时复用的界面状态读取端口。"""
+        return _LocalScreenStateReader(self)
+
     def start_screen_state_probe(
         self,
         *,
@@ -794,7 +798,7 @@ class LocalControlApplication:
 
     def _build_screen_state_reader(self) -> ScreenStateReader:
         """创建基于当前本地控制配置的界面状态 reader。"""
-        return _LocalScreenStateReader(self)
+        return self.build_screen_state_reader()
 
     def _running_background_screen_state(self) -> str | None:
         """返回运行中后台探测的有效状态，没有可用状态时返回 None。"""
