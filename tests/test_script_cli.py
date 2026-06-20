@@ -84,6 +84,36 @@ def test_star_cli_capture_screen_reports_application_error(monkeypatch, capsys) 
     assert captured.err == "screen capture is not configured\n"
 
 
+def test_star_cli_diagnose_screen_outputs_application_result(monkeypatch, capsys) -> None:
+    """验证 diagnose-screen 子命令复用 application 屏幕诊断结果。"""
+    calls = []
+
+    class FakeApp:
+        def diagnose_screen_setup(self, *, min_confidence=0.8):
+            """记录最低置信度并返回固定屏幕诊断结果。"""
+            calls.append(min_confidence)
+            return ControlResult(
+                exit_code=0,
+                stdout=(
+                    "saved screenshot: .star/debug/screenshots/latest-screen.png\n"
+                    "current_state=主页\n"
+                ),
+                stderr="warning: captured screenshot appears all black\n",
+            )
+
+    monkeypatch.setattr(cli, "build_local_control_application", lambda: FakeApp())
+
+    assert main(["diagnose-screen", "--min-confidence", "0.75"]) == 0
+
+    captured = capsys.readouterr()
+    assert captured.out == (
+        "saved screenshot: .star/debug/screenshots/latest-screen.png\n"
+        "current_state=主页\n"
+    )
+    assert captured.err == "warning: captured screenshot appears all black\n"
+    assert calls == [0.75]
+
+
 def test_star_cli_capture_region_diagnostics_outputs_application_result(monkeypatch, capsys) -> None:
     """验证 capture-region-diagnostics 子命令复用 application 区域诊断结果。"""
     calls = []
