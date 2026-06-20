@@ -12,6 +12,7 @@ import threading
 
 from game_automation.portable.application.local_control import (
     ControlResult,
+    ScreenStateProbeStats,
     ScreenStateProbeStatus,
     ScriptDetailsResult,
     ScriptRunStatus,
@@ -72,6 +73,7 @@ def test_local_ui_serves_control_page() -> None:
     assert 'id="stop-screen-state-probe"' in html
     assert 'id="screen-state-interval"' in html
     assert 'id="screen-state-current"' in html
+    assert 'id="screen-state-stats"' in html
     assert 'id="screen-state-log"' in html
     assert "运行测试" in html
     assert "模拟状态" in html
@@ -99,6 +101,7 @@ def test_local_ui_serves_static_assets() -> None:
     assert "height: 280px" in css
     assert "resize: vertical" in css
     assert 'document.querySelector("#screen-state-confidence")' in script
+    assert 'document.querySelector("#screen-state-stats")' in script
     assert 'document.querySelector("#script-details")' in script
     assert 'document.querySelector("#dry-run-screen-state")' in script
     assert 'document.querySelector("#screen-state-suggestions")' in script
@@ -119,6 +122,8 @@ def test_local_ui_serves_static_assets() -> None:
     assert 'fetch(`/api/script-details?name=${encodeURIComponent(scriptSelect.value)}`)' in script
     assert 'fetch("/api/start-screen-state-probe"' in script
     assert 'fetch("/api/capture-region-diagnostics"' in script
+    assert "renderScreenStateStats" in script
+    assert "命中次数：" in script
 
 
 def test_local_ui_lists_image_assets_over_http() -> None:
@@ -306,6 +311,12 @@ def test_local_ui_starts_screen_state_probe_over_http() -> None:
         "exit_code": None,
         "stdout": "probe started\n",
         "stderr": "",
+        "stats": {
+            "rounds": 0,
+            "last_elapsed_ms": None,
+            "matched_counts": {},
+            "skipped_counts": {},
+        },
     }
 
 
@@ -329,6 +340,12 @@ def test_local_ui_gets_screen_state_probe_status_over_http() -> None:
         "exit_code": 0,
         "stdout": "probe done\n",
         "stderr": "",
+        "stats": {
+            "rounds": 3,
+            "last_elapsed_ms": 18.5,
+            "matched_counts": {"主页": 2, "人物": 1},
+            "skipped_counts": {"技能": 2},
+        },
     }
 
 
@@ -352,6 +369,12 @@ def test_local_ui_stops_screen_state_probe_over_http() -> None:
         "exit_code": None,
         "stdout": "probe stopping\n",
         "stderr": "",
+        "stats": {
+            "rounds": 0,
+            "last_elapsed_ms": None,
+            "matched_counts": {},
+            "skipped_counts": {},
+        },
     }
 
 
@@ -601,6 +624,12 @@ class FakeControlApplication:
             current_state="人物",
             exit_code=0,
             stdout="probe done\n",
+            stats=ScreenStateProbeStats(
+                rounds=3,
+                last_elapsed_ms=18.5,
+                matched_counts=(("主页", 2), ("人物", 1)),
+                skipped_counts=(("技能", 2),),
+            ),
         )
 
     def stop_screen_state_probe(self) -> ScreenStateProbeStatus:

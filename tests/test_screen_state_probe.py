@@ -431,6 +431,52 @@ def test_local_control_runs_background_screen_state_probe(tmp_path) -> None:
     assert final.exit_code == 0
 
 
+def test_local_control_background_screen_state_probe_tracks_stats(tmp_path) -> None:
+    """验证后台界面探测会按已完成轮次累计结构化统计。"""
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    (assets / "主页.png").write_bytes(b"fake")
+    (assets / "技能.png").write_bytes(b"fake")
+    call_count = 0
+
+    class FakeBatchLocator:
+        def locate_requests(self, requests, *, logger=None, stop_on_first_match=False):
+            """第一轮命中主页并跳过技能，后续轮次全部未知。"""
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return (
+                    ImageBatchMatchResult(
+                        requests[0].template,
+                        ImageMatch(Rect(10, 20, 30, 40), confidence=0.91),
+                        elapsed_ms=3.0,
+                    ),
+                    ImageBatchMatchResult.skipped_result(requests[1].template),
+                )
+            return (
+                ImageBatchMatchResult(requests[0].template, None, elapsed_ms=4.0),
+                ImageBatchMatchResult(requests[1].template, None, elapsed_ms=5.0),
+            )
+
+    app = LocalControlApplication(
+        project_root=tmp_path,
+        real_image_batch_locator_factory=FakeBatchLocator,
+    )
+
+    started = app.start_screen_state_probe(min_confidence=0.8, interval_seconds=0.01)
+    assert started.stats.rounds == 0
+
+    running = _wait_until_probe_stats_rounds(app, 2)
+    app.stop_screen_state_probe()
+    final = _wait_until_probe_finished(app)
+
+    assert running.stats.rounds >= 2
+    assert final.stats.rounds >= 2
+    assert final.stats.last_elapsed_ms is not None
+    assert final.stats.matched_counts == (("主页", 1),)
+    assert final.stats.skipped_counts == (("技能", 1),)
+
+
 def test_local_control_rejects_second_screen_state_probe_while_running(tmp_path) -> None:
     """验证已有后台探测运行时不会启动第二个探测会话。"""
     assets = tmp_path / "assets"
@@ -478,3 +524,14 @@ def _wait_until_probe_finished(app: LocalControlApplication):
             return status
         time.sleep(0.01)
     raise AssertionError("screen state probe did not finish")
+
+
+def _wait_until_probe_stats_rounds(app: LocalControlApplication, rounds: int):
+    """轮询等待后台界面探测统计达到指定轮数。"""
+    deadline = time.monotonic() + 2
+    while time.monotonic() < deadline:
+        status = app.current_screen_state_probe()
+        if status.stats.rounds >= rounds:
+            return status
+        time.sleep(0.01)
+    raise AssertionError(f"screen state probe stats did not reach {rounds} rounds")
