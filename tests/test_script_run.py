@@ -118,8 +118,8 @@ def test_run_script_reports_invalid_dry_run_color_without_running(capsys) -> Non
     )
 
 
-def test_run_script_reports_wait_until_timeout(capsys) -> None:
-    """验证 WaitUntil 超时时应用层返回运行超时错误。"""
+def test_run_script_stops_normally_when_wait_until_times_out(capsys) -> None:
+    """验证 WaitUntil 超时时应用层按正常完成返回。"""
     result = run_script(WAIT_UNTIL_COLOR_DEMO_SCRIPT, dry_run=True)
 
     captured = capsys.readouterr()
@@ -127,9 +127,9 @@ def test_run_script_reports_wait_until_timeout(capsys) -> None:
         "wait 0.5s",
         "wait 0.5s",
     ]
-    assert result.exit_code == 1
-    assert result.finish_reason == "timed_out"
-    assert result.error_message == "script run timed out: wait until condition timed out"
+    assert result.exit_code == 0
+    assert result.finish_reason == "completed"
+    assert result.error_message is None
 
 
 def test_run_script_dry_run_wait_until_image_with_configured_match(capsys) -> None:
@@ -166,8 +166,8 @@ def test_run_script_logs_screen_state_condition_when_logger_is_configured() -> N
     ]
 
 
-def test_run_script_dry_run_wait_until_image_times_out_by_default(capsys) -> None:
-    """验证 dry-run 未配置图片时图片等待会超时。"""
+def test_run_script_dry_run_wait_until_image_stops_normally_by_default(capsys) -> None:
+    """验证 dry-run 未配置图片时图片等待会正常停止。"""
     result = run_script(build_wait_until_image_script(), dry_run=True)
 
     captured = capsys.readouterr()
@@ -175,9 +175,9 @@ def test_run_script_dry_run_wait_until_image_times_out_by_default(capsys) -> Non
         "wait 0.5s",
         "wait 0.5s",
     ]
-    assert result.exit_code == 1
-    assert result.finish_reason == "timed_out"
-    assert result.error_message == "script run timed out: wait until condition timed out"
+    assert result.exit_code == 0
+    assert result.finish_reason == "completed"
+    assert result.error_message is None
 
 
 def test_run_script_dry_run_click_image_with_configured_match(capsys) -> None:
@@ -195,15 +195,15 @@ def test_run_script_dry_run_click_image_with_configured_match(capsys) -> None:
     assert captured.out == "click Point(x=0, y=0)\n"
 
 
-def test_run_script_dry_run_click_image_reports_missing_target(capsys) -> None:
-    """验证 dry-run 未配置图片时图片目标点击报告未找到。"""
+def test_run_script_dry_run_click_image_stops_normally_when_target_is_missing(capsys) -> None:
+    """验证 dry-run 未配置图片时图片目标点击正常停止。"""
     result = run_script(build_click_image_script(), dry_run=True)
 
     captured = capsys.readouterr()
     assert captured.out == ""
-    assert result.exit_code == 1
-    assert result.finish_reason == "failed"
-    assert result.error_message == "script run failed: image target not found: assets/start.png"
+    assert result.exit_code == 0
+    assert result.finish_reason == "completed"
+    assert result.error_message is None
 
 
 def test_run_script_emits_step_events_when_enabled(capsys) -> None:

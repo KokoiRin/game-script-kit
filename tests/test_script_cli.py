@@ -684,16 +684,16 @@ def test_star_cli_runs_wait_until_color_demo_with_custom_dry_run_color(capsys) -
     ]
 
 
-def test_star_cli_reports_wait_until_color_demo_timeout(capsys) -> None:
-    """验证条件等待脚本 dry-run 默认颜色会超时并返回非零。"""
-    assert main(["run", "wait-until-color-demo", "--dry-run"]) == 1
+def test_star_cli_stops_normally_when_wait_until_color_demo_times_out(capsys) -> None:
+    """验证条件等待脚本 dry-run 默认颜色超时时正常退出。"""
+    assert main(["run", "wait-until-color-demo", "--dry-run"]) == 0
 
     captured = capsys.readouterr()
     assert captured.out.splitlines() == [
         "wait 0.5s",
         "wait 0.5s",
     ]
-    assert "script run timed out: wait until condition timed out" in captured.err
+    assert captured.err == ""
 
 
 def test_star_cli_runs_wait_until_image_demo_with_dry_run_image(capsys) -> None:
@@ -714,16 +714,16 @@ def test_star_cli_runs_wait_until_image_demo_with_dry_run_image(capsys) -> None:
     ]
 
 
-def test_star_cli_reports_wait_until_image_demo_timeout(capsys) -> None:
-    """验证图片等待脚本 dry-run 默认未找到会超时并返回非零。"""
-    assert main(["run", "wait-until-image-demo", "--dry-run"]) == 1
+def test_star_cli_stops_normally_when_wait_until_image_demo_times_out(capsys) -> None:
+    """验证图片等待脚本 dry-run 默认未找到时正常退出。"""
+    assert main(["run", "wait-until-image-demo", "--dry-run"]) == 0
 
     captured = capsys.readouterr()
     assert captured.out.splitlines() == [
         "wait 0.5s",
         "wait 0.5s",
     ]
-    assert "script run timed out: wait until condition timed out" in captured.err
+    assert captured.err == ""
 
 
 def test_star_cli_runs_wait_until_screen_state_demo_with_custom_dry_run_state(capsys) -> None:
@@ -1306,13 +1306,13 @@ def test_star_cli_probe_state_reports_runtime_error(monkeypatch, capsys) -> None
     assert "screen state probe failed: image locator unavailable" in captured.err
 
 
-def test_star_cli_reports_click_image_demo_missing_target(capsys) -> None:
-    """验证图片目标点击 demo 未配置 dry-run 图片时报告未找到。"""
-    assert main(["run", "click-image-demo", "--dry-run"]) == 1
+def test_star_cli_stops_normally_when_click_image_demo_target_is_missing(capsys) -> None:
+    """验证图片目标点击 demo 未配置 dry-run 图片时正常退出。"""
+    assert main(["run", "click-image-demo", "--dry-run"]) == 0
 
     captured = capsys.readouterr()
     assert captured.out == ""
-    assert "script run failed: image target not found: assets/start.png" in captured.err
+    assert captured.err == ""
 
 
 def test_star_cli_reports_unknown_script(capsys) -> None:

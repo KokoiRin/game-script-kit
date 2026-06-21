@@ -41,6 +41,10 @@ class ScriptCancelledError(RuntimeError):
     """表示脚本运行被外部取消信号停止。"""
 
 
+class ScriptStoppedNormally(RuntimeError):
+    """表示脚本因前置条件未满足而正常停止。"""
+
+
 @dataclass(frozen=True, slots=True)
 class ScriptRunner:
     device: InputDevice
@@ -53,7 +57,10 @@ class ScriptRunner:
 
     def run(self, script: Script) -> None:
         """按脚本步骤树顺序执行所有步骤。"""
-        self._run_steps(script, script.steps)
+        try:
+            self._run_steps(script, script.steps)
+        except ScriptStoppedNormally:
+            return
 
     def _run_steps(self, script: Script, steps: tuple[Step, ...], *, path_prefix: str = "") -> None:
         """按顺序解释一组步骤。"""
@@ -87,6 +94,15 @@ class ScriptRunner:
                 self._run_wait_until(script, step, step_path)
             else:  # pragma: no cover
                 raise TypeError(f"unsupported script step: {type(step).__name__}")
+        except ScriptStoppedNormally as exc:
+            self._emit_event(
+                "step_stopped",
+                step_path=step_path,
+                step_type=step_type,
+                status="stopped",
+                details={"reason": str(exc)},
+            )
+            raise
         except Exception as exc:
             self._emit_event(
                 "step_failed",
@@ -216,7 +232,13 @@ class ScriptRunner:
                 )
                 return
             if elapsed_seconds >= step.timeout_seconds:
-                raise TimeoutError("wait until condition timed out")
+                self._emit_event(
+                    "wait_until_timed_out",
+                    step_path=step_path,
+                    step_type="WaitUntil",
+                    details={"attempt": str(attempt), "elapsed_seconds": f"{elapsed_seconds:.3f}"},
+                )
+                raise ScriptStoppedNormally("等待条件未满足")
 
             remaining_seconds = step.timeout_seconds - elapsed_seconds
             wait_seconds = min(step.interval_seconds, remaining_seconds)
@@ -264,7 +286,13 @@ class ScriptRunner:
         )
         match = result.match
         if match is None:
-            raise RuntimeError(f"image target not found: {search.template.path}")
+            self._emit_event(
+                "image_target_missing",
+                step_path=step_path,
+                step_type="Click",
+                details={"template": search.template.path},
+            )
+            raise ScriptStoppedNormally("图片目标未找到")
         anchor_point = match.point_at(target.anchor)
         resolved = Point(
             anchor_point.x + target.offset.x,

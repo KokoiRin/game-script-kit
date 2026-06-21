@@ -732,19 +732,33 @@ def test_runner_reports_unknown_named_image_target() -> None:
         ).run(script)
 
 
-def test_runner_reports_missing_image_target() -> None:
-    """验证图片目标未找到时 runner 报告运行错误。"""
+def test_runner_stops_normally_when_image_target_is_missing() -> None:
+    """验证图片目标未找到时 runner 正常停止且不执行后续步骤。"""
+    device = FakeInputDevice()
+    logger = FakeRunEventLogger()
     script = Script(
         name="click-missing-image-target",
         window=ScreenWindow(),
-        steps=(Click(ImageTarget(ImageTemplate("assets/missing.png"))),),
+        steps=(
+            Click(ImageTarget(ImageTemplate("assets/missing.png"))),
+            Click(Point(3, 4)),
+        ),
     )
 
-    with pytest.raises(RuntimeError, match="image target not found"):
-        ScriptRunner(
-            device=FakeInputDevice(),
-            image_locator=SequenceImageLocator([None]),
-        ).run(script)
+    ScriptRunner(
+        device=device,
+        image_locator=SequenceImageLocator([None]),
+        logger=logger,
+        emit_step_events=True,
+    ).run(script)
+
+    assert device.actions == []
+    assert [event.event_type for event in logger.events] == [
+        "step_started",
+        "image_target_missing",
+        "step_stopped",
+    ]
+    assert logger.events[1].details["template"] == "assets/missing.png"
 
 
 def test_runner_requires_image_locator_for_image_target() -> None:
@@ -897,8 +911,9 @@ def test_runner_wait_until_waits_until_screen_state_matches() -> None:
 
 
 def test_runner_wait_until_times_out_and_stops_following_steps() -> None:
-    """验证 WaitUntil 超时后抛错且不执行后续步骤。"""
+    """验证 WaitUntil 超时后正常停止且不执行后续步骤。"""
     device = FakeInputDevice()
+    logger = FakeRunEventLogger()
     script = Script(
         name="wait-until-timeout",
         window=ScreenWindow(),
@@ -912,11 +927,24 @@ def test_runner_wait_until_times_out_and_stops_following_steps() -> None:
         ),
     )
 
-    with pytest.raises(TimeoutError, match="wait until condition timed out"):
-        ScriptRunner(device=device, color_reader=FakeColorReader(Color(0, 0, 0))).run(script)
+    ScriptRunner(
+        device=device,
+        color_reader=FakeColorReader(Color(0, 0, 0)),
+        logger=logger,
+        emit_step_events=True,
+    ).run(script)
 
     assert [action.name for action in device.actions] == ["wait", "wait"]
     assert [action.duration_seconds for action in device.actions] == [0.5, 0.5]
+    assert [event.event_type for event in logger.events] == [
+        "step_started",
+        "condition_evaluated",
+        "condition_evaluated",
+        "condition_evaluated",
+        "wait_until_timed_out",
+        "step_stopped",
+    ]
+    assert logger.events[-2].details["attempt"] == "3"
 
 
 def test_runner_wait_until_caps_wait_to_remaining_timeout() -> None:
@@ -934,8 +962,7 @@ def test_runner_wait_until_caps_wait_to_remaining_timeout() -> None:
         ),
     )
 
-    with pytest.raises(TimeoutError):
-        ScriptRunner(device=device, color_reader=FakeColorReader(Color(0, 0, 0))).run(script)
+    ScriptRunner(device=device, color_reader=FakeColorReader(Color(0, 0, 0))).run(script)
 
     assert [action.duration_seconds for action in device.actions] == [0.6, 0.4]
 

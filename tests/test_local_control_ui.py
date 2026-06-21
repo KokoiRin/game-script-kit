@@ -157,6 +157,7 @@ def test_local_ui_serves_control_page() -> None:
     assert 'id="use-script-screen-state"' in html
     assert 'id="run-script"' in html
     assert 'id="stop-script"' in html
+    assert html.index('id="output"') < html.index('id="script-details"')
     assert 'id="image-asset-select"' in html
     assert 'id="image-confidence"' in html
     assert 'id="click-image"' in html
@@ -232,10 +233,13 @@ def test_local_ui_serves_static_assets() -> None:
     assert "renderScriptRunLog" in script
     assert "renderScriptRunEvent" in script
     assert "renderScriptTextLogLine" in script
+    assert "events.length === 0" in script
     assert 'line.startsWith("script event ")' in script
     assert "outputEl.scrollTop = outputEl.scrollHeight" in script
     assert "【运行】脚本开始" in script
-    assert "【步骤】" in script
+    assert "【等待】" in script
+    assert "条件未满足，已停止后续步骤" in script
+    assert "未找到图片目标" in script
     assert "【图片】匹配" in script
     assert "【状态】判断界面状态" in script
     assert "已使用脚本状态" in script
