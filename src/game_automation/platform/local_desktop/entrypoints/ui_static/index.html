@@ -40,6 +40,13 @@
         <button id="run-script" type="button">运行脚本</button>
         <button class="secondary" id="stop-script" type="button" disabled>停止</button>
       </section>
+      <section class="output">
+        <div class="status" id="status"></div>
+        <pre id="output"></pre>
+        <div class="debug-preview" id="debug-preview">
+          <img id="debug-screenshot" alt="最新截屏诊断图">
+        </div>
+      </section>
       <section class="script-details-panel">
         <pre id="script-config-errors"></pre>
         <pre id="script-details"></pre>
@@ -61,13 +68,6 @@
         <button class="secondary" id="capture-region-crops" type="button">区域裁剪</button>
         <button class="secondary" id="capture-probe-crops" type="button">候选裁剪</button>
         <button id="click-image" type="button">查找并点击图片</button>
-      </section>
-      <section class="output">
-        <div class="status" id="status"></div>
-        <pre id="output"></pre>
-        <div class="debug-preview" id="debug-preview">
-          <img id="debug-screenshot" alt="最新截屏诊断图">
-        </div>
       </section>
     </section>
     <section class="tab-panel" id="screen-state-panel" hidden>

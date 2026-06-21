@@ -107,10 +107,13 @@
 
     function renderScriptRunLog(result) {
       const lines = [];
-      for (const event of result.events || []) {
+      const events = result.events || [];
+      for (const event of events) {
         lines.push(renderScriptRunEvent(event));
       }
-      lines.push(...renderScriptTextLog(result.stdout || "", false));
+      if (events.length === 0) {
+        lines.push(...renderScriptTextLog(result.stdout || "", false));
+      }
       lines.push(...renderScriptTextLog(result.stderr || "", true));
       return lines.filter(Boolean).join("\n");
     }
@@ -129,31 +132,42 @@
         return `【结束】脚本结束：${reason}，退出码：${exitCode}`;
       }
       if (event.type === "step_started") {
-        return `【步骤】${path} 开始：${step}`;
+        return "";
       }
       if (event.type === "step_succeeded") {
-        return `【步骤】${path} 成功：${step}`;
+        return "";
       }
       if (event.type === "step_failed") {
-        return `【步骤】${path} 失败：${step}，原因：${details.error || "未知错误"}`;
+        return `【错误】${path} ${step}失败：${details.error || "未知错误"}`;
+      }
+      if (event.type === "step_stopped") {
+        return "";
       }
       if (event.type === "repeat_iteration_started") {
         return `【循环】${path} 第 ${details.iteration || "?"}/${details.total || "?"} 轮开始`;
       }
       if (event.type === "condition_evaluated") {
+        if (event.step === "WaitUntil") {
+          return "";
+        }
         const result = details.result === "True" ? "命中" : "未命中";
         const branch = details.branch ? `，分支：${details.branch === "then" ? "满足时" : "不满足时"}` : "";
-        const attempt = details.attempt ? `，第 ${details.attempt} 次检查` : "";
-        return `【判断】${path} ${result}${branch}${attempt}`;
+        return `【判断】${path} ${result}${branch}`;
       }
       if (event.type === "wait_until_satisfied") {
         return `【等待】${path} 条件已满足，第 ${details.attempt || "?"} 次检查，用时 ${details.elapsed_seconds || "0"} 秒`;
       }
+      if (event.type === "wait_until_timed_out") {
+        return `【等待】${path} 条件未满足，已停止后续步骤，用时 ${details.elapsed_seconds || "0"} 秒`;
+      }
       if (event.type === "image_target_resolved") {
         return `【图片】${path} 图片目标已定位：${details.template || "未知图片"}，点击点 ${details.point || "未知"}`;
       }
+      if (event.type === "image_target_missing") {
+        return `【图片】${path} 未找到图片目标：${details.template || "未知图片"}，已停止后续步骤`;
+      }
       if (event.type === "click_resolved") {
-        return `【点击】${path} 点击点已解析：${details.point || "未知"}`;
+        return "";
       }
       if (event.type === "click_performed") {
         return `【点击】${path} 已点击：${details.point || "未知"}`;
@@ -165,7 +179,7 @@
         return `【等待】${path} 开始等待 ${details.duration || "0"} 秒`;
       }
       if (event.type === "wait_finished") {
-        return `【等待】${path} 等待完成 ${details.duration || "0"} 秒`;
+        return "";
       }
       return `【事件】${path} ${event.type || "未知事件"}`;
     }
