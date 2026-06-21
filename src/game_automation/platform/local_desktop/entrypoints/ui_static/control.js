@@ -98,9 +98,25 @@
       } else if (result.exit_code === null || result.exit_code === undefined) {
         statusEl.textContent = "脚本未运行";
       } else {
-        statusEl.textContent = `脚本退出码：${result.exit_code}`;
+        const finishReason = scriptFinishReasonLabel(result.finish_reason);
+        statusEl.textContent = `脚本退出码：${result.exit_code}（${finishReason}）`;
       }
       outputEl.textContent = `${result.stdout || ""}${result.stderr || ""}`;
+    }
+
+    function scriptFinishReasonLabel(reason) {
+      const labels = {
+        completed: "正常完成",
+        cancelled: "已取消",
+        timed_out: "等待超时",
+        failed: "运行失败",
+        setup_failed: "运行环境不可用",
+        configuration_failed: "配置错误",
+        script_not_found: "脚本不存在",
+        running: "运行中",
+        idle: "未运行",
+      };
+      return labels[reason] || reason || "未知";
     }
 
     function renderScreenStateStatus(result) {

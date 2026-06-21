@@ -433,8 +433,10 @@ def test_local_ui_runs_script_over_http() -> None:
     assert payload == {
         "running": True,
         "exit_code": None,
+        "finish_reason": "running",
         "stdout": "started\n",
         "stderr": "",
+        "events": [],
     }
 
 
@@ -455,8 +457,10 @@ def test_local_ui_gets_script_run_status_over_http() -> None:
     assert payload == {
         "running": False,
         "exit_code": 0,
+        "finish_reason": "completed",
         "stdout": "done\n",
         "stderr": "",
+        "events": [],
     }
 
 
@@ -477,8 +481,10 @@ def test_local_ui_stops_script_run_over_http() -> None:
     assert payload == {
         "running": True,
         "exit_code": None,
+        "finish_reason": "running",
         "stdout": "stopping\n",
         "stderr": "",
+        "events": [],
     }
 
 
@@ -1031,7 +1037,7 @@ class FakeControlApplication:
     def current_script_run(self) -> ScriptRunStatus:
         """记录 fake 后台脚本状态查询。"""
         self.status_requests += 1
-        return ScriptRunStatus(running=False, exit_code=0, stdout="done\n")
+        return ScriptRunStatus(running=False, exit_code=0, stdout="done\n", finish_reason="completed")
 
     def stop_running_script(self) -> ScriptRunStatus:
         """记录 fake 后台脚本停止请求。"""
