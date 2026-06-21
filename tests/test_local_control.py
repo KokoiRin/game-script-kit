@@ -1247,7 +1247,11 @@ def test_local_control_captures_screen_debug_screenshot(tmp_path) -> None:
         captured_paths.append(path)
         Image.new("RGB", (20, 10), "white").save(path)
 
-    app = LocalControlApplication(project_root=tmp_path, screen_capture_factory=lambda: screen_capture)
+    app = LocalControlApplication(
+        project_root=tmp_path,
+        screen_capture_factory=lambda: screen_capture,
+        screen_size_factory=lambda: Point(10, 5),
+    )
 
     result = app.capture_screen_screenshot()
 
@@ -1256,9 +1260,76 @@ def test_local_control_captures_screen_debug_screenshot(tmp_path) -> None:
     assert result.stderr == ""
     assert result.stdout == f"saved screenshot: {screenshot_path}\n"
     assert result.screenshot_path == str(screenshot_path)
+    assert result.image_size == Point(20, 10)
+    assert result.screen_size == Point(10, 5)
     with Image.open(screenshot_path) as screenshot:
         assert screenshot.size == (20, 10)
     assert captured_paths == [screenshot_path]
+
+
+def test_local_control_previews_image_match_in_selected_region(tmp_path) -> None:
+    """验证 UI 用例可在选中区域内只读预览图片匹配。"""
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    (assets / "start.png").write_bytes(b"fake")
+    calls = []
+
+    class FakeImageLocator:
+        def locate(self, template, *, region=None, min_confidence=1.0, logger=None):
+            """记录区域和置信度并返回固定匹配。"""
+            calls.append((template, region, min_confidence))
+            return ImageMatch(Rect(12, 24, 10, 8), confidence=0.93)
+
+    app = LocalControlApplication(
+        project_root=tmp_path,
+        real_image_locator_factory=FakeImageLocator,
+    )
+
+    result = app.preview_image_asset_match(
+        "start.png",
+        region=Rect(10, 20, 100, 50),
+        min_confidence=0.7,
+    )
+
+    assert result.exit_code == 0
+    assert result.stderr == ""
+    assert result.found is True
+    assert result.confidence == 0.93
+    assert result.rect == Rect(12, 24, 10, 8)
+    assert result.center == Point(17, 28)
+    assert "image match template=" in result.stdout
+    assert calls == [
+        (ImageTemplate(str(assets / "start.png")), Rect(10, 20, 100, 50), 0.7)
+    ]
+
+
+def test_local_control_preview_image_match_reports_miss(tmp_path) -> None:
+    """验证区域预览未命中时返回正常结果而不是点击或失败。"""
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    (assets / "start.png").write_bytes(b"fake")
+
+    class FakeImageLocator:
+        def locate(self, template, *, region=None, min_confidence=1.0, logger=None):
+            """模拟区域内未找到图片。"""
+            return None
+
+    app = LocalControlApplication(
+        project_root=tmp_path,
+        real_image_locator_factory=FakeImageLocator,
+    )
+
+    result = app.preview_image_asset_match(
+        "start.png",
+        region=Rect(10, 20, 100, 50),
+        min_confidence=0.7,
+    )
+
+    assert result.exit_code == 0
+    assert result.found is False
+    assert result.confidence is None
+    assert result.rect is None
+    assert result.center is None
 
 
 def test_local_control_warns_when_screen_debug_screenshot_is_black(tmp_path) -> None:

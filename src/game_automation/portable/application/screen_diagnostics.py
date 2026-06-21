@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import io
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -14,6 +15,7 @@ from pathlib import Path
 from game_automation.portable.application.diagnostic_artifacts import (
     draw_probe_diagnostics,
     draw_region_diagnostics,
+    read_image_pixel_size,
     refresh_crop_output_folder,
     save_probe_candidate_crops,
     save_region_crops,
@@ -29,7 +31,15 @@ from game_automation.portable.application.screen_state_config import (
     load_screen_state_candidates,
     load_screen_state_regions,
 )
-from game_automation.portable.domain import ImageTemplate, Point, ScreenStateCandidate, ScreenStateProbeResult
+from game_automation.portable.domain import (
+    ImageTemplate,
+    Point,
+    Rect,
+    ScreenStateCandidate,
+    ScreenStateProbeResult,
+    TargetCatalog,
+)
+from game_automation.portable.engine.image_query import locate_image
 from game_automation.portable.engine.ports import RunLogger, ScreenImageBatchLocator, ScreenImageLocator
 from game_automation.portable.engine.screen_state_probe import probe_screen_state
 
@@ -54,6 +64,35 @@ class ControlResult:
     stdout: str = ""
     stderr: str = ""
     screenshot_path: str = ""
+    image_size: Point | None = None
+    screen_size: Point | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ImageMatchPreviewResult:
+    """表达图片区域预览匹配的结构化结果。"""
+
+    exit_code: int
+    stdout: str = ""
+    stderr: str = ""
+    found: bool = False
+    confidence: float | None = None
+    rect: Rect | None = None
+    center: Point | None = None
+
+
+class _StringLogger:
+    def __init__(self) -> None:
+        """初始化预览匹配日志缓冲。"""
+        self._stream = io.StringIO()
+
+    def log(self, message: str) -> None:
+        """把一条诊断日志写入缓冲。"""
+        self._stream.write(f"{message}\n")
+
+    def text(self) -> str:
+        """返回所有诊断日志文本。"""
+        return self._stream.getvalue()
 
 
 class ScreenDiagnosticsUseCase:
@@ -83,6 +122,8 @@ class ScreenDiagnosticsUseCase:
         try:
             self._screen_capture_factory()(screenshot_path)
             warning = screen_capture_health_warning(screenshot_path)
+            image_size = read_image_pixel_size(screenshot_path)
+            screen_size = self._read_screen_size_if_available()
         except Exception as exc:
             return ControlResult(exit_code=1, stderr=f"{exc}\n")
         return ControlResult(
@@ -90,6 +131,45 @@ class ScreenDiagnosticsUseCase:
             stdout=f"saved screenshot: {screenshot_path}\n",
             stderr=warning,
             screenshot_path=str(screenshot_path),
+            image_size=image_size,
+            screen_size=screen_size,
+        )
+
+    def preview_image_asset_match(
+        self,
+        asset_name: str,
+        *,
+        region: Rect,
+        min_confidence: float = 0.8,
+    ) -> ImageMatchPreviewResult:
+        """在指定区域内只读预览一次图片匹配，不执行点击。"""
+        if self._real_image_locator_factory is None:
+            return ImageMatchPreviewResult(
+                exit_code=1,
+                stderr="screen image matching is not configured\n",
+            )
+        try:
+            asset_path = self._resolve_image_asset(asset_name)
+            logger = _StringLogger()
+            lookup = locate_image(
+                ImageTemplate(str(asset_path)),
+                image_locator=self._real_image_locator_factory(),
+                resources=TargetCatalog(),
+                region=region,
+                min_confidence=min_confidence,
+                logger=logger,
+            )
+        except ValueError as exc:
+            return ImageMatchPreviewResult(exit_code=2, stderr=f"invalid image match preview: {exc}\n")
+        except RuntimeError as exc:
+            return ImageMatchPreviewResult(exit_code=1, stderr=f"{exc}\n")
+        return ImageMatchPreviewResult(
+            exit_code=0,
+            stdout=logger.text(),
+            found=lookup.found,
+            confidence=lookup.confidence,
+            rect=lookup.rect,
+            center=lookup.center,
         )
 
     def diagnose_screen_setup(self, *, min_confidence: float = 0.8) -> ControlResult:
@@ -325,6 +405,15 @@ class ScreenDiagnosticsUseCase:
             return self._screen_size_factory()
         except Exception as exc:
             return ControlResult(exit_code=1, stderr=f"{exc}\n")
+
+    def _read_screen_size_if_available(self) -> Point | None:
+        """尽力读取屏幕坐标尺寸，失败时不影响普通截图展示。"""
+        if self._screen_size_factory is None:
+            return None
+        try:
+            return self._screen_size_factory()
+        except Exception:
+            return None
 
     def _screen_state_diagnostic_regions(self):
         """读取探测诊断可选绘制的命名区域。"""

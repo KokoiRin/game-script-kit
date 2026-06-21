@@ -16,6 +16,7 @@ from typing import Any
 
 from game_automation.platform.local_desktop.composition import build_local_control_application
 from game_automation.platform.local_desktop.entrypoints.local_ui_assets import read_ui_asset
+from game_automation.portable.domain import Rect
 from game_automation.portable.application.local_control import LocalControlApplication
 from game_automation.portable.engine.run_events import script_run_event_to_payload
 
@@ -159,6 +160,33 @@ def create_local_control_server(
                     min_confidence=min_confidence,
                 )
                 self._send_json(_result_to_payload(result))
+                return
+            if self.path == "/api/preview-image-match":
+                payload = self._read_json()
+                min_confidence = _parse_min_confidence(payload)
+                region = _parse_region(payload)
+                if min_confidence is None or region is None:
+                    self._send_json(
+                        {
+                            "exit_code": 2,
+                            "stdout": "",
+                            "stderr": (
+                                "invalid image match preview request: "
+                                "region must contain positive numeric left, top, width, and height\n"
+                            ),
+                            "found": False,
+                            "confidence": None,
+                            "rect": None,
+                            "center": None,
+                        }
+                    )
+                    return
+                result = control_app.preview_image_asset_match(
+                    str(payload.get("asset", "")),
+                    region=region,
+                    min_confidence=min_confidence,
+                )
+                self._send_json(_image_match_preview_to_payload(result))
                 return
             if self.path == "/api/capture-screen":
                 result = control_app.capture_screen_screenshot()
@@ -305,7 +333,24 @@ def _result_to_payload(result) -> dict[str, object]:
     }
     if result.screenshot_path:
         payload["screenshot_path"] = result.screenshot_path
+    if result.image_size is not None:
+        payload["image_size"] = _point_to_payload(result.image_size)
+    if result.screen_size is not None:
+        payload["screen_size"] = _point_to_payload(result.screen_size)
     return payload
+
+
+def _image_match_preview_to_payload(result) -> dict[str, object]:
+    """把区域图片匹配预览结果转换成 HTTP JSON payload。"""
+    return {
+        "exit_code": result.exit_code,
+        "stdout": result.stdout,
+        "stderr": result.stderr,
+        "found": result.found,
+        "confidence": result.confidence,
+        "rect": _rect_to_payload(result.rect),
+        "center": _point_to_payload(result.center),
+    }
 
 
 def _status_to_payload(status) -> dict[str, object]:
@@ -422,12 +467,36 @@ def _rect_to_payload(rect) -> dict[str, int] | None:
     return {"left": rect.left, "top": rect.top, "width": rect.width, "height": rect.height}
 
 
+def _point_to_payload(point) -> dict[str, int] | None:
+    """把可空点位转换成 HTTP JSON payload。"""
+    if point is None:
+        return None
+    return {"x": point.x, "y": point.y}
+
+
 def _parse_min_confidence(payload: dict[str, object]) -> float | None:
     """把 HTTP payload 中的图片匹配置信度解析为数字。"""
     try:
         return float(payload.get("min_confidence", 0.8))
     except (TypeError, ValueError):
         return None
+
+
+def _parse_region(payload: dict[str, object]):
+    """把 HTTP payload 中的选择区域解析为 Rect。"""
+    region = payload.get("region")
+    if not isinstance(region, dict):
+        return None
+    try:
+        left = int(region.get("left"))
+        top = int(region.get("top"))
+        width = int(region.get("width"))
+        height = int(region.get("height"))
+    except (TypeError, ValueError):
+        return None
+    if width <= 0 or height <= 0:
+        return None
+    return Rect(left, top, width, height)
 
 
 def _parse_interval_seconds(payload: dict[str, object]) -> float | None:

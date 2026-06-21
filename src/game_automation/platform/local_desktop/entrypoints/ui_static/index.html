@@ -44,8 +44,20 @@
         <div class="status" id="status"></div>
         <pre id="output"></pre>
         <div class="debug-preview" id="debug-preview">
-          <img id="debug-screenshot" alt="最新截屏诊断图">
+          <div class="screenshot-region-stage" id="screenshot-region-stage">
+            <img id="debug-screenshot" alt="最新截屏诊断图">
+            <div class="region-selection-box" id="region-selection-box"></div>
+          </div>
         </div>
+        <section class="region-selector-panel" id="region-selector-panel">
+          <div class="region-summary" id="selected-region-output">截图坐标：未选择</div>
+          <pre class="region-json" id="selected-region-json"></pre>
+          <div class="region-actions">
+            <button class="secondary" id="copy-selected-region" type="button" disabled>复制区域</button>
+            <button class="secondary" id="preview-region-match" type="button" disabled>区域匹配预览</button>
+          </div>
+          <div class="region-match-result" id="region-match-result">匹配预览：未运行</div>
+        </section>
       </section>
       <section class="script-details-panel">
         <pre id="script-config-errors"></pre>

@@ -33,6 +33,7 @@ from game_automation.portable.application.script_run import (
 )
 from game_automation.portable.application.screen_diagnostics import (
     ControlResult,
+    ImageMatchPreviewResult,
     ScreenCapture,
     ScreenCaptureFactory,
     ScreenDiagnosticsUseCase,
@@ -594,6 +595,20 @@ class LocalControlApplication:
             exit_code=result.exit_code,
             stdout=stdout.getvalue(),
             stderr=stderr.getvalue(),
+        )
+
+    def preview_image_asset_match(
+        self,
+        asset_name: str,
+        *,
+        region: Rect,
+        min_confidence: float = 0.8,
+    ) -> ImageMatchPreviewResult:
+        """在用户选择的区域内预览图片匹配，不执行点击。"""
+        return self._screen_diagnostics.preview_image_asset_match(
+            asset_name,
+            region=region,
+            min_confidence=min_confidence,
         )
 
     def probe_screen_state_once(

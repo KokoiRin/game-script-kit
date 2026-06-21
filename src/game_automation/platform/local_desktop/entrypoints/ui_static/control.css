@@ -194,10 +194,55 @@
       overflow: auto;
       max-height: 460px;
     }
+    .screenshot-region-stage {
+      position: relative;
+      display: inline-block;
+      min-width: 100%;
+      cursor: crosshair;
+      line-height: 0;
+    }
     .debug-preview img {
       display: block;
       max-width: 100%;
       height: auto;
+      user-select: none;
+      -webkit-user-drag: none;
+    }
+    .region-selection-box {
+      display: none;
+      position: absolute;
+      border: 2px solid #f59e0b;
+      background: rgba(245, 158, 11, 0.18);
+      box-sizing: border-box;
+      pointer-events: none;
+    }
+    .region-selector-panel {
+      display: grid;
+      gap: 8px;
+      border: 1px solid #d8dde5;
+      border-radius: 8px;
+      background: #ffffff;
+      padding: 12px 14px;
+      color: #15171a;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+    .region-summary,
+    .region-match-result {
+      min-height: 20px;
+      white-space: pre-wrap;
+    }
+    .region-json {
+      height: 72px;
+      border-color: #d8dde5;
+      background: #f8fafc;
+      color: #15171a;
+      resize: none;
+    }
+    .region-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
     }
     @media (max-width: 760px) {
       header, .toolbar, .image-toolbar, .screen-state-toolbar {
