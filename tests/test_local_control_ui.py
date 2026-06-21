@@ -12,6 +12,7 @@ import threading
 
 from game_automation.portable.application.local_control import (
     ControlResult,
+    ImageMatchPreviewResult,
     LocalControlApplication,
     ScreenStateConfigSummaryResult,
     ScreenStateProbeCandidateSummary,
@@ -30,7 +31,7 @@ from game_automation.portable.application.screen_state_config import (
     ScreenStateConfigGroupSummary,
     ScreenStateConfigSearchSummary,
 )
-from game_automation.portable.domain import Rect
+from game_automation.portable.domain import Point, Rect
 from game_automation.portable.scripts_manager.catalog import ScriptCatalog
 from game_automation.platform.local_desktop.entrypoints.local_ui import create_local_control_server
 
@@ -167,6 +168,10 @@ def test_local_ui_serves_control_page() -> None:
     assert 'id="capture-probe-diagnostics"' in html
     assert 'id="capture-region-crops"' in html
     assert 'id="capture-probe-crops"' in html
+    assert 'id="selected-region-output"' in html
+    assert 'id="selected-region-json"' in html
+    assert 'id="preview-region-match"' in html
+    assert 'id="region-match-result"' in html
     assert 'id="debug-screenshot"' in html
     assert 'id="run-tests"' in html
     assert 'id="screen-state-tab"' in html
@@ -231,6 +236,13 @@ def test_local_ui_serves_static_assets() -> None:
     assert "payload.image_dependencies" in script
     assert "dry_run_images: scriptImageDependencies" in script
     assert "renderScriptRunLog" in script
+    assert "selectedRegion" in script
+    assert "updateSelectionFromPointer" in script
+    assert "copySelectedRegion" in script
+    assert "previewRegionMatch" in script
+    assert "/api/preview-image-match" in script
+    assert "截图坐标" in script
+    assert "匹配预览" in script
     assert "renderScriptRunEvent" in script
     assert "renderScriptTextLogLine" in script
     assert "events.length === 0" in script
@@ -691,6 +703,80 @@ def test_local_ui_clicks_image_asset_over_http() -> None:
     }
 
 
+def test_local_ui_previews_image_match_over_http() -> None:
+    """验证 UI HTTP 接口把区域图片预览匹配请求委托给 application。"""
+    app = FakeControlApplication()
+    server = create_local_control_server(host="127.0.0.1", port=0, app=app)
+    thread = threading.Thread(target=server.serve_forever)
+    thread.start()
+    try:
+        payload = _request_json(
+            server.server_address,
+            "POST",
+            "/api/preview-image-match",
+            {
+                "asset": "start.png",
+                "min_confidence": 0.7,
+                "region": {"left": 10, "top": 20, "width": 100, "height": 50},
+            },
+        )
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+    assert app.image_preview_requests == [
+        {
+            "asset": "start.png",
+            "min_confidence": 0.7,
+            "region": Rect(10, 20, 100, 50),
+        }
+    ]
+    assert payload == {
+        "exit_code": 0,
+        "stdout": "image match preview\n",
+        "stderr": "",
+        "found": True,
+        "confidence": 0.91,
+        "rect": {"left": 12, "top": 24, "width": 10, "height": 8},
+        "center": {"x": 17, "y": 28},
+    }
+
+
+def test_local_ui_rejects_invalid_preview_region_over_http() -> None:
+    """验证 UI HTTP 接口拒绝无效区域预览请求。"""
+    app = FakeControlApplication()
+    server = create_local_control_server(host="127.0.0.1", port=0, app=app)
+    thread = threading.Thread(target=server.serve_forever)
+    thread.start()
+    try:
+        payload = _request_json(
+            server.server_address,
+            "POST",
+            "/api/preview-image-match",
+            {
+                "asset": "start.png",
+                "min_confidence": 0.7,
+                "region": {"left": 10, "top": 20, "width": 0, "height": 50},
+            },
+        )
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+    assert app.image_preview_requests == []
+    assert payload == {
+        "exit_code": 2,
+        "stdout": "",
+        "stderr": "invalid image match preview request: region must contain positive numeric left, top, width, and height\n",
+        "found": False,
+        "confidence": None,
+        "rect": None,
+        "center": None,
+    }
+
+
 def test_local_ui_rejects_non_numeric_image_confidence_over_http() -> None:
     """验证 UI HTTP 接口拒绝非数字图片置信度。"""
     app = FakeControlApplication()
@@ -746,6 +832,8 @@ def test_local_ui_captures_screen_over_http() -> None:
         "stderr": "",
         "screenshot_path": "/tmp/latest-screen.png",
         "screenshot_url": "/api/debug-screenshot?version=1",
+        "image_size": {"x": 200, "y": 100},
+        "screen_size": {"x": 100, "y": 50},
     }
 
 
@@ -953,6 +1041,7 @@ class FakeControlApplication:
         self.script_detail_requests: list[str] = []
         self.test_requests: list[str] = []
         self.image_click_requests: list[dict[str, object]] = []
+        self.image_preview_requests: list[dict[str, object]] = []
         self.capture_requests = 0
         self.screen_diagnosis_requests: list[float] = []
         self.region_diagnostics_requests = 0
@@ -1134,6 +1223,30 @@ class FakeControlApplication:
         )
         return ControlResult(exit_code=0, stdout="click Point(x=0, y=0)\n", stderr="")
 
+    def preview_image_asset_match(
+        self,
+        asset_name: str,
+        *,
+        region: Rect,
+        min_confidence: float = 0.8,
+    ) -> ImageMatchPreviewResult:
+        """记录 fake 图片区域预览匹配请求。"""
+        self.image_preview_requests.append(
+            {
+                "asset": asset_name,
+                "region": region,
+                "min_confidence": min_confidence,
+            }
+        )
+        return ImageMatchPreviewResult(
+            exit_code=0,
+            stdout="image match preview\n",
+            found=True,
+            confidence=0.91,
+            rect=Rect(12, 24, 10, 8),
+            center=Point(17, 28),
+        )
+
     def capture_screen_screenshot(self) -> ControlResult:
         """记录 fake 截屏诊断请求。"""
         self.capture_requests += 1
@@ -1142,6 +1255,8 @@ class FakeControlApplication:
             stdout="saved screenshot: /tmp/latest-screen.png\n",
             stderr="",
             screenshot_path="/tmp/latest-screen.png",
+            image_size=Point(200, 100),
+            screen_size=Point(100, 50),
         )
 
     def diagnose_screen_setup(self, *, min_confidence: float = 0.8) -> ControlResult:

@@ -26,7 +26,14 @@
     const captureProbeCropsButton = document.querySelector("#capture-probe-crops");
     const imageConfidenceInput = document.querySelector("#image-confidence");
     const debugPreview = document.querySelector("#debug-preview");
+    const screenshotRegionStage = document.querySelector("#screenshot-region-stage");
     const debugScreenshot = document.querySelector("#debug-screenshot");
+    const regionSelectionBox = document.querySelector("#region-selection-box");
+    const selectedRegionOutput = document.querySelector("#selected-region-output");
+    const selectedRegionJson = document.querySelector("#selected-region-json");
+    const copySelectedRegionButton = document.querySelector("#copy-selected-region");
+    const previewRegionMatchButton = document.querySelector("#preview-region-match");
+    const regionMatchResult = document.querySelector("#region-match-result");
     const screenStateConfidenceInput = document.querySelector("#screen-state-confidence");
     const screenStateIntervalInput = document.querySelector("#screen-state-interval");
     const screenStateConfigSummary = document.querySelector("#screen-state-config-summary");
@@ -47,6 +54,9 @@
     let latestScreenStateCandidates = [];
     let scriptStateDependencies = [];
     let scriptImageDependencies = [];
+    let screenshotMetrics = null;
+    let selectedRegion = null;
+    let selectionDragStart = null;
 
     function setBusy(isBusy) {
       runScriptButton.disabled = isBusy;
@@ -59,6 +69,8 @@
       captureRegionCropsButton.disabled = isBusy;
       captureProbeCropsButton.disabled = isBusy;
       clickImageButton.disabled = isBusy || !imageAssetSelect.value;
+      copySelectedRegionButton.disabled = selectedRegion === null;
+      previewRegionMatchButton.disabled = isBusy || selectedRegion === null || !imageAssetSelect.value;
       useProbedScreenStateButton.disabled = isBusy;
       useScriptScreenStateButton.disabled = isBusy;
       stopScriptButton.disabled = !activeScriptRun;
@@ -87,9 +99,172 @@
       statusEl.textContent = `${prefix}退出码：${result.exit_code}`;
       outputEl.textContent = `${result.stdout || ""}${result.stderr || ""}`;
       if (result.screenshot_url) {
-        debugScreenshot.src = result.screenshot_url;
-        debugPreview.style.display = "block";
+        renderDebugScreenshot(result);
       }
+    }
+
+    function renderDebugScreenshot(result) {
+      screenshotMetrics = {
+        imageSize: result.image_size || null,
+        screenSize: result.screen_size || null,
+      };
+      resetRegionSelection();
+      debugScreenshot.src = result.screenshot_url;
+      debugPreview.style.display = "block";
+    }
+
+    function resetRegionSelection() {
+      selectedRegion = null;
+      selectionDragStart = null;
+      regionSelectionBox.style.display = "none";
+      selectedRegionOutput.textContent = "截图坐标：未选择";
+      selectedRegionJson.textContent = "";
+      regionMatchResult.textContent = "匹配预览：未运行";
+      setBusy(activeScriptRun);
+    }
+
+    function imagePixelSize() {
+      const naturalWidth = debugScreenshot.naturalWidth || 0;
+      const naturalHeight = debugScreenshot.naturalHeight || 0;
+      if (screenshotMetrics && screenshotMetrics.imageSize) {
+        return screenshotMetrics.imageSize;
+      }
+      return {x: naturalWidth, y: naturalHeight};
+    }
+
+    function screenCoordinateSize() {
+      const imageSize = imagePixelSize();
+      if (screenshotMetrics && screenshotMetrics.screenSize) {
+        return screenshotMetrics.screenSize;
+      }
+      return imageSize;
+    }
+
+    function clientPointToScreenPoint(event) {
+      const bounds = debugScreenshot.getBoundingClientRect();
+      const imageSize = imagePixelSize();
+      const screenSize = screenCoordinateSize();
+      if (bounds.width <= 0 || bounds.height <= 0 || imageSize.x <= 0 || imageSize.y <= 0) {
+        return null;
+      }
+      const displayX = Math.min(Math.max(event.clientX - bounds.left, 0), bounds.width);
+      const displayY = Math.min(Math.max(event.clientY - bounds.top, 0), bounds.height);
+      const pixelX = displayX / bounds.width * imageSize.x;
+      const pixelY = displayY / bounds.height * imageSize.y;
+      return {
+        x: Math.round(pixelX / imageSize.x * screenSize.x),
+        y: Math.round(pixelY / imageSize.y * screenSize.y),
+      };
+    }
+
+    function regionFromPoints(start, end) {
+      const left = Math.min(start.x, end.x);
+      const top = Math.min(start.y, end.y);
+      const right = Math.max(start.x, end.x);
+      const bottom = Math.max(start.y, end.y);
+      const width = Math.max(1, right - left);
+      const height = Math.max(1, bottom - top);
+      return {left, top, width, height};
+    }
+
+    function regionToDisplayBox(region) {
+      const bounds = debugScreenshot.getBoundingClientRect();
+      const screenSize = screenCoordinateSize();
+      if (screenSize.x <= 0 || screenSize.y <= 0 || bounds.width <= 0 || bounds.height <= 0) {
+        return null;
+      }
+      return {
+        left: region.left / screenSize.x * bounds.width,
+        top: region.top / screenSize.y * bounds.height,
+        width: region.width / screenSize.x * bounds.width,
+        height: region.height / screenSize.y * bounds.height,
+      };
+    }
+
+    function renderSelectedRegion(region) {
+      selectedRegion = region;
+      const coordinateLabel = screenshotMetrics && screenshotMetrics.screenSize ? "屏幕坐标" : "截图坐标";
+      selectedRegionOutput.textContent = (
+        `${coordinateLabel}：left=${region.left}, top=${region.top}, ` +
+        `width=${region.width}, height=${region.height}`
+      );
+      selectedRegionJson.textContent = JSON.stringify({region}, null, 2);
+      renderSelectionBox(region);
+      setBusy(activeScriptRun);
+    }
+
+    function renderSelectionBox(region) {
+      const box = regionToDisplayBox(region);
+      if (!box) {
+        regionSelectionBox.style.display = "none";
+        return;
+      }
+      regionSelectionBox.style.display = "block";
+      regionSelectionBox.style.left = `${box.left}px`;
+      regionSelectionBox.style.top = `${box.top}px`;
+      regionSelectionBox.style.width = `${box.width}px`;
+      regionSelectionBox.style.height = `${box.height}px`;
+    }
+
+    function updateSelectionFromPointer(event) {
+      if (!selectionDragStart) {
+        return;
+      }
+      const current = clientPointToScreenPoint(event);
+      if (!current) {
+        return;
+      }
+      renderSelectedRegion(regionFromPoints(selectionDragStart, current));
+    }
+
+    async function copySelectedRegion() {
+      if (!selectedRegion) {
+        return;
+      }
+      const text = selectedRegionJson.textContent;
+      if (navigator.clipboard) {
+        await navigator.clipboard.writeText(text);
+        regionMatchResult.textContent = "区域 JSON 已复制";
+      }
+    }
+
+    async function previewRegionMatch() {
+      if (!selectedRegion) {
+        regionMatchResult.textContent = "匹配预览：请先在截图上拖拽选择区域";
+        return;
+      }
+      setBusy(true);
+      regionMatchResult.textContent = "匹配预览：正在匹配...";
+      try {
+        const response = await fetch("/api/preview-image-match", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({
+            asset: imageAssetSelect.value,
+            min_confidence: Number.parseFloat(imageConfidenceInput.value),
+            region: selectedRegion,
+          })
+        });
+        const result = await response.json();
+        renderRegionMatchResult(result);
+      } finally {
+        setBusy(activeScriptRun);
+      }
+    }
+
+    function renderRegionMatchResult(result) {
+      if (result.exit_code !== 0) {
+        regionMatchResult.textContent = `匹配预览：失败\n${result.stderr || "未知错误"}`;
+        return;
+      }
+      const status = result.found ? "命中" : "未命中";
+      const confidence = formatConfidence(result.confidence);
+      const rect = formatRect(result.rect);
+      const center = result.center ? `x=${result.center.x},y=${result.center.y}` : "无";
+      regionMatchResult.textContent = (
+        `匹配预览：${status}；置信度 ${confidence}；位置 ${rect}；中心 ${center}` +
+        (result.stdout ? `\n${result.stdout.trim()}` : "")
+      );
     }
 
     function renderScriptStatus(result) {
@@ -907,6 +1082,37 @@
     captureRegionCropsButton.addEventListener("click", captureRegionCrops);
     captureProbeCropsButton.addEventListener("click", captureProbeCrops);
     clickImageButton.addEventListener("click", clickImage);
+    copySelectedRegionButton.addEventListener("click", copySelectedRegion);
+    previewRegionMatchButton.addEventListener("click", previewRegionMatch);
+    imageAssetSelect.addEventListener("change", () => setBusy(activeScriptRun));
+    screenshotRegionStage.addEventListener("pointerdown", (event) => {
+      if (!debugScreenshot.src) {
+        return;
+      }
+      selectionDragStart = clientPointToScreenPoint(event);
+      if (!selectionDragStart) {
+        return;
+      }
+      screenshotRegionStage.setPointerCapture(event.pointerId);
+      renderSelectedRegion(regionFromPoints(selectionDragStart, selectionDragStart));
+      event.preventDefault();
+    });
+    screenshotRegionStage.addEventListener("pointermove", updateSelectionFromPointer);
+    screenshotRegionStage.addEventListener("pointerup", (event) => {
+      updateSelectionFromPointer(event);
+      selectionDragStart = null;
+      if (screenshotRegionStage.hasPointerCapture(event.pointerId)) {
+        screenshotRegionStage.releasePointerCapture(event.pointerId);
+      }
+    });
+    screenshotRegionStage.addEventListener("pointercancel", () => {
+      selectionDragStart = null;
+    });
+    debugScreenshot.addEventListener("load", () => {
+      if (selectedRegion) {
+        renderSelectionBox(selectedRegion);
+      }
+    });
     startScreenStateProbeButton.addEventListener("click", startScreenStateProbe);
     stopScreenStateProbeButton.addEventListener("click", stopScreenStateProbe);
     loadScripts();

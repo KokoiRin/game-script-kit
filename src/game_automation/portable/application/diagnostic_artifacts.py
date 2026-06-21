@@ -139,6 +139,14 @@ def screen_capture_health_warning(path: Path) -> str:
     return BLANK_SCREENSHOT_WARNING if _rgb_extrema_are_near_black(extrema) else ""
 
 
+def read_image_pixel_size(path: Path) -> Point:
+    """读取图片像素尺寸，隐藏 Pillow 依赖细节。"""
+    from PIL import Image
+
+    with Image.open(path) as image:
+        return Point(image.width, image.height)
+
+
 def refresh_crop_output_folder(output_folder: Path) -> None:
     """删除裁剪输出目录中的旧 PNG，让目录只代表本轮导出结果。"""
     for path in output_folder.glob("*.png"):
