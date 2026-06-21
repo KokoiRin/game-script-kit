@@ -101,7 +101,157 @@
         const finishReason = scriptFinishReasonLabel(result.finish_reason);
         statusEl.textContent = `脚本退出码：${result.exit_code}（${finishReason}）`;
       }
-      outputEl.textContent = `${result.stdout || ""}${result.stderr || ""}`;
+      outputEl.textContent = renderScriptRunLog(result);
+      outputEl.scrollTop = outputEl.scrollHeight;
+    }
+
+    function renderScriptRunLog(result) {
+      const lines = [];
+      for (const event of result.events || []) {
+        lines.push(renderScriptRunEvent(event));
+      }
+      lines.push(...renderScriptTextLog(result.stdout || "", false));
+      lines.push(...renderScriptTextLog(result.stderr || "", true));
+      return lines.filter(Boolean).join("\n");
+    }
+
+    function renderScriptRunEvent(event) {
+      const details = event.details || {};
+      const path = event.path ? `步骤 ${event.path}` : "脚本";
+      const step = scriptStepLabel(event.step);
+      if (event.type === "run_started") {
+        const mode = details.dry_run === "True" ? "模拟运行" : "真实运行";
+        return `【运行】脚本开始：${details.script || "未知脚本"}，模式：${mode}`;
+      }
+      if (event.type === "run_finished") {
+        const reason = scriptFinishReasonLabel(event.status || details.finish_reason);
+        const exitCode = details.exit_code === undefined ? "未知" : details.exit_code;
+        return `【结束】脚本结束：${reason}，退出码：${exitCode}`;
+      }
+      if (event.type === "step_started") {
+        return `【步骤】${path} 开始：${step}`;
+      }
+      if (event.type === "step_succeeded") {
+        return `【步骤】${path} 成功：${step}`;
+      }
+      if (event.type === "step_failed") {
+        return `【步骤】${path} 失败：${step}，原因：${details.error || "未知错误"}`;
+      }
+      if (event.type === "repeat_iteration_started") {
+        return `【循环】${path} 第 ${details.iteration || "?"}/${details.total || "?"} 轮开始`;
+      }
+      if (event.type === "condition_evaluated") {
+        const result = details.result === "True" ? "命中" : "未命中";
+        const branch = details.branch ? `，分支：${details.branch === "then" ? "满足时" : "不满足时"}` : "";
+        const attempt = details.attempt ? `，第 ${details.attempt} 次检查` : "";
+        return `【判断】${path} ${result}${branch}${attempt}`;
+      }
+      if (event.type === "wait_until_satisfied") {
+        return `【等待】${path} 条件已满足，第 ${details.attempt || "?"} 次检查，用时 ${details.elapsed_seconds || "0"} 秒`;
+      }
+      if (event.type === "image_target_resolved") {
+        return `【图片】${path} 图片目标已定位：${details.template || "未知图片"}，点击点 ${details.point || "未知"}`;
+      }
+      if (event.type === "click_resolved") {
+        return `【点击】${path} 点击点已解析：${details.point || "未知"}`;
+      }
+      if (event.type === "click_performed") {
+        return `【点击】${path} 已点击：${details.point || "未知"}`;
+      }
+      if (event.type === "drag_resolved") {
+        return `【拖拽】${path} 从 ${details.start || "未知"} 到 ${details.end || "未知"}，持续 ${details.duration || "0"} 秒`;
+      }
+      if (event.type === "wait_started") {
+        return `【等待】${path} 开始等待 ${details.duration || "0"} 秒`;
+      }
+      if (event.type === "wait_finished") {
+        return `【等待】${path} 等待完成 ${details.duration || "0"} 秒`;
+      }
+      return `【事件】${path} ${event.type || "未知事件"}`;
+    }
+
+    function scriptStepLabel(step) {
+      const labels = {
+        Click: "点击",
+        Drag: "拖拽",
+        Wait: "等待",
+        Repeat: "循环",
+        If: "条件分支",
+        WaitUntil: "等待条件",
+      };
+      return labels[step] || step || "脚本动作";
+    }
+
+    function renderScriptTextLog(text, isError) {
+      return text
+        .split("\n")
+        .map((line) => line.trim())
+        .filter((line) => line && !line.startsWith("script event "))
+        .map((line) => renderScriptTextLogLine(line, isError));
+    }
+
+    function renderScriptTextLogLine(line, isError) {
+      const imageMatch = parseKeyValueLogLine(line, "image match ");
+      if (imageMatch) {
+        const found = imageMatch.found === "True" ? "命中" : "未命中";
+        const confidence = imageMatch.confidence === "None" ? "无" : imageMatch.confidence;
+        return (
+          `【图片】匹配 ${imageMatch.template || "未知图片"}：${found}` +
+          `，置信度 ${confidence}` +
+          `，最低置信度 ${imageMatch.min_confidence || "未知"}` +
+          `，用时 ${imageMatch.elapsed_ms || "未知"}ms` +
+          `，区域 ${imageMatch.region || "全屏"}`
+        );
+      }
+
+      const screenStateCondition = parseKeyValueLogLine(line, "screen state condition ");
+      if (screenStateCondition) {
+        const matched = screenStateCondition.matched === "True" ? "命中" : "未命中";
+        return (
+          `【状态】判断界面状态：期望 ${screenStateCondition.expected || "未知"}` +
+          `，实际 ${screenStateCondition.actual || "未知"}` +
+          `，最低置信度 ${screenStateCondition.min_confidence || "未知"}` +
+          `，结果：${matched}`
+        );
+      }
+
+      if (line.startsWith("click ")) {
+        return `【点击】${line.slice("click ".length)}`;
+      }
+      if (line.startsWith("wait ") && line.endsWith("s")) {
+        return `【等待】${line.slice("wait ".length)}`;
+      }
+      if (line === "script run cancelled") {
+        return "【结束】脚本已取消";
+      }
+      if (line.startsWith("script run timed out:")) {
+        return `【错误】脚本等待超时：${line.slice("script run timed out:".length).trim()}`;
+      }
+      if (line.startsWith("script run failed:")) {
+        return `【错误】脚本运行失败：${line.slice("script run failed:".length).trim()}`;
+      }
+      if (line.startsWith("script run setup failed:")) {
+        return `【错误】运行环境不可用：${line.slice("script run setup failed:".length).trim()}`;
+      }
+      if (line.startsWith("script run configuration failed:")) {
+        return `【错误】运行配置错误：${line.slice("script run configuration failed:".length).trim()}`;
+      }
+      return isError ? `【错误】${line}` : `【日志】${line}`;
+    }
+
+    function parseKeyValueLogLine(line, prefix) {
+      if (!line.startsWith(prefix)) {
+        return null;
+      }
+      const fields = {};
+      for (const part of line.slice(prefix.length).split(" ")) {
+        const separator = part.indexOf("=");
+        if (separator <= 0) {
+          continue;
+        }
+        fields[part.slice(0, separator)] = part.slice(separator + 1);
+      }
+      return fields;
     }
 
     function scriptFinishReasonLabel(reason) {

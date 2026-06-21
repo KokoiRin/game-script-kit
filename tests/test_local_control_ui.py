@@ -229,6 +229,15 @@ def test_local_ui_serves_static_assets() -> None:
     assert "scriptImageDependencies" in script
     assert "payload.image_dependencies" in script
     assert "dry_run_images: scriptImageDependencies" in script
+    assert "renderScriptRunLog" in script
+    assert "renderScriptRunEvent" in script
+    assert "renderScriptTextLogLine" in script
+    assert 'line.startsWith("script event ")' in script
+    assert "outputEl.scrollTop = outputEl.scrollHeight" in script
+    assert "【运行】脚本开始" in script
+    assert "【步骤】" in script
+    assert "【图片】匹配" in script
+    assert "【状态】判断界面状态" in script
     assert "已使用脚本状态" in script
     assert "当前脚本没有状态依赖" in script
     assert "状态决策：" in script
