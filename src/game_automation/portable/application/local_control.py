@@ -63,6 +63,10 @@ from game_automation.portable.engine.ports import (
     RunLogger,
     ScreenStateReader,
 )
+from game_automation.portable.engine.run_events import (
+    ScriptRunEvent,
+    format_script_run_event,
+)
 from game_automation.portable.scripts_manager import DEFAULT_SCRIPT_CATALOG
 from game_automation.portable.scripts_manager.catalog import ScriptCatalog, ScriptNotFoundError
 
@@ -74,6 +78,13 @@ class ScriptRunStatus:
     exit_code: int | None = None
     stdout: str = ""
     stderr: str = ""
+    finish_reason: str = "idle"
+    events: tuple[ScriptRunEvent, ...] = ()
+
+    def __post_init__(self) -> None:
+        """运行中的状态默认使用 running 作为结束原因占位。"""
+        if self.running and self.finish_reason == "idle":
+            object.__setattr__(self, "finish_reason", "running")
 
 
 @dataclass(frozen=True, slots=True)
@@ -134,6 +145,7 @@ class _ThreadSafeRunLog:
         self._lock = threading.Lock()
         self._stdout = io.StringIO()
         self._stderr = io.StringIO()
+        self._events: list[ScriptRunEvent] = []
 
     def stdout_writer(self):
         """返回用于重定向 stdout 的 writer。"""
@@ -146,6 +158,12 @@ class _ThreadSafeRunLog:
     def log(self, message: str) -> None:
         """把运行诊断日志追加到 stdout。"""
         self.write_stdout(f"{message}\n")
+
+    def log_event(self, event: ScriptRunEvent) -> None:
+        """记录结构化运行事件，并同步追加可读文本日志。"""
+        with self._lock:
+            self._events.append(event)
+            self._stdout.write(f"{format_script_run_event(event)}\n")
 
     def write_stdout(self, text: str) -> None:
         """追加一段 stdout 文本。"""
@@ -161,6 +179,11 @@ class _ThreadSafeRunLog:
         """返回当前 stdout/stderr 文本快照。"""
         with self._lock:
             return self._stdout.getvalue(), self._stderr.getvalue()
+
+    def snapshot_events(self) -> tuple[ScriptRunEvent, ...]:
+        """返回当前结构化运行事件快照。"""
+        with self._lock:
+            return tuple(self._events)
 
 
 class _RunLogWriter:
@@ -185,6 +208,10 @@ class _StringRunLogger:
     def log(self, message: str) -> None:
         """把运行诊断日志写入同步 stdout 捕获流。"""
         self._stream.write(f"{message}\n")
+
+    def log_event(self, event: ScriptRunEvent) -> None:
+        """把结构化运行事件写入同步 stdout 捕获流。"""
+        self._stream.write(f"{format_script_run_event(event)}\n")
 
 
 class _LocalScreenStateReader(ScreenStateReader):
@@ -225,22 +252,27 @@ class _BackgroundScriptRun:
         self._lock = threading.Lock()
         self._running = True
         self._exit_code: int | None = None
+        self._finish_reason = "running"
 
-    def finish(self, exit_code: int) -> None:
+    def finish(self, exit_code: int, finish_reason: str) -> None:
         """记录后台脚本结束状态。"""
         with self._lock:
             self._running = False
             self._exit_code = exit_code
+            self._finish_reason = finish_reason
 
     def snapshot(self) -> ScriptRunStatus:
         """返回后台脚本当前状态快照。"""
         stdout, stderr = self.log.snapshot()
+        events = self.log.snapshot_events()
         with self._lock:
             return ScriptRunStatus(
                 running=self._running,
                 exit_code=self._exit_code,
                 stdout=stdout,
                 stderr=stderr,
+                finish_reason="running" if self._running else self._finish_reason,
+                events=events,
             )
 
 
@@ -465,16 +497,24 @@ class LocalControlApplication:
                     exit_code=current.exit_code,
                     stdout=current.stdout,
                     stderr=current.stderr + "script is already running\n",
+                    finish_reason=current.finish_reason,
+                    events=current.events,
                 )
             try:
                 script = self._script_with_shared_resources(self._catalog.get(name))
             except ScriptNotFoundError as exc:
-                return ScriptRunStatus(running=False, exit_code=1, stderr=str(exc))
+                return ScriptRunStatus(
+                    running=False,
+                    exit_code=1,
+                    stderr=str(exc),
+                    finish_reason="script_not_found",
+                )
             except (LookupError, ValueError) as exc:
                 return ScriptRunStatus(
                     running=False,
                     exit_code=2,
                     stderr=f"script resource configuration failed: {exc}\n",
+                    finish_reason="configuration_failed",
                 )
 
             session = _BackgroundScriptRun()
@@ -642,10 +682,11 @@ class LocalControlApplication:
                 real_screen_state_reader_factory=self._build_screen_state_reader,
                 cancellation_token=session.cancellation,
                 logger=session.log,
+                emit_step_events=True,
             )
         if result.error_message is not None:
             session.log.write_stderr(f"{result.error_message}\n")
-        session.finish(result.exit_code)
+        session.finish(result.exit_code, result.finish_reason)
 
     def _run_screen_state_probe_session(
         self,

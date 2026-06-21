@@ -90,6 +90,23 @@ class SequenceImageLocator:
         return self.matches[index]
 
 
+class FakeRunEventLogger:
+    """收集 runner 输出的结构化事件和文本日志。"""
+
+    def __init__(self) -> None:
+        """初始化事件和文本列表。"""
+        self.messages: list[str] = []
+        self.events = []
+
+    def log(self, message: str) -> None:
+        """记录普通文本日志。"""
+        self.messages.append(message)
+
+    def log_event(self, event) -> None:
+        """记录结构化脚本运行事件。"""
+        self.events.append(event)
+
+
 class SequenceScreenStateReader:
     """按序返回界面状态，序列耗尽后保持最后一个状态。"""
 
@@ -234,6 +251,37 @@ def test_runner_expands_repeat_steps() -> None:
     ]
 
 
+def test_runner_emits_step_events_for_repeat_and_click() -> None:
+    """验证 runner 启用事件日志后记录 Repeat 轮次和点击执行结果。"""
+    device = FakeInputDevice()
+    logger = FakeRunEventLogger()
+    script = Script(
+        name="repeat-events",
+        window=ScreenWindow(),
+        steps=(Repeat(times=2, steps=(Click(Point(10, 20)),)),),
+    )
+
+    ScriptRunner(device=device, logger=logger, emit_step_events=True).run(script)
+
+    assert [event.event_type for event in logger.events] == [
+        "step_started",
+        "repeat_iteration_started",
+        "step_started",
+        "click_resolved",
+        "click_performed",
+        "step_succeeded",
+        "repeat_iteration_started",
+        "step_started",
+        "click_resolved",
+        "click_performed",
+        "step_succeeded",
+        "step_succeeded",
+    ]
+    assert logger.events[1].details["iteration"] == "1"
+    assert logger.events[6].details["iteration"] == "2"
+    assert logger.events[3].details["point"] == "Point(x=10, y=20)"
+
+
 def test_runner_stops_repeat_when_cancellation_is_requested() -> None:
     """验证 runner 在循环运行中收到取消信号后停止后续步骤。"""
     device = FakeInputDevice()
@@ -337,6 +385,35 @@ def test_runner_executes_else_branch_when_color_condition_does_not_match() -> No
 
     assert [action.name for action in device.actions] == ["wait"]
     assert device.actions[0].duration_seconds == 0.5
+
+
+def test_runner_emits_if_branch_event() -> None:
+    """验证 If 条件分支会记录结构化选择结果。"""
+    device = FakeInputDevice()
+    logger = FakeRunEventLogger()
+    script = Script(
+        name="if-events",
+        window=ScreenWindow(),
+        steps=(
+            If(
+                condition=ColorIs(Point(1, 2), Color(10, 20, 30)),
+                then_steps=(Click(Point(3, 4)),),
+                else_steps=(Wait(0.5),),
+            ),
+        ),
+    )
+
+    ScriptRunner(
+        device=device,
+        color_reader=FakeColorReader(Color(99, 20, 30)),
+        logger=logger,
+        emit_step_events=True,
+    ).run(script)
+
+    branch_events = [event for event in logger.events if event.event_type == "condition_evaluated"]
+    assert branch_events[0].step_path == "1"
+    assert branch_events[0].details["result"] == "False"
+    assert branch_events[0].details["branch"] == "else"
 
 
 def test_runner_skips_empty_else_branch_and_continues() -> None:

@@ -621,11 +621,14 @@ def test_local_control_background_state_script_uses_dry_run_screen_state() -> No
     final = _wait_until_finished(app)
 
     assert final.exit_code == 0
+    assert final.finish_reason == "completed"
     assert final.stderr == ""
-    assert final.stdout == (
-        "screen state condition expected=主页 actual=主页 min_confidence=0.8 matched=True\n"
-        "click Point(x=100, y=200)\n"
-    )
+    assert "script event type=run_started" in final.stdout
+    assert "script event type=condition_evaluated path=1 step=If result=True branch=then" in final.stdout
+    assert "screen state condition expected=主页 actual=主页 min_confidence=0.8 matched=True" in final.stdout
+    assert "click Point(x=100, y=200)" in final.stdout
+    assert "script event type=run_finished status=completed exit_code=0" in final.stdout
+    assert [event.event_type for event in final.events][:2] == ["run_started", "step_started"]
 
 
 def test_local_control_background_run_uses_screen_state_search_ref(tmp_path) -> None:
@@ -668,10 +671,11 @@ def test_local_control_background_run_uses_screen_state_search_ref(tmp_path) -> 
     final = _wait_until_finished(app)
 
     assert final.exit_code == 0
+    assert final.finish_reason == "completed"
     assert final.stderr == ""
     assert str(assets / "离开.png") in final.stdout
     assert "min_confidence=0.75" in final.stdout
-    assert final.stdout.splitlines()[-1] == "click Point(x=0, y=0)"
+    assert "click Point(x=0, y=0)" in final.stdout
 
 
 def test_local_control_can_stop_background_script_run() -> None:
@@ -707,6 +711,7 @@ def test_local_control_can_stop_background_script_run() -> None:
     final = _wait_until_finished(app)
     assert final.running is False
     assert final.exit_code == 130
+    assert final.finish_reason == "cancelled"
     assert "script run cancelled" in final.stderr
 
 
@@ -740,8 +745,10 @@ def test_local_control_rejects_second_background_script_while_running() -> None:
 
     final = _wait_until_finished(app)
     assert duplicate.running is True
+    assert duplicate.finish_reason == "running"
     assert "script is already running" in duplicate.stderr
     assert final.exit_code == 130
+    assert final.finish_reason == "cancelled"
 
 
 def test_local_control_background_status_includes_image_match_logs() -> None:
@@ -783,9 +790,11 @@ def test_local_control_background_status_includes_image_match_logs() -> None:
     final = _wait_until_finished(app)
 
     assert final.exit_code == 0
+    assert final.finish_reason == "completed"
     assert "image match template=assets/start.png" in final.stdout
     assert "found=True" in final.stdout
     assert "confidence=0.91" in final.stdout
+    assert any(event.event_type == "step_succeeded" for event in final.events)
 
 
 def test_local_control_runs_script_with_screen_state_condition(tmp_path) -> None:

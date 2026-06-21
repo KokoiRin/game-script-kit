@@ -36,10 +36,15 @@ class FakeRunLogger:
     def __init__(self) -> None:
         """初始化日志列表。"""
         self.messages: list[str] = []
+        self.events = []
 
     def log(self, message: str) -> None:
         """记录一条运行日志。"""
         self.messages.append(message)
+
+    def log_event(self, event) -> None:
+        """记录一条结构化运行事件。"""
+        self.events.append(event)
 
 
 def build_wait_until_image_script() -> Script:
@@ -90,6 +95,7 @@ def test_run_script_dry_run_prints_plain_script_operations(capsys) -> None:
 
     output = capsys.readouterr().out
     assert result.exit_code == 0
+    assert result.finish_reason == "completed"
     assert result.error_message is None
     assert "wait 3s" in output
     assert "Point(x=242, y=92)" in output
@@ -106,6 +112,7 @@ def test_run_script_reports_invalid_dry_run_color_without_running(capsys) -> Non
     captured = capsys.readouterr()
     assert captured.out == ""
     assert result.exit_code == 2
+    assert result.finish_reason == "configuration_failed"
     assert result.error_message == (
         "script run configuration failed: color must match #[0-9A-Fa-f]{6}"
     )
@@ -121,6 +128,7 @@ def test_run_script_reports_wait_until_timeout(capsys) -> None:
         "wait 0.5s",
     ]
     assert result.exit_code == 1
+    assert result.finish_reason == "timed_out"
     assert result.error_message == "script run timed out: wait until condition timed out"
 
 
@@ -134,6 +142,7 @@ def test_run_script_dry_run_wait_until_image_with_configured_match(capsys) -> No
 
     captured = capsys.readouterr()
     assert result.exit_code == 0
+    assert result.finish_reason == "completed"
     assert result.error_message is None
     assert captured.out == "click Point(x=100, y=200)\n"
 
@@ -150,6 +159,7 @@ def test_run_script_logs_screen_state_condition_when_logger_is_configured() -> N
     )
 
     assert result.exit_code == 0
+    assert result.finish_reason == "completed"
     assert result.error_message is None
     assert logger.messages == [
         "screen state condition expected=主页 actual=主页 min_confidence=0.8 matched=True"
@@ -166,6 +176,7 @@ def test_run_script_dry_run_wait_until_image_times_out_by_default(capsys) -> Non
         "wait 0.5s",
     ]
     assert result.exit_code == 1
+    assert result.finish_reason == "timed_out"
     assert result.error_message == "script run timed out: wait until condition timed out"
 
 
@@ -179,6 +190,7 @@ def test_run_script_dry_run_click_image_with_configured_match(capsys) -> None:
 
     captured = capsys.readouterr()
     assert result.exit_code == 0
+    assert result.finish_reason == "completed"
     assert result.error_message is None
     assert captured.out == "click Point(x=0, y=0)\n"
 
@@ -190,7 +202,37 @@ def test_run_script_dry_run_click_image_reports_missing_target(capsys) -> None:
     captured = capsys.readouterr()
     assert captured.out == ""
     assert result.exit_code == 1
+    assert result.finish_reason == "failed"
     assert result.error_message == "script run failed: image target not found: assets/start.png"
+
+
+def test_run_script_emits_step_events_when_enabled(capsys) -> None:
+    """验证应用层可按需启用结构化步骤事件，不影响默认输出策略。"""
+    logger = FakeRunLogger()
+
+    result = run_script(
+        build_click_image_script(),
+        dry_run=True,
+        dry_run_images=(IMAGE_TEMPLATE_PATH,),
+        logger=logger,
+        emit_step_events=True,
+    )
+
+    captured = capsys.readouterr()
+    assert captured.out == "click Point(x=0, y=0)\n"
+    assert result.exit_code == 0
+    assert result.finish_reason == "completed"
+    assert [event.event_type for event in logger.events] == [
+        "run_started",
+        "step_started",
+        "image_target_resolved",
+        "click_resolved",
+        "click_performed",
+        "step_succeeded",
+        "run_finished",
+    ]
+    assert logger.events[1].step_path == "1"
+    assert logger.events[2].details["point"] == "Point(x=0, y=0)"
 
 
 def test_run_script_dry_run_screen_state_condition_uses_fixed_state(capsys) -> None:

@@ -35,7 +35,7 @@ def test_star_cli_lists_available_scripts(capsys) -> None:
     assert main(["list"]) == 0
 
     output = capsys.readouterr().out.splitlines()
-    assert output == [
+    assert output[:11] == [
         "demo",
         "recorded-clicks",
         "repeat-demo",

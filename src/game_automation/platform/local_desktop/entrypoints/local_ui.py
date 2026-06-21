@@ -17,6 +17,7 @@ from typing import Any
 from game_automation.platform.local_desktop.composition import build_local_control_application
 from game_automation.platform.local_desktop.entrypoints.local_ui_assets import read_ui_asset
 from game_automation.portable.application.local_control import LocalControlApplication
+from game_automation.portable.engine.run_events import script_run_event_to_payload
 
 
 def serve_local_control_ui(*, host: str, port: int, open_browser: bool) -> int:
@@ -312,8 +313,10 @@ def _status_to_payload(status) -> dict[str, object]:
     return {
         "running": status.running,
         "exit_code": status.exit_code,
+        "finish_reason": status.finish_reason,
         "stdout": status.stdout,
         "stderr": status.stderr,
+        "events": [script_run_event_to_payload(event) for event in status.events],
     }
 
 

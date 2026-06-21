@@ -24,6 +24,7 @@ from game_automation.portable.engine.ports import (
     ScreenImageLocator,
     ScreenStateReader,
 )
+from game_automation.portable.engine.run_events import ScriptRunEvent, emit_script_run_event
 from game_automation.portable.engine.runner import ScriptCancelledError, ScriptRunner
 from game_automation.portable.engine.script_requirements import inspect_script_requirements
 
@@ -37,6 +38,7 @@ ScreenStateReaderFactory = Callable[[], ScreenStateReader]
 class ScriptRunResult:
     exit_code: int
     error_message: str | None = None
+    finish_reason: str = "completed"
 
 
 def run_script(
@@ -52,8 +54,15 @@ def run_script(
     real_screen_state_reader_factory: ScreenStateReaderFactory | None = None,
     cancellation_token: CancellationToken | None = None,
     logger: RunLogger | None = None,
+    emit_step_events: bool = False,
 ) -> ScriptRunResult:
     """运行一份已解析脚本，并返回入口层可直接映射的结果。"""
+    if emit_step_events:
+        _emit_run_lifecycle_event(
+            logger,
+            "run_started",
+            details={"script": script.name, "dry_run": str(dry_run)},
+        )
     try:
         runner = _build_runner(
             script,
@@ -67,35 +76,83 @@ def run_script(
             real_screen_state_reader_factory=real_screen_state_reader_factory,
             cancellation_token=cancellation_token,
             logger=logger,
+            emit_step_events=emit_step_events,
         )
     except ValueError as exc:
+        _emit_run_lifecycle_event(
+            logger,
+            "run_finished",
+            status="configuration_failed",
+            details={"exit_code": "2", "error": str(exc)},
+            enabled=emit_step_events,
+        )
         return ScriptRunResult(
             exit_code=2,
             error_message=f"script run configuration failed: {exc}",
+            finish_reason="configuration_failed",
         )
     except RuntimeError as exc:
+        _emit_run_lifecycle_event(
+            logger,
+            "run_finished",
+            status="setup_failed",
+            details={"exit_code": "1", "error": str(exc)},
+            enabled=emit_step_events,
+        )
         return ScriptRunResult(
             exit_code=1,
             error_message=f"script run setup failed: {exc}",
+            finish_reason="setup_failed",
         )
 
     try:
         runner.run(script)
     except ScriptCancelledError as exc:
+        _emit_run_lifecycle_event(
+            logger,
+            "run_finished",
+            status="cancelled",
+            details={"exit_code": "130", "error": str(exc)},
+            enabled=emit_step_events,
+        )
         return ScriptRunResult(
             exit_code=130,
             error_message=str(exc),
+            finish_reason="cancelled",
         )
     except TimeoutError as exc:
+        _emit_run_lifecycle_event(
+            logger,
+            "run_finished",
+            status="timed_out",
+            details={"exit_code": "1", "error": str(exc)},
+            enabled=emit_step_events,
+        )
         return ScriptRunResult(
             exit_code=1,
             error_message=f"script run timed out: {exc}",
+            finish_reason="timed_out",
         )
     except RuntimeError as exc:
+        _emit_run_lifecycle_event(
+            logger,
+            "run_finished",
+            status="failed",
+            details={"exit_code": "1", "error": str(exc)},
+            enabled=emit_step_events,
+        )
         return ScriptRunResult(
             exit_code=1,
             error_message=f"script run failed: {exc}",
+            finish_reason="failed",
         )
+    _emit_run_lifecycle_event(
+        logger,
+        "run_finished",
+        status="completed",
+        details={"exit_code": "0"},
+        enabled=emit_step_events,
+    )
     return ScriptRunResult(exit_code=0)
 
 
@@ -112,6 +169,7 @@ def _build_runner(
     real_screen_state_reader_factory: ScreenStateReaderFactory | None,
     cancellation_token: CancellationToken | None,
     logger: RunLogger | None,
+    emit_step_events: bool,
 ) -> ScriptRunner:
     """按脚本运行模式和端口需求组装 runner。"""
     requirements = inspect_script_requirements(script)
@@ -132,6 +190,7 @@ def _build_runner(
             ),
             cancellation_token=cancellation_token,
             logger=logger,
+            emit_step_events=emit_step_events,
         )
 
     return ScriptRunner(
@@ -150,6 +209,28 @@ def _build_runner(
         ),
         cancellation_token=cancellation_token,
         logger=logger,
+        emit_step_events=emit_step_events,
+    )
+
+
+def _emit_run_lifecycle_event(
+    logger: RunLogger | None,
+    event_type: str,
+    *,
+    status: str = "",
+    details: dict[str, str] | None = None,
+    enabled: bool = True,
+) -> None:
+    """按需输出脚本整体生命周期事件。"""
+    if not enabled:
+        return
+    emit_script_run_event(
+        logger,
+        ScriptRunEvent(
+            event_type=event_type,
+            status=status,
+            details={} if details is None else details,
+        ),
     )
 
 
