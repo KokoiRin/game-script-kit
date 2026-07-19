@@ -745,13 +745,15 @@ def test_runner_stops_normally_when_image_target_is_missing() -> None:
         ),
     )
 
-    ScriptRunner(
+    result = ScriptRunner(
         device=device,
         image_locator=SequenceImageLocator([None]),
         logger=logger,
         emit_step_events=True,
     ).run(script)
 
+    assert result.finish_reason == "stopped_unmet_condition"
+    assert result.message == "图片目标未找到"
     assert device.actions == []
     assert [event.event_type for event in logger.events] == [
         "step_started",
@@ -927,13 +929,15 @@ def test_runner_wait_until_times_out_and_stops_following_steps() -> None:
         ),
     )
 
-    ScriptRunner(
+    result = ScriptRunner(
         device=device,
         color_reader=FakeColorReader(Color(0, 0, 0)),
         logger=logger,
         emit_step_events=True,
     ).run(script)
 
+    assert result.finish_reason == "stopped_unmet_condition"
+    assert result.message == "等待条件未满足"
     assert [action.name for action in device.actions] == ["wait", "wait"]
     assert [action.duration_seconds for action in device.actions] == [0.5, 0.5]
     assert [event.event_type for event in logger.events] == [

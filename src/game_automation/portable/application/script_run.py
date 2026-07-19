@@ -106,7 +106,7 @@ def run_script(
         )
 
     try:
-        runner.run(script)
+        execution_result = runner.run(script)
     except ScriptCancelledError as exc:
         _emit_run_lifecycle_event(
             logger,
@@ -145,6 +145,21 @@ def run_script(
             exit_code=1,
             error_message=f"script run failed: {exc}",
             finish_reason="failed",
+        )
+    if execution_result.finish_reason != "completed":
+        _emit_run_lifecycle_event(
+            logger,
+            "run_finished",
+            status=execution_result.finish_reason,
+            details={
+                "exit_code": "0",
+                "reason": execution_result.message or "",
+            },
+            enabled=emit_step_events,
+        )
+        return ScriptRunResult(
+            exit_code=0,
+            finish_reason=execution_result.finish_reason,
         )
     _emit_run_lifecycle_event(
         logger,

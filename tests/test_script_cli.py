@@ -5,6 +5,7 @@ from types import ModuleType
 
 from game_automation.portable.application.local_control import ControlResult
 from game_automation.portable.application.project_assets import SCRIPT_FOLDER
+from game_automation.portable.application.script_run import ScriptRunResult
 from game_automation.portable.domain import (
     Click,
     Color,
@@ -28,6 +29,11 @@ from game_automation.portable.engine.ports import InputDevice
 from game_automation.portable.scripts_manager.catalog import ScriptCatalog
 from game_automation.platform.local_desktop.entrypoints import cli
 from game_automation.platform.local_desktop.entrypoints.cli import main
+
+
+def _script_run_result(exit_code: int, finish_reason: str) -> ScriptRunResult:
+    """构造 CLI 测试用脚本运行结果。"""
+    return ScriptRunResult(exit_code=exit_code, finish_reason=finish_reason)
 
 
 def test_star_cli_lists_available_scripts(capsys) -> None:
@@ -129,6 +135,166 @@ def test_star_cli_runs_file_backed_script_in_dry_run(monkeypatch, tmp_path) -> N
     monkeypatch.setattr(cli, "DEFAULT_SCRIPT_CATALOG", ScriptCatalog(()))
 
     assert main(["run", "用户脚本", "--dry-run"]) == 0
+
+
+def test_star_cli_run_plan_runs_scripts_in_order(monkeypatch, capsys) -> None:
+    """验证 run-plan 子命令会按给定顺序运行多个脚本。"""
+    calls = []
+    catalog = ScriptCatalog(
+        (
+            Script("first", ScreenWindow(), (Click(Point(1, 2)),)),
+            Script("second", ScreenWindow(), (Click(Point(3, 4)),)),
+        )
+    )
+
+    def fake_run(script, **kwargs):
+        """记录脚本并模拟成功运行。"""
+        calls.append((script.name, kwargs["dry_run"]))
+        print(f"ran {script.name}")
+        return _script_run_result(0, "completed")
+
+    monkeypatch.setattr(cli, "DEFAULT_SCRIPT_CATALOG", catalog)
+    monkeypatch.setattr(cli, "run_script_on_local_desktop", fake_run)
+
+    assert main(["run-plan", "first", "second", "--dry-run"]) == 0
+
+    captured = capsys.readouterr()
+    assert calls == [("first", True), ("second", True)]
+    assert "[1] first: exit_code=0 finish_reason=completed" in captured.out
+    assert "[2] second: exit_code=0 finish_reason=completed" in captured.out
+    assert "ran first" in captured.out
+    assert "ran second" in captured.out
+    assert captured.err == ""
+
+
+def test_star_cli_run_plan_stops_after_first_error(monkeypatch, capsys) -> None:
+    """验证 run-plan 默认遇到失败脚本后停止。"""
+    calls = []
+    catalog = ScriptCatalog(
+        (
+            Script("first", ScreenWindow(), (Click(Point(1, 2)),)),
+            Script("second", ScreenWindow(), (Click(Point(3, 4)),)),
+        )
+    )
+
+    def fake_run(script, **kwargs):
+        """让第一个脚本失败。"""
+        calls.append(script.name)
+        return _script_run_result(1 if script.name == "first" else 0, "failed")
+
+    monkeypatch.setattr(cli, "DEFAULT_SCRIPT_CATALOG", catalog)
+    monkeypatch.setattr(cli, "run_script_on_local_desktop", fake_run)
+
+    assert main(["run-plan", "first", "second", "--dry-run"]) == 1
+
+    captured = capsys.readouterr()
+    assert calls == ["first"]
+    assert "[1] first: exit_code=1 finish_reason=failed" in captured.out
+    assert "[2] second" not in captured.out
+
+
+def test_star_cli_run_plan_can_continue_after_error(monkeypatch, capsys) -> None:
+    """验证 run-plan 可在失败后继续收集后续脚本结果。"""
+    calls = []
+    catalog = ScriptCatalog(
+        (
+            Script("first", ScreenWindow(), (Click(Point(1, 2)),)),
+            Script("second", ScreenWindow(), (Click(Point(3, 4)),)),
+        )
+    )
+
+    def fake_run(script, **kwargs):
+        """让第一个脚本失败，第二个成功。"""
+        calls.append(script.name)
+        return _script_run_result(1 if script.name == "first" else 0, "failed" if script.name == "first" else "completed")
+
+    monkeypatch.setattr(cli, "DEFAULT_SCRIPT_CATALOG", catalog)
+    monkeypatch.setattr(cli, "run_script_on_local_desktop", fake_run)
+
+    assert main(["run-plan", "first", "second", "--dry-run", "--continue-on-error"]) == 1
+
+    captured = capsys.readouterr()
+    assert calls == ["first", "second"]
+    assert "[1] first: exit_code=1 finish_reason=failed" in captured.out
+    assert "[2] second: exit_code=0 finish_reason=completed" in captured.out
+
+
+def test_star_cli_run_plan_reports_unmet_condition_without_running_later_scripts(monkeypatch, capsys) -> None:
+    """验证 run-plan 不会把条件未满足误报为整轮完成。"""
+    calls = []
+    catalog = ScriptCatalog(
+        (
+            Script("first", ScreenWindow(), (Click(Point(1, 2)),)),
+            Script("second", ScreenWindow(), (Click(Point(3, 4)),)),
+        )
+    )
+
+    def fake_run(script, **kwargs):
+        """让第一个脚本因条件未满足正常停止。"""
+        calls.append(script.name)
+        return _script_run_result(0, "stopped_unmet_condition")
+
+    monkeypatch.setattr(cli, "DEFAULT_SCRIPT_CATALOG", catalog)
+    monkeypatch.setattr(cli, "run_script_on_local_desktop", fake_run)
+
+    assert main(["run-plan", "first", "second", "--dry-run"]) == 0
+
+    captured = capsys.readouterr()
+    assert calls == ["first"]
+    assert "Run Plan: exit_code=0 finish_reason=stopped_unmet_condition" in captured.out
+    assert "[1] first: exit_code=0 finish_reason=stopped_unmet_condition" in captured.out
+    assert "[2] second" not in captured.out
+
+
+def test_star_cli_run_plan_uses_each_script_image_dependencies(monkeypatch, tmp_path) -> None:
+    """验证 run-plan 自动图片 dry-run 会按每个脚本解析自己的图片依赖。"""
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    first_image = assets / "first.png"
+    second_image = assets / "second.png"
+    first_image.write_bytes(b"fake")
+    second_image.write_bytes(b"fake")
+    calls = []
+    catalog = ScriptCatalog(
+        (
+            Script("first", ScreenWindow(), (Click(ImageTarget(ImageTemplate(str(first_image)))),)),
+            Script("second", ScreenWindow(), (Click(ImageTarget(ImageTemplate(str(second_image)))),)),
+        )
+    )
+
+    def fake_run(script, **kwargs):
+        """记录每个脚本收到的 dry-run 图片集合。"""
+        calls.append((script.name, kwargs["dry_run_images"]))
+        return _script_run_result(0, "completed")
+
+    monkeypatch.setattr(cli, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(cli, "DEFAULT_SCRIPT_CATALOG", catalog)
+    monkeypatch.setattr(cli, "run_script_on_local_desktop", fake_run)
+
+    assert main(["run-plan", "first", "second", "--dry-run", "--dry-run-script-images"]) == 0
+
+    assert calls == [
+        ("first", (str(first_image),)),
+        ("second", (str(second_image),)),
+    ]
+
+
+def test_star_cli_run_plan_rejects_unknown_script_before_running(monkeypatch, capsys) -> None:
+    """验证 run-plan 遇到未知脚本时不会运行后续脚本。"""
+    calls = []
+    monkeypatch.setattr(
+        cli,
+        "DEFAULT_SCRIPT_CATALOG",
+        ScriptCatalog((Script("second", ScreenWindow(), (Click(Point(3, 4)),)),)),
+    )
+    monkeypatch.setattr(cli, "run_script_on_local_desktop", lambda *args, **kwargs: calls.append("run"))
+
+    assert main(["run-plan", "missing", "second", "--dry-run"]) == 1
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "unknown script: missing" in captured.err
+    assert calls == []
 
 
 def test_star_cli_capture_screen_outputs_application_result(monkeypatch, capsys) -> None:

@@ -20,7 +20,8 @@
 - 通过 `ScreenImageLocator` 端口隔离屏幕图像匹配实现。
 - 提供 macOS `pyautogui` adapter 和 dry-run demo。
 - 提供独立坐标记录工具，用于采集屏幕绝对坐标。
-- 提供命名脚本管理入口，可列出脚本并通过脚本名称启动。
+- 支持从 `scripts/*.json` 加载用户脚本，并通过名称查看详情和运行。
+- 支持 Run Plan，一次按顺序运行多个已有命名脚本并汇总结束原因。
 - 提供本地控制 UI，可在浏览器窗口中选择脚本、运行 dry-run 和触发固定测试任务。
 
 ## 代码结构
@@ -57,7 +58,7 @@ cd /path/to/game-script-kit
 
 ## 列出和运行命名脚本
 
-推荐使用 `star` 统一管理脚本。脚本定义放在 `src/game_automation/portable/scripts_manager/`，默认注册表在 `src/game_automation/portable/scripts_manager/catalog.py`。
+推荐使用 `star` 统一管理脚本。内置脚本来自 `src/game_automation/portable/scripts_manager/`，用户脚本放在项目根目录 `scripts/*.json`。
 
 列出当前可用脚本：
 
@@ -77,6 +78,14 @@ cd /path/to/game-script-kit
 ```bash
 .venv/bin/star run recorded-clicks
 ```
+
+一次按顺序运行多个脚本：
+
+```bash
+.venv/bin/star run-plan file-script-demo repeat-demo --dry-run
+```
+
+Run Plan 默认在第一个未完整执行的脚本后停止；`--continue-on-error` 可继续收集后续脚本结果。条件等待超时或图片目标未找到仍保持成功退出码，但摘要会明确显示 `stopped_unmet_condition`，不会误报为 `completed`。
 
 运行前确认：
 
@@ -124,16 +133,16 @@ curl -X POST http://127.0.0.1:8765/api/click-image \
 
 ## 新增或编辑脚本
 
-第一版脚本定义使用 Python 文件，方便直接复用 `Click`、`Drag`、`Wait`、`ScreenWindow` 和 `AreaWindow`。
+用户脚本优先使用 `scripts/*.json`。可以从 `scripts/file-script-demo.json` 复制一份开始，文件支持局部点位、图片、区域、搜索资源，以及 `wait`、`click`、`repeat`、`if_state`、`wait_until_state` 和 `wait_until_image` 步骤。
 
 新增脚本的最小流程：
 
-1. 在 `src/game_automation/portable/scripts_manager/<script_name>.py` 新增一个 `Script(name="<script-name>", ...)`。
-2. 在 `src/game_automation/portable/scripts_manager/catalog.py` 把它加入 `DEFAULT_SCRIPT_CATALOG`。
-3. 运行 `.venv/bin/star list` 确认脚本名称可见。
-4. 运行 `.venv/bin/star run <script-name> --dry-run` 检查步骤执行顺序。
+1. 在 `scripts/` 下新增一个 `.json` 文件，并填写唯一 `name` 和非空 `steps`。
+2. 运行 `.venv/bin/star list` 确认脚本名称可见。
+3. 运行 `.venv/bin/star details <script-name>` 检查资源和运行能力依赖。
+4. 运行 `.venv/bin/star run <script-name> --dry-run` 检查步骤顺序。
 
-编辑已有脚本时，直接修改 `src/game_automation/portable/scripts_manager/` 下对应文件里的步骤序列，不需要修改 runner 或平台 adapter。
+坏脚本会被隔离并在 stderr 报告，其他有效脚本仍可列出和运行。只有需要复用 Python 领域对象的内置 demo 才需要放到 `scripts_manager`。
 
 ## 运行 demo dry-run
 
@@ -212,7 +221,7 @@ macOS 真实运行前确认：
 - 尽量提供 `region` 缩小搜索范围，避免全屏模板匹配过慢。
 - `min_confidence < 1.0` 走 OpenCV 置信度匹配；项目运行依赖已声明 `opencv-python-headless`。
 
-注意：当前只支持把首个匹配区域中心点解析为点击坐标；拖拽图片目标、多匹配选择、截图录制和脚本文件格式仍未接入。
+注意：当前只支持把首个匹配区域解析为点击坐标；拖拽图片目标、多匹配选择和截图录制仍未接入。
 
 ## 记录鼠标坐标和颜色
 

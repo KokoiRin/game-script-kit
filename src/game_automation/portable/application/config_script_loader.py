@@ -14,6 +14,7 @@ from typing import Any
 from game_automation.portable.domain import (
     Click,
     If,
+    ImageExists,
     ImageRef,
     ImageSearchSpec,
     ImageTarget,
@@ -193,6 +194,8 @@ def _parse_step(value: Any) -> Step:
         return _parse_if_state(payload)
     if step_type == "wait_until_state":
         return _parse_wait_until_state(payload)
+    if step_type == "wait_until_image":
+        return _parse_wait_until_image(payload)
     raise ValueError(f"unsupported step type: {step_type}")
 
 
@@ -249,12 +252,40 @@ def _parse_wait_until_state(value: Any) -> WaitUntil:
     )
 
 
+def _parse_wait_until_image(value: Any) -> WaitUntil:
+    """解析等待图片或搜索目标出现的步骤。"""
+    if not isinstance(value, dict):
+        raise ValueError("wait_until_image step must be an object")
+    return WaitUntil(
+        condition=_parse_image_exists_condition(value),
+        timeout_seconds=_number_value(value.get("timeout"), "wait_until_image timeout"),
+        interval_seconds=_number_value(value.get("interval"), "wait_until_image interval"),
+    )
+
+
 def _parse_screen_state_condition(value: dict[str, Any]) -> ScreenStateIs:
     """解析状态条件。"""
     return ScreenStateIs(
         _required_text(value, "state", "screen state"),
         min_confidence=_parse_optional_confidence(value.get("min_confidence")) or 0.8,
     )
+
+
+def _parse_image_exists_condition(value: dict[str, Any]) -> ImageExists:
+    """解析图片存在条件，支持命名搜索和命名图片。"""
+    min_confidence = _parse_optional_confidence(value.get("min_confidence"))
+    if "search" in value:
+        return ImageExists(
+            SearchRef(_text_value(value["search"], "wait_until_image search")),
+            min_confidence=min_confidence,
+        )
+    if "image" in value:
+        return ImageExists(
+            ImageRef(_text_value(value["image"], "wait_until_image image")),
+            region=_parse_rect(value["region"], field="wait_until_image region") if "region" in value else None,
+            min_confidence=min_confidence,
+        )
+    raise ValueError("wait_until_image must define one of search or image")
 
 
 def _parse_offset(value: Any) -> Point:

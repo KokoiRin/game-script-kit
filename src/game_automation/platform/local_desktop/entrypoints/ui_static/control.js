@@ -446,6 +446,7 @@
     function scriptFinishReasonLabel(reason) {
       const labels = {
         completed: "正常完成",
+        stopped_unmet_condition: "条件未满足，正常停止",
         cancelled: "已取消",
         timed_out: "等待超时",
         failed: "运行失败",

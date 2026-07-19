@@ -135,6 +135,7 @@
 - **THEN** 它会正常停止本轮脚本
 - **AND** 它不会执行后续脚本步骤
 - **AND** 它会输出条件等待未满足的运行事件
+- **AND** runner 返回 `stopped_unmet_condition` 结束原因
 
 #### Scenario: 条件初始满足时立即继续
 - **WHEN** ScriptRunner 执行条件初始结果为真的 `WaitUntil`
@@ -226,6 +227,7 @@
 - **THEN** runner 不会执行该点击
 - **AND** runner 会正常停止本轮脚本
 - **AND** runner 会输出图片目标未找到的运行事件
+- **AND** runner 返回 `stopped_unmet_condition` 结束原因
 
 #### Scenario: 图片目标点击匹配中心点
 - **WHEN** `ScreenImageLocator` 对 `ImageTarget.template` 返回 `ImageMatch`

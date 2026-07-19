@@ -158,6 +158,7 @@ pixel matching.
 
 - **WHEN** 后台脚本因为等待条件超时或图片目标未找到而正常停止
 - **THEN** UI 的黑色运行输出框展示停止原因
+- **AND** 运行状态使用 `stopped_unmet_condition` 结束原因
 - **AND** UI 不把该情况展示为运行失败
 
 #### Scenario: 兼容文本图片匹配日志

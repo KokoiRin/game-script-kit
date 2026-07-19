@@ -197,6 +197,45 @@ def test_screen_image_locator_batch_keeps_best_confidence_when_below_threshold(t
     assert results[0].best_rect is not None
 
 
+def test_screen_image_locator_clamps_opencv_score_above_one(tmp_path, monkeypatch) -> None:
+    """验证 OpenCV 浮点误差超过 1 时会被 adapter 归一化。"""
+    import numpy
+
+    class HighScoreCv2:
+        TM_CCOEFF_NORMED = object()
+
+        def matchTemplate(self, screenshot_array, template_array, method):
+            """返回占位结果，分数由 minMaxLoc 提供。"""
+            return object()
+
+        def minMaxLoc(self, result):
+            """模拟 OpenCV 返回略大于 1 的最高分。"""
+            return (0.0, 1.0000001192092896, (0, 0), (12, 9))
+
+    monkeypatch.setattr(
+        image_matching_adapter,
+        "_load_cv_modules",
+        lambda: (HighScoreCv2(), numpy),
+    )
+    template = _build_template_image()
+    template_path = tmp_path / "button.png"
+    template.save(template_path)
+    screenshot = Image.new("RGB", (40, 30), "white")
+
+    results = PyAutoGuiScreenImageLocator(backend=ScreenshotBackend(screenshot)).locate_requests(
+        (
+            ImageSearchRequest(
+                ImageTemplate(str(template_path)),
+                min_confidence=0.8,
+            ),
+        )
+    )
+
+    assert results[0].match is not None
+    assert results[0].match.confidence == 1.0
+    assert results[0].best_confidence == 1.0
+
+
 def test_screen_image_locator_batch_converts_screenshot_to_array_once(tmp_path, monkeypatch) -> None:
     """验证批量定位只把同一张截图转换为一次 OpenCV 数组。"""
     cv2, numpy = image_matching_adapter._load_cv_modules()

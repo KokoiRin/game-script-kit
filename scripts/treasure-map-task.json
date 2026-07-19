@@ -1,0 +1,87 @@
+{
+  "name": "宝图任务",
+  "resources": {
+    "points": {
+      "活动面板": {
+        "x": 244,
+        "y": 97
+      },
+      "宝图任务对话确认": {
+        "x": 725,
+        "y": 401
+      }
+    },
+    "images": {
+      "宝图任务": "宝图任务.png"
+    },
+    "regions": {
+      "活动列表区": {
+        "left": 200,
+        "top": 160,
+        "width": 620,
+        "height": 360
+      }
+    },
+    "searches": {
+      "宝图任务": {
+        "image": "宝图任务",
+        "region": "活动列表区",
+        "min_confidence": 0.8
+      }
+    }
+  },
+  "steps": [
+    {
+      "wait_until_state": {
+        "state": "主页",
+        "min_confidence": 0.8,
+        "timeout": 3,
+        "interval": 0.5
+      }
+    },
+    {
+      "click": {
+        "point": "活动面板"
+      }
+    },
+    {
+      "wait_until_state": {
+        "state": "活动",
+        "min_confidence": 0.8,
+        "timeout": 5,
+        "interval": 0.5
+      }
+    },
+    {
+      "wait_until_image": {
+        "search": "宝图任务",
+        "min_confidence": 0.8,
+        "timeout": 5,
+        "interval": 0.5
+      }
+    },
+    {
+      "click": {
+        "search": "宝图任务",
+        "min_confidence": 0.8,
+        "offset": {
+          "x": 126,
+          "y": 27
+        }
+      }
+    },
+    {
+      "wait_until_state": {
+        "state": "对话",
+        "min_confidence": 0.8,
+        "timeout": 15,
+        "interval": 0.5
+      }
+    },
+    {
+      "click": {
+        "point": "宝图任务对话确认"
+      }
+    }
+  ]
+}

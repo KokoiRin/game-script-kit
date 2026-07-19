@@ -46,6 +46,14 @@ class ScriptStoppedNormally(RuntimeError):
 
 
 @dataclass(frozen=True, slots=True)
+class ScriptExecutionResult:
+    """记录引擎是否完整执行脚本及正常停止原因。"""
+
+    finish_reason: str = "completed"
+    message: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class ScriptRunner:
     device: InputDevice
     color_reader: PixelColorReader | None = None
@@ -55,12 +63,16 @@ class ScriptRunner:
     logger: RunLogger | None = None
     emit_step_events: bool = False
 
-    def run(self, script: Script) -> None:
-        """按脚本步骤树顺序执行所有步骤。"""
+    def run(self, script: Script) -> ScriptExecutionResult:
+        """按脚本步骤树顺序执行所有步骤并返回可观察结束原因。"""
         try:
             self._run_steps(script, script.steps)
-        except ScriptStoppedNormally:
-            return
+        except ScriptStoppedNormally as exc:
+            return ScriptExecutionResult(
+                finish_reason="stopped_unmet_condition",
+                message=str(exc),
+            )
+        return ScriptExecutionResult()
 
     def _run_steps(self, script: Script, steps: tuple[Step, ...], *, path_prefix: str = "") -> None:
         """按顺序解释一组步骤。"""

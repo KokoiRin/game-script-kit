@@ -119,7 +119,7 @@ def test_run_script_reports_invalid_dry_run_color_without_running(capsys) -> Non
 
 
 def test_run_script_stops_normally_when_wait_until_times_out(capsys) -> None:
-    """验证 WaitUntil 超时时应用层按正常完成返回。"""
+    """验证 WaitUntil 超时时应用层返回未满足条件的结束原因。"""
     result = run_script(WAIT_UNTIL_COLOR_DEMO_SCRIPT, dry_run=True)
 
     captured = capsys.readouterr()
@@ -128,7 +128,7 @@ def test_run_script_stops_normally_when_wait_until_times_out(capsys) -> None:
         "wait 0.5s",
     ]
     assert result.exit_code == 0
-    assert result.finish_reason == "completed"
+    assert result.finish_reason == "stopped_unmet_condition"
     assert result.error_message is None
 
 
@@ -176,7 +176,7 @@ def test_run_script_dry_run_wait_until_image_stops_normally_by_default(capsys) -
         "wait 0.5s",
     ]
     assert result.exit_code == 0
-    assert result.finish_reason == "completed"
+    assert result.finish_reason == "stopped_unmet_condition"
     assert result.error_message is None
 
 
@@ -202,7 +202,7 @@ def test_run_script_dry_run_click_image_stops_normally_when_target_is_missing(ca
     captured = capsys.readouterr()
     assert captured.out == ""
     assert result.exit_code == 0
-    assert result.finish_reason == "completed"
+    assert result.finish_reason == "stopped_unmet_condition"
     assert result.error_message is None
 
 

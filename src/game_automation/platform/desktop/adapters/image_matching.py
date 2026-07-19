@@ -350,7 +350,7 @@ def _locate_template(
         screenshot_array = numpy.array(screenshot.image)
     result = cv2.matchTemplate(screenshot_array, template.array, cv2.TM_CCOEFF_NORMED)
     _, max_score, _, max_location = cv2.minMaxLoc(result)
-    confidence = float(max_score)
+    confidence = _clamp_opencv_confidence(float(max_score))
     left_pixels = int(max_location[0]) + screenshot.origin_left_pixels
     top_pixels = int(max_location[1]) + screenshot.origin_top_pixels
     best_rect = Rect(
@@ -400,6 +400,12 @@ def _log_match_stages(
         f"found={match is not None} "
         f"confidence={None if match is None else match.confidence}"
     )
+
+
+def _clamp_opencv_confidence(score: float) -> float:
+    """把 OpenCV 归一化匹配分数限制在领域允许的置信度范围内。"""
+    # OpenCV 的归一化匹配在极高相似度时可能因浮点误差略微超过 1。
+    return max(0.0, min(1.0, score))
 
 
 def _log_batch_match_stages(

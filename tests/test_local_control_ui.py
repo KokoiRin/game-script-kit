@@ -213,6 +213,7 @@ def test_local_ui_serves_static_assets() -> None:
     assert "height: 280px" in css
     assert "resize: vertical" in css
     assert 'document.querySelector("#screen-state-confidence")' in script
+    assert 'stopped_unmet_condition: "条件未满足，正常停止"' in script
     assert 'document.querySelector("#screen-state-config-summary")' in script
     assert 'document.querySelector("#screen-state-stats")' in script
     assert 'document.querySelector("#screen-state-candidates")' in script

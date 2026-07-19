@@ -1,0 +1,94 @@
+"""编排一轮多个脚本运行的 application module。
+
+本 module 负责按用户给定顺序运行已有脚本、应用停止策略并聚合结果；它不解析
+CLI/HTTP 参数、不读取项目脚本目录，也不解释单个脚本步骤语义。
+"""
+
+from __future__ import annotations
+
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass
+
+from game_automation.portable.domain import Script
+
+
+@dataclass(frozen=True, slots=True)
+class ScriptPlanItem:
+    """描述一轮计划里的单个脚本项。"""
+
+    name: str
+    script: Script
+    dry_run_images: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class ScriptPlanScriptResult:
+    """表达单个脚本运行后可被计划聚合的结果。"""
+
+    exit_code: int
+    finish_reason: str = "completed"
+    stdout: str = ""
+    stderr: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class ScriptPlanItemResult:
+    """记录计划中某个脚本项的执行结果。"""
+
+    index: int
+    script_name: str
+    exit_code: int
+    finish_reason: str
+    stdout: str = ""
+    stderr: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class ScriptPlanResult:
+    """记录一轮计划的整体结果。"""
+
+    exit_code: int
+    finish_reason: str
+    items: tuple[ScriptPlanItemResult, ...]
+
+
+RunPlanItemRunner = Callable[[ScriptPlanItem], ScriptPlanScriptResult]
+
+
+def run_script_plan(
+    items: Sequence[ScriptPlanItem],
+    *,
+    run_item: RunPlanItemRunner,
+    continue_on_error: bool = False,
+) -> ScriptPlanResult:
+    """按顺序运行一轮脚本计划，并根据失败策略决定是否继续。"""
+    item_results: list[ScriptPlanItemResult] = []
+    first_error_code = 0
+    first_incomplete_reason = "completed"
+    for index, item in enumerate(items, start=1):
+        result = run_item(item)
+        item_result = ScriptPlanItemResult(
+            index=index,
+            script_name=item.name,
+            exit_code=result.exit_code,
+            finish_reason=result.finish_reason,
+            stdout=result.stdout,
+            stderr=result.stderr,
+        )
+        item_results.append(item_result)
+        incomplete = result.exit_code != 0 or result.finish_reason != "completed"
+        if incomplete and first_incomplete_reason == "completed":
+            first_incomplete_reason = (
+                result.finish_reason if result.finish_reason != "completed" else "failed"
+            )
+        if result.exit_code != 0:
+            if first_error_code == 0:
+                first_error_code = result.exit_code
+        if incomplete and not continue_on_error:
+            break
+    exit_code = first_error_code
+    return ScriptPlanResult(
+        exit_code=exit_code,
+        finish_reason=first_incomplete_reason,
+        items=tuple(item_results),
+    )

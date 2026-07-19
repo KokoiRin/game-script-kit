@@ -35,6 +35,7 @@ from game_automation.portable.domain import (
     WaitUntil,
     If,
     ImageSearchSpec,
+    ImageExists,
     ImageTemplate,
 )
 
@@ -89,6 +90,27 @@ def test_load_config_script_parses_steps_and_resources(tmp_path) -> None:
                             "interval": 0.5,
                         }
                     },
+                    {
+                        "wait_until_image": {
+                            "search": "离开按钮",
+                            "min_confidence": 0.85,
+                            "timeout": 4,
+                            "interval": 0.25,
+                        }
+                    },
+                    {
+                        "wait_until_image": {
+                            "image": "离开图",
+                            "region": {
+                                "left": 10,
+                                "top": 20,
+                                "width": 30,
+                                "height": 40,
+                            },
+                            "timeout": 2,
+                            "interval": 0.5,
+                        }
+                    },
                 ],
             },
             ensure_ascii=False,
@@ -124,6 +146,16 @@ def test_load_config_script_parses_steps_and_resources(tmp_path) -> None:
         WaitUntil(
             condition=ScreenStateIs("主页", min_confidence=0.75),
             timeout_seconds=3,
+            interval_seconds=0.5,
+        ),
+        WaitUntil(
+            condition=ImageExists(SearchRef("离开按钮"), min_confidence=0.85),
+            timeout_seconds=4,
+            interval_seconds=0.25,
+        ),
+        WaitUntil(
+            condition=ImageExists(ImageRef("离开图"), region=Rect(10, 20, 30, 40)),
+            timeout_seconds=2,
             interval_seconds=0.5,
         ),
     )

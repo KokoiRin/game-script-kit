@@ -7,8 +7,10 @@
 from __future__ import annotations
 
 import argparse
+import io
 import json
 import sys
+from contextlib import redirect_stderr, redirect_stdout
 
 from game_automation.platform.local_desktop.composition import (
     build_local_control_application,
@@ -25,6 +27,13 @@ from game_automation.portable.application.script_details import ScriptDetailsRes
 from game_automation.portable.application.project_scripts import (
     ProjectScriptCatalogResult,
     load_project_script_catalog_result,
+)
+from game_automation.portable.application.run_plan import (
+    ScriptPlanItem,
+    ScriptPlanItemResult,
+    ScriptPlanResult,
+    ScriptPlanScriptResult,
+    run_script_plan,
 )
 from game_automation.portable.application.script_resources import (
     load_shared_script_resources,
@@ -91,6 +100,126 @@ def _run_script(args: argparse.Namespace) -> int:
     if result.error_message is not None:
         print(result.error_message, file=sys.stderr)
     return result.exit_code
+
+
+def _run_plan(args: argparse.Namespace) -> int:
+    """按用户给定顺序运行一轮脚本计划。"""
+    if args.dry_run_script_images and not args.dry_run:
+        print("--dry-run-script-images requires --dry-run", file=sys.stderr)
+        return 2
+    dry_run_screen_state_error = _validate_dry_run_screen_state_args(args)
+    if dry_run_screen_state_error != 0:
+        return dry_run_screen_state_error
+
+    plan_items_result = _resolve_plan_items(args)
+    if isinstance(plan_items_result, int):
+        return plan_items_result
+    dry_run_screen_state_result = _resolve_dry_run_screen_state(args)
+    if dry_run_screen_state_result[0] != 0:
+        return dry_run_screen_state_result[0]
+    dry_run_screen_state = dry_run_screen_state_result[1]
+
+    result = run_script_plan(
+        plan_items_result,
+        run_item=lambda item: _run_plan_item(
+            item,
+            dry_run=args.dry_run,
+            dry_run_color=args.dry_run_color,
+            dry_run_screen_state=dry_run_screen_state,
+        ),
+        continue_on_error=args.continue_on_error,
+    )
+    _print_run_plan_result(result)
+    return result.exit_code
+
+
+def _resolve_plan_items(args: argparse.Namespace) -> tuple[ScriptPlanItem, ...] | int:
+    """解析 Run Plan 中每个脚本名和该脚本自己的 dry-run 图片依赖。"""
+    catalog_result = _load_cli_script_catalog_result()
+    scripts = []
+    for script_name in args.names:
+        try:
+            script = catalog_result.catalog.get(script_name)
+        except ScriptNotFoundError as exc:
+            print(exc, file=sys.stderr)
+            return 1
+        except ValueError as exc:
+            print(f"script configuration failed: {exc}", file=sys.stderr)
+            return 2
+        scripts.append((script_name, script))
+    try:
+        shared_resources = load_shared_script_resources(PROJECT_ROOT)
+    except (LookupError, ValueError) as exc:
+        print(f"script resource configuration failed: {exc}", file=sys.stderr)
+        return 2
+
+    items: list[ScriptPlanItem] = []
+    for script_name, script in scripts:
+        try:
+            script = script_with_shared_resources(script, shared_resources)
+        except (LookupError, ValueError) as exc:
+            print(f"script resource configuration failed: {exc}", file=sys.stderr)
+            return 2
+        dry_run_images = tuple(args.dry_run_image)
+        if args.dry_run_script_images:
+            try:
+                dry_run_images = _merge_dry_run_images(
+                    dry_run_images,
+                    _describe_script(script).image_dependencies,
+                )
+            except (LookupError, ValueError) as exc:
+                print(f"script details configuration failed: {exc}", file=sys.stderr)
+                return 2
+        items.append(ScriptPlanItem(script_name, script, dry_run_images=dry_run_images))
+    return tuple(items)
+
+
+def _run_plan_item(
+    item: ScriptPlanItem,
+    *,
+    dry_run: bool,
+    dry_run_color: str,
+    dry_run_screen_state: str,
+) -> ScriptPlanScriptResult:
+    """运行计划中的单个脚本并捕获输出，供计划摘要统一展示。"""
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+    with redirect_stdout(stdout), redirect_stderr(stderr):
+        result = run_script_on_local_desktop(
+            item.script,
+            dry_run=dry_run,
+            dry_run_color=dry_run_color,
+            dry_run_images=item.dry_run_images,
+            dry_run_screen_state=dry_run_screen_state,
+        )
+    if result.error_message is not None:
+        stderr.write(result.error_message)
+        stderr.write("\n")
+    return ScriptPlanScriptResult(
+        exit_code=result.exit_code,
+        finish_reason=result.finish_reason,
+        stdout=stdout.getvalue(),
+        stderr=stderr.getvalue(),
+    )
+
+
+def _print_run_plan_result(result: ScriptPlanResult) -> None:
+    """打印一轮计划摘要和每个脚本捕获到的输出。"""
+    print(f"Run Plan: exit_code={result.exit_code} finish_reason={result.finish_reason}")
+    for item in result.items:
+        _print_run_plan_item_result(item)
+
+
+def _print_run_plan_item_result(item: ScriptPlanItemResult) -> None:
+    """打印计划中单个脚本的摘要和输出。"""
+    print(
+        f"[{item.index}] {item.script_name}: "
+        f"exit_code={item.exit_code} finish_reason={item.finish_reason}"
+    )
+    if item.stdout:
+        print(item.stdout, end="")
+    if item.stderr:
+        print(item.stderr, file=sys.stderr, end="")
 
 
 def _validate_dry_run_screen_state_args(args: argparse.Namespace) -> int:
@@ -516,6 +645,43 @@ def main(argv: list[str] | None = None) -> int:
         help="Probe current screen state once and use it for dry-run screen-state conditions.",
     )
 
+    run_plan_parser = subparsers.add_parser("run-plan", help="Run many named scripts in order.")
+    run_plan_parser.add_argument("names", nargs="+", help="Script names to run in order.")
+    run_plan_mode = run_plan_parser.add_mutually_exclusive_group()
+    run_plan_mode.add_argument("--dry-run", action="store_true", help="Print planned operations without real mouse.")
+    run_plan_mode.add_argument("--macos", action="store_true", help="Run with macOS adapter (default).")
+    run_plan_parser.add_argument(
+        "--dry-run-color",
+        default="#000000",
+        help="Fixed #RRGGBB screen color used when dry-running color conditions.",
+    )
+    run_plan_parser.add_argument(
+        "--dry-run-image",
+        action="append",
+        default=[],
+        help="Template path treated as found when dry-running image conditions. Can be repeated.",
+    )
+    run_plan_parser.add_argument(
+        "--dry-run-script-images",
+        action="store_true",
+        help="Treat each script's resolved image dependencies as found when dry-running.",
+    )
+    run_plan_parser.add_argument(
+        "--dry-run-screen-state",
+        default=None,
+        help="Fixed screen state used when dry-running screen-state conditions.",
+    )
+    run_plan_parser.add_argument(
+        "--dry-run-probed-screen-state",
+        action="store_true",
+        help="Probe current screen state once and use it for dry-run screen-state conditions.",
+    )
+    run_plan_parser.add_argument(
+        "--continue-on-error",
+        action="store_true",
+        help="Continue running later scripts after a script returns a non-zero exit code.",
+    )
+
     recorder_parser = subparsers.add_parser("recorder", help="Record screen coordinates.")
     recorder_parser.add_argument("--display-interval", type=float, default=1.0, help="Seconds between coordinate prints.")
     recorder_parser.add_argument("--poll-interval", type=float, default=0.05, help="Seconds between keyboard polls.")
@@ -547,6 +713,8 @@ def main(argv: list[str] | None = None) -> int:
         return _run_capture_probe_crops(args)
     elif args.command == "run":
         return _run_script(args)
+    elif args.command == "run-plan":
+        return _run_plan(args)
     elif args.command == "recorder":
         return _run_recorder(args)
     elif args.command == "ui":
