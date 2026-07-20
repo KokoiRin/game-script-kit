@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Star 视觉自动化靶场</title>
+    <link rel="stylesheet" href="/static/lab.css">
+  </head>
+  <body>
+    <main class="lab-shell">
+      <header class="lab-header">
+        <div>
+          <p class="lab-kicker">VISUAL AUTOMATION LAB</p>
+          <h1>任务处理台</h1>
+        </div>
+        <div class="lab-meta">
+          <span id="mode-badge">模式：连接中</span>
+          <span id="sequence-badge">事件：-</span>
+        </div>
+      </header>
+      <section id="lab-app" class="lab-stage" aria-live="polite">
+        <p class="lab-loading">正在连接靶场状态……</p>
+      </section>
+      <footer class="lab-footer">
+        <span>目标应用</span>
+        <span id="truth-status">真值接口：等待连接</span>
+      </footer>
+    </main>
+    <script src="/static/lab.js"></script>
+  </body>
+</html>

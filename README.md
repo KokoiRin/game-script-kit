@@ -131,6 +131,45 @@ curl -X POST http://127.0.0.1:8765/api/click-image \
 .venv/bin/python -m pytest tests/test_local_control.py tests/test_local_control_ui.py tests/test_script_cli.py
 ```
 
+## 视觉自动化靶场
+
+`star-lab` 是独立于 Star 控制 UI 的本地目标应用，用来稳定验证截图、识图、点击、等待和任务编排行为。它不会调用 Star runner，也不会移动鼠标。
+
+启动正常任务场景：
+
+```bash
+.venv/bin/star-lab
+```
+
+只启动服务、不自动打开浏览器，或切换到故障模式：
+
+```bash
+.venv/bin/star-lab --no-open
+.venv/bin/star-lab --mode slow --loading-delay 4
+.venv/bin/star-lab --mode missing_target
+```
+
+默认地址是 `http://127.0.0.1:8770/`。测试程序可以使用独立真值接口验收结果：
+
+```bash
+curl http://127.0.0.1:8770/api/state
+curl http://127.0.0.1:8770/api/events
+curl -X POST http://127.0.0.1:8770/api/reset \
+  -H 'Content-Type: application/json' \
+  -d '{"mode":"normal","loading_delay_seconds":0.6}'
+```
+
+自动化脚本只能通过页面像素和鼠标操作靶场；`/api/state` 与 `/api/events` 只供验收程序读取，避免用 Star 自己报告的结果证明自己成功。
+
+在靶场页面保持可见、屏幕录制和辅助功能权限已经授予的情况下，可以运行真实 Star smoke：
+
+```bash
+.venv/bin/python tools/visual_lab_star_smoke.py
+```
+
+该工具通过 API 重置场景，然后只用 Star 的真实截图、OpenCV 匹配和鼠标点击完成任务，最后再读取真值接口确认状态为 `completed`。
+如果从会抢占前台窗口的终端或开发工具启动，可以加 `--start-delay 5`，并在倒计时内把靶场浏览器放回前台。
+
 ## 新增或编辑脚本
 
 用户脚本优先使用 `scripts/*.json`。可以从 `scripts/file-script-demo.json` 复制一份开始，文件支持局部点位、图片、区域、搜索资源，以及 `wait`、`click`、`repeat`、`if_state`、`wait_until_state` 和 `wait_until_image` 步骤。
