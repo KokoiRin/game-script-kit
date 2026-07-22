@@ -590,6 +590,23 @@ def test_runner_clicks_image_target_center_with_offset_and_region() -> None:
     ]
 
 
+def test_runner_limits_image_target_to_area_window_by_default() -> None:
+    """验证区域窗口内图片目标未声明区域时只搜索窗口范围。"""
+    device = FakeInputDevice()
+    locator = SequenceImageLocator([ImageMatch(Rect(110, 220, 30, 40), confidence=0.9)])
+    window_rect = Rect(100, 200, 800, 600)
+    script = Script(
+        name="window-bounded-image-target",
+        window=AreaWindow(window_rect),
+        steps=(Click(ImageTarget(ImageTemplate("assets/start.png"))),),
+    )
+
+    ScriptRunner(device=device, image_locator=locator).run(script)
+
+    assert locator.calls == [(ImageTemplate("assets/start.png"), window_rect, 1.0)]
+    assert device.actions[0].target == Point(125, 240)
+
+
 def test_runner_clicks_image_target_anchor() -> None:
     """验证图片目标可以点击指定匹配 anchor。"""
     device = FakeInputDevice()

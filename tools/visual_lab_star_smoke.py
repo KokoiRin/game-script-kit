@@ -39,6 +39,11 @@ def main(argv: list[str] | None = None) -> int:
         help="Application Star activates before operating the visual lab.",
     )
     parser.add_argument(
+        "--target-window-title",
+        default="Star 视觉自动化靶场",
+        help="Top-level window title Star raises and binds before the smoke run.",
+    )
+    parser.add_argument(
         "--min-confidence",
         type=float,
         default=0.9,
@@ -66,6 +71,7 @@ def main(argv: list[str] | None = None) -> int:
         _build_smoke_script(min_confidence=args.min_confidence),
         dry_run=False,
         target_application=args.target_app,
+        target_window_title=args.target_window_title,
     )
     truth = _get_json(args.url, "/api/state")
     events = _get_json(args.url, "/api/events")["events"]
@@ -73,6 +79,8 @@ def main(argv: list[str] | None = None) -> int:
         "Visual lab smoke: "
         f"finish_reason={result.finish_reason} truth_state={truth['state']} events={len(events)}"
     )
+    if result.error_message is not None:
+        print(result.error_message)
     if result.finish_reason != "completed" or truth["state"] != "completed":
         return 1
     return 0

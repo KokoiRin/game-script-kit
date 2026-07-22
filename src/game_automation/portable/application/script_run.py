@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from game_automation.portable.adapters.dry_run import (
     DryRunInputDevice,
@@ -15,8 +15,8 @@ from game_automation.portable.adapters.dry_run import (
     DryRunScreenImageLocator,
     DryRunScreenStateReader,
 )
-from game_automation.portable.application.ports import ApplicationActivator
-from game_automation.portable.domain import Color, ImageMatch, ImageTemplate, Rect, Script
+from game_automation.portable.application.ports import ApplicationActivator, ApplicationWindowController
+from game_automation.portable.domain import AreaWindow, Color, ImageMatch, ImageTemplate, Rect, Script
 from game_automation.portable.engine.ports import (
     CancellationToken,
     InputDevice,
@@ -34,6 +34,7 @@ PixelColorReaderFactory = Callable[[], PixelColorReader]
 ScreenImageLocatorFactory = Callable[[], ScreenImageLocator]
 ScreenStateReaderFactory = Callable[[], ScreenStateReader]
 ApplicationActivatorFactory = Callable[[], ApplicationActivator]
+ApplicationWindowControllerFactory = Callable[[], ApplicationWindowController]
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,7 +52,9 @@ def run_script(
     dry_run_images: tuple[str, ...] = (),
     dry_run_screen_state: str = "未知",
     target_application: str | None = None,
+    target_window_title: str | None = None,
     real_application_activator_factory: ApplicationActivatorFactory | None = None,
+    real_application_window_controller_factory: ApplicationWindowControllerFactory | None = None,
     real_device_factory: InputDeviceFactory | None = None,
     real_color_reader_factory: PixelColorReaderFactory | None = None,
     real_image_locator_factory: ScreenImageLocatorFactory | None = None,
@@ -68,13 +71,16 @@ def run_script(
             details={"script": script.name, "dry_run": str(dry_run)},
         )
     try:
-        _activate_target_application(
+        prepared_script = _prepare_target_environment(
+            script,
             dry_run=dry_run,
             target_application=target_application,
+            target_window_title=target_window_title,
             real_application_activator_factory=real_application_activator_factory,
+            real_application_window_controller_factory=real_application_window_controller_factory,
         )
         runner = _build_runner(
-            script,
+            prepared_script,
             dry_run=dry_run,
             dry_run_color=dry_run_color,
             dry_run_images=dry_run_images,
@@ -115,7 +121,7 @@ def run_script(
         )
 
     try:
-        execution_result = runner.run(script)
+        execution_result = runner.run(prepared_script)
     except ScriptCancelledError as exc:
         _emit_run_lifecycle_event(
             logger,
@@ -180,21 +186,40 @@ def run_script(
     return ScriptRunResult(exit_code=0)
 
 
-def _activate_target_application(
+def _prepare_target_environment(
+    script: Script,
     *,
     dry_run: bool,
     target_application: str | None,
+    target_window_title: str | None,
     real_application_activator_factory: ApplicationActivatorFactory | None,
-) -> None:
-    """在真实 runner 创建前通过应用端口激活目标应用。"""
-    if dry_run or target_application is None:
-        return
+    real_application_window_controller_factory: ApplicationWindowControllerFactory | None,
+) -> Script:
+    """在真实 runner 创建前激活应用、选窗并返回本轮脚本副本。"""
+    if dry_run:
+        return script
+    if target_window_title is not None and target_application is None:
+        raise ValueError("target window title requires target application")
+    if target_application is None:
+        return script
     normalized_application = target_application.strip()
     if not normalized_application:
         raise ValueError("target application must not be empty")
     if real_application_activator_factory is None:
         raise RuntimeError("real application activator factory is required")
     real_application_activator_factory().activate(normalized_application)
+    if target_window_title is None:
+        return script
+    normalized_title = target_window_title.strip()
+    if not normalized_title:
+        raise ValueError("target window title must not be empty")
+    if real_application_window_controller_factory is None:
+        raise RuntimeError("real application window controller factory is required")
+    focused_window = real_application_window_controller_factory().focus_window(
+        normalized_application,
+        normalized_title,
+    )
+    return replace(script, window=AreaWindow(focused_window.rect))
 
 
 def _build_runner(

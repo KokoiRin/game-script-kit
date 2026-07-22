@@ -143,7 +143,9 @@ def test_condition_evaluator_returns_true_when_image_exists() -> None:
     )
 
     assert result is True
-    assert locator.calls == [(ImageTemplate("assets/start.png"), None, 1.0)]
+    assert locator.calls == [
+        (ImageTemplate("assets/start.png"), Rect(100, 200, 800, 600), 1.0)
+    ]
 
 
 def test_condition_evaluator_resolves_named_image() -> None:
@@ -161,7 +163,9 @@ def test_condition_evaluator_resolves_named_image() -> None:
     )
 
     assert result is True
-    assert locator.calls == [(ImageTemplate("assets/start.png"), None, 1.0)]
+    assert locator.calls == [
+        (ImageTemplate("assets/start.png"), Rect(100, 200, 800, 600), 1.0)
+    ]
 
 
 def test_condition_evaluator_resolves_named_image_search() -> None:
@@ -214,7 +218,9 @@ def test_condition_evaluator_overrides_named_image_search_confidence() -> None:
         resources=catalog,
     )
 
-    assert locator.calls == [(ImageTemplate("assets/离开.png"), None, 0.9)]
+    assert locator.calls == [
+        (ImageTemplate("assets/离开.png"), Rect(100, 200, 800, 600), 0.9)
+    ]
 
 
 def test_condition_evaluator_reports_unknown_named_image() -> None:

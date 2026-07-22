@@ -4,6 +4,7 @@
 """
 
 from game_automation.portable.application.script_run import run_script
+from game_automation.portable.application.ports import FocusedApplicationWindow
 from game_automation.portable.domain import (
     Click,
     Color,
@@ -408,6 +409,136 @@ def test_run_script_dry_run_does_not_activate_target_application() -> None:
 
     assert result.exit_code == 0
     assert activator_builds == []
+
+
+def test_run_script_focuses_target_window_and_binds_script_copy_before_device() -> None:
+    """验证真实运行按顺序选窗并把窗口矩形绑定到本轮脚本副本。"""
+    events = []
+
+    class FakeApplicationActivator:
+        def activate(self, application: str) -> None:
+            """记录应用激活。"""
+            events.append(("activate", application))
+
+    class FakeWindowController:
+        def focus_window(self, application: str, title_contains: str) -> FocusedApplicationWindow:
+            """记录窗口选择并返回固定屏幕矩形。"""
+            events.append(("focus_window", application, title_contains))
+            return FocusedApplicationWindow("Star 视觉自动化靶场", Rect(100, 200, 800, 600))
+
+    class FakeInputDevice(InputDevice):
+        def click(self, target) -> None:
+            """记录窗口内点位解析后的点击。"""
+            events.append(("click", target))
+
+        def drag_to(self, start, end, duration_seconds: float = 0.0) -> None:
+            """本测试脚本不会拖拽。"""
+
+        def wait(self, duration_seconds: float) -> None:
+            """本测试脚本不会等待。"""
+
+    def build_device() -> FakeInputDevice:
+        """记录输入设备创建时机。"""
+        events.append(("build_device", None))
+        return FakeInputDevice()
+
+    script = Script("window-bound", ScreenWindow(), (Click(Point(10, 20)),))
+
+    result = run_script(
+        script,
+        dry_run=False,
+        target_application="Safari",
+        target_window_title="视觉自动化靶场",
+        real_application_activator_factory=FakeApplicationActivator,
+        real_application_window_controller_factory=FakeWindowController,
+        real_device_factory=build_device,
+    )
+
+    assert result.exit_code == 0
+    assert events == [
+        ("activate", "Safari"),
+        ("focus_window", "Safari", "视觉自动化靶场"),
+        ("build_device", None),
+        ("click", Point(110, 220)),
+    ]
+    assert script.window == ScreenWindow()
+
+
+def test_run_script_reports_target_window_failure_without_device() -> None:
+    """验证窗口选择失败会归一化为 setup failure 并阻止设备创建。"""
+    device_builds = []
+
+    class FakeApplicationActivator:
+        def activate(self, application: str) -> None:
+            """模拟应用激活成功。"""
+
+    class FailingWindowController:
+        def focus_window(self, application: str, title_contains: str) -> FocusedApplicationWindow:
+            """模拟目标窗口不存在。"""
+            raise RuntimeError("target window was not found")
+
+    def build_device():
+        """记录不应发生的输入设备创建。"""
+        device_builds.append(True)
+        raise AssertionError("device must not be created")
+
+    script = Script("window-missing", ScreenWindow(), (Click(Point(1, 2)),))
+
+    result = run_script(
+        script,
+        dry_run=False,
+        target_application="Safari",
+        target_window_title="Missing",
+        real_application_activator_factory=FakeApplicationActivator,
+        real_application_window_controller_factory=FailingWindowController,
+        real_device_factory=build_device,
+    )
+
+    assert result.exit_code == 1
+    assert result.finish_reason == "setup_failed"
+    assert result.error_message == "script run setup failed: target window was not found"
+    assert device_builds == []
+
+
+def test_run_script_rejects_target_window_without_target_application() -> None:
+    """验证 portable application 要求窗口标题和目标应用一起提供。"""
+    script = Script("window-without-app", ScreenWindow(), (Click(Point(1, 2)),))
+
+    result = run_script(
+        script,
+        dry_run=False,
+        target_window_title="视觉自动化靶场",
+        real_device_factory=lambda: (_ for _ in ()).throw(AssertionError("must not build device")),
+    )
+
+    assert result.exit_code == 2
+    assert result.finish_reason == "configuration_failed"
+    assert result.error_message == (
+        "script run configuration failed: target window title requires target application"
+    )
+
+
+def test_run_script_dry_run_does_not_focus_target_window() -> None:
+    """验证 portable dry-run 不创建真实窗口控制 adapter。"""
+    controller_builds = []
+
+    def build_controller():
+        """记录不应发生的窗口控制 adapter 创建。"""
+        controller_builds.append(True)
+        raise AssertionError("window controller must not be created")
+
+    script = Script("dry-window", ScreenWindow(), (Click(Point(1, 2)),))
+
+    result = run_script(
+        script,
+        dry_run=True,
+        target_application="Safari",
+        target_window_title="视觉自动化靶场",
+        real_application_window_controller_factory=build_controller,
+    )
+
+    assert result.exit_code == 0
+    assert controller_builds == []
 
 
 def test_run_script_real_mode_injects_color_reader_for_color_script() -> None:

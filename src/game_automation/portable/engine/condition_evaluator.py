@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from game_automation.portable.domain import Color, ColorIs, ImageExists, Point, Rect, ScreenStateIs
+from game_automation.portable.domain import Color, ColorIs, ImageExists, ScreenStateIs
 from game_automation.portable.domain.conditions import Condition
 from game_automation.portable.domain.point_aliases import TargetCatalog
 from game_automation.portable.domain.windows import Window
@@ -85,7 +85,7 @@ def _evaluate_image_exists(
         image_locator=image_locator,
         resources=resources,
         region=condition.region,
-        region_resolver=lambda region: _resolve_region(window, region),
+        region_resolver=window.resolve_region,
         min_confidence=condition.min_confidence,
         logger=logger,
     )
@@ -116,21 +116,3 @@ def _evaluate_screen_state_is(
             f"matched={matched}"
         )
     return matched
-
-
-def _resolve_region(window: Window, region: Rect | None) -> Rect | None:
-    """按脚本窗口解析图片搜索区域的左上角。"""
-    if region is None:
-        return None
-    top_left = window.resolve(_region_top_left(region))
-    return Rect(
-        left=top_left.x,
-        top=top_left.y,
-        width=region.width,
-        height=region.height,
-    )
-
-
-def _region_top_left(region: Rect) -> Point:
-    """把 Rect 左上角转换为窗口可解析的点。"""
-    return Point(region.left, region.top)

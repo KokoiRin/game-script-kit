@@ -167,16 +167,21 @@ curl -X POST http://127.0.0.1:8770/api/reset \
 .venv/bin/python tools/visual_lab_star_smoke.py
 ```
 
-该工具通过 API 重置场景，自动激活 Safari，然后只用 Star 的真实截图、OpenCV 匹配和鼠标点击完成任务，最后再读取真值接口确认状态为 `completed`。如果使用其他浏览器，可传入 `--target-app "Google Chrome"`。
+该工具通过 API 重置场景，自动激活 Safari、Raise 标题为 `Star 视觉自动化靶场` 的顶层窗口，并把识图限制在该窗口范围，然后只用 Star 的真实截图、OpenCV 匹配和鼠标点击完成任务。最后再读取真值接口确认状态为 `completed`。
 
 普通脚本和 Run Plan 也可以在真实运行前激活目标应用：
 
 ```bash
 .venv/bin/star run click-image-demo --target-app Safari
 .venv/bin/star run-plan first-script second-script --target-app Safari
+.venv/bin/star run click-image-demo \
+  --target-app Safari \
+  --target-window-title "Star 视觉自动化靶场"
 ```
 
-Run Plan 会在每个脚本开始前重新激活一次目标应用。`--target-app` 不能和无桌面副作用的 `--dry-run` 同时使用。
+指定窗口标题后，Star 会要求唯一匹配的可见顶层窗口，用它的左上角解析脚本点位，并把未声明 region 的图片搜索限制在窗口矩形内。Run Plan 会在每个脚本开始前重新读取窗口位置。浏览器标签页不是独立顶层窗口；如果需要在多个页面之间选窗，应把目标页面放进单独的浏览器窗口。
+
+`--target-window-title` 必须和 `--target-app` 一起使用；目标应用参数不能和无桌面副作用的 `--dry-run` 同时使用。
 
 ## 新增或编辑脚本
 

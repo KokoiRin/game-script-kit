@@ -91,6 +91,51 @@ def test_build_real_application_activator_uses_macos_adapter(monkeypatch) -> Non
     assert activator is created["activator"]
 
 
+def test_run_script_on_local_desktop_passes_target_window_controller(monkeypatch) -> None:
+    """验证本地桌面运行会把窗口标题和控制 factory 交给应用层。"""
+    captured = {}
+    script = Script("target-window", ScreenWindow(), (Click(Point(1, 2)),))
+
+    def fake_run_script(*args, **kwargs):
+        """记录 composition 传给应用层的选窗参数。"""
+        captured["kwargs"] = kwargs
+        return "result"
+
+    monkeypatch.setattr(composition, "run_script", fake_run_script)
+
+    result = composition.run_script_on_local_desktop(
+        script,
+        dry_run=False,
+        target_application="Safari",
+        target_window_title="视觉自动化靶场",
+    )
+
+    assert result == "result"
+    assert captured["kwargs"]["target_window_title"] == "视觉自动化靶场"
+    assert (
+        captured["kwargs"]["real_application_window_controller_factory"]
+        is composition.build_real_application_window_controller
+    )
+
+
+def test_build_real_application_window_controller_uses_macos_adapter(monkeypatch) -> None:
+    """验证本地桌面窗口控制 factory 会延迟创建 macOS adapter。"""
+    import game_automation.platform.macos.adapters as macos
+
+    created = {}
+
+    class FakeWindowController:
+        def __init__(self) -> None:
+            """记录 macOS 窗口 adapter 创建。"""
+            created["controller"] = self
+
+    monkeypatch.setattr(macos, "MacOSApplicationWindowController", FakeWindowController)
+
+    controller = composition.build_real_application_window_controller()
+
+    assert controller is created["controller"]
+
+
 def test_run_script_on_local_desktop_passes_screen_state_reader_factory(monkeypatch) -> None:
     """验证本地桌面运行脚本会把界面状态 reader factory 交给应用层。"""
     captured = {}

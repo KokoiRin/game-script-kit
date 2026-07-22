@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 from game_automation.portable.application.local_control import LocalControlApplication, ScreenCapture
-from game_automation.portable.application.ports import ApplicationActivator
+from game_automation.portable.application.ports import ApplicationActivator, ApplicationWindowController
 from game_automation.portable.application.project_assets import PROJECT_ROOT
 from game_automation.portable.application.project_scripts import load_project_script_catalog_result
 from game_automation.portable.application.script_run import ScriptRunResult, run_script
@@ -29,6 +29,7 @@ def run_script_on_local_desktop(
     dry_run_images: tuple[str, ...] = (),
     dry_run_screen_state: str = "未知",
     target_application: str | None = None,
+    target_window_title: str | None = None,
 ) -> ScriptRunResult:
     """用本机桌面 adapter 运行脚本。"""
     return run_script(
@@ -38,7 +39,9 @@ def run_script_on_local_desktop(
         dry_run_images=dry_run_images,
         dry_run_screen_state=dry_run_screen_state,
         target_application=target_application,
+        target_window_title=target_window_title,
         real_application_activator_factory=build_real_application_activator,
+        real_application_window_controller_factory=build_real_application_window_controller,
         real_device_factory=build_real_input_device,
         real_color_reader_factory=build_real_color_reader,
         real_image_locator_factory=build_real_screen_image_locator,
@@ -51,6 +54,13 @@ def build_real_application_activator() -> ApplicationActivator:
     from game_automation.platform.macos.adapters import MacOSApplicationActivator
 
     return MacOSApplicationActivator()
+
+
+def build_real_application_window_controller() -> ApplicationWindowController:
+    """延迟创建 macOS 窗口控制 adapter，避免普通运行触发辅助功能依赖。"""
+    from game_automation.platform.macos.adapters import MacOSApplicationWindowController
+
+    return MacOSApplicationWindowController()
 
 
 def build_local_control_application() -> LocalControlApplication:

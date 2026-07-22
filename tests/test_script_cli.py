@@ -189,6 +189,41 @@ def test_star_cli_run_plan_passes_target_application_to_every_script(monkeypatch
     assert calls == [("first", "Safari"), ("second", "Safari")]
 
 
+def test_star_cli_run_plan_passes_target_window_to_every_script(monkeypatch) -> None:
+    """验证 run-plan 为每个脚本项传递同一目标窗口标题。"""
+    calls = []
+    catalog = ScriptCatalog(
+        (
+            Script("first", ScreenWindow(), (Click(Point(1, 2)),)),
+            Script("second", ScreenWindow(), (Click(Point(3, 4)),)),
+        )
+    )
+
+    def fake_run(script, **kwargs):
+        """记录每个脚本收到的窗口标题。"""
+        calls.append((script.name, kwargs["target_window_title"]))
+        return _script_run_result(0, "completed")
+
+    monkeypatch.setattr(cli, "DEFAULT_SCRIPT_CATALOG", catalog)
+    monkeypatch.setattr(cli, "run_script_on_local_desktop", fake_run)
+
+    assert main(
+        [
+            "run-plan",
+            "first",
+            "second",
+            "--target-app",
+            "Safari",
+            "--target-window-title",
+            "视觉自动化靶场",
+        ]
+    ) == 0
+    assert calls == [
+        ("first", "视觉自动化靶场"),
+        ("second", "视觉自动化靶场"),
+    ]
+
+
 def test_star_cli_run_plan_rejects_target_application_in_dry_run(monkeypatch, capsys) -> None:
     """验证 run-plan dry-run 不允许请求真实应用激活。"""
     calls = []
@@ -1006,6 +1041,44 @@ def test_star_cli_run_rejects_target_application_in_dry_run(monkeypatch, capsys)
 
     captured = capsys.readouterr()
     assert "--target-app cannot be used with --dry-run" in captured.err
+    assert calls == []
+
+
+def test_star_cli_run_passes_target_window_title(monkeypatch) -> None:
+    """验证 run 子命令把目标窗口标题交给本地桌面 composition。"""
+    calls = []
+
+    def fake_run(script, **kwargs):
+        """记录真实运行收到的目标窗口标题。"""
+        calls.append(kwargs["target_window_title"])
+        return _script_run_result(0, "completed")
+
+    monkeypatch.setattr(cli, "run_script_on_local_desktop", fake_run)
+
+    assert main(
+        [
+            "run",
+            "recorded-clicks",
+            "--target-app",
+            "Safari",
+            "--target-window-title",
+            "视觉自动化靶场",
+        ]
+    ) == 0
+    assert calls == ["视觉自动化靶场"]
+
+
+def test_star_cli_run_rejects_target_window_without_application(monkeypatch, capsys) -> None:
+    """验证 run 子命令要求窗口标题和目标应用一起使用。"""
+    calls = []
+    monkeypatch.setattr(cli, "run_script_on_local_desktop", lambda *args, **kwargs: calls.append(True))
+
+    assert main(
+        ["run", "recorded-clicks", "--target-window-title", "视觉自动化靶场"]
+    ) == 2
+
+    captured = capsys.readouterr()
+    assert "--target-window-title requires --target-app" in captured.err
     assert calls == []
 
 

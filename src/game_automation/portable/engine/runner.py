@@ -319,11 +319,8 @@ class ScriptRunner:
         return resolved
 
     def _resolve_image_target_region(self, script: Script, region: Rect | None) -> Rect | None:
-        """按脚本窗口解析图片目标搜索区域左上角。"""
-        if region is None:
-            return None
-        top_left = script.window.resolve(Point(region.left, region.top))
-        return Rect(top_left.x, top_left.y, region.width, region.height)
+        """按脚本窗口解析图片目标的默认或显式搜索区域。"""
+        return script.window.resolve_region(region)
 
     def _emit_event(
         self,

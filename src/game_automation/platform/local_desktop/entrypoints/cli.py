@@ -100,6 +100,7 @@ def _run_script(args: argparse.Namespace) -> int:
         dry_run_images=dry_run_images,
         dry_run_screen_state=dry_run_screen_state,
         target_application=args.target_app,
+        target_window_title=args.target_window_title,
     )
     if result.error_message is not None:
         print(result.error_message, file=sys.stderr)
@@ -134,6 +135,7 @@ def _run_plan(args: argparse.Namespace) -> int:
             dry_run_color=args.dry_run_color,
             dry_run_screen_state=dry_run_screen_state,
             target_application=args.target_app,
+            target_window_title=args.target_window_title,
         ),
         continue_on_error=args.continue_on_error,
     )
@@ -189,6 +191,7 @@ def _run_plan_item(
     dry_run_color: str,
     dry_run_screen_state: str,
     target_application: str | None,
+    target_window_title: str | None,
 ) -> ScriptPlanScriptResult:
     """运行计划中的单个脚本并捕获输出，供计划摘要统一展示。"""
     stdout = io.StringIO()
@@ -201,6 +204,7 @@ def _run_plan_item(
             dry_run_images=item.dry_run_images,
             dry_run_screen_state=dry_run_screen_state,
             target_application=target_application,
+            target_window_title=target_window_title,
         )
     if result.error_message is not None:
         stderr.write(result.error_message)
@@ -245,6 +249,9 @@ def _validate_dry_run_screen_state_args(args: argparse.Namespace) -> int:
 
 def _validate_target_application_args(args: argparse.Namespace) -> int:
     """拒绝要求无副作用的 dry-run 同时激活真实应用。"""
+    if args.target_window_title is not None and args.target_app is None:
+        print("--target-window-title requires --target-app", file=sys.stderr)
+        return 2
     if args.target_app is not None and args.dry_run:
         print("--target-app cannot be used with --dry-run", file=sys.stderr)
         return 2
@@ -667,6 +674,11 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="Activate this application before a real script run.",
     )
+    run_parser.add_argument(
+        "--target-window-title",
+        default=None,
+        help="Raise the unique top-level window containing this title and bind its bounds.",
+    )
 
     run_plan_parser = subparsers.add_parser("run-plan", help="Run many named scripts in order.")
     run_plan_parser.add_argument("names", nargs="+", help="Script names to run in order.")
@@ -708,6 +720,11 @@ def main(argv: list[str] | None = None) -> int:
         "--target-app",
         default=None,
         help="Activate this application before every real plan item.",
+    )
+    run_plan_parser.add_argument(
+        "--target-window-title",
+        default=None,
+        help="Raise and bind the matching top-level window before every real plan item.",
     )
 
     recorder_parser = subparsers.add_parser("recorder", help="Record screen coordinates.")
