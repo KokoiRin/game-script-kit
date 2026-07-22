@@ -167,6 +167,40 @@ def test_star_cli_run_plan_runs_scripts_in_order(monkeypatch, capsys) -> None:
     assert captured.err == ""
 
 
+def test_star_cli_run_plan_passes_target_application_to_every_script(monkeypatch) -> None:
+    """验证 run-plan 会在每个脚本项运行时传递同一目标应用。"""
+    calls = []
+    catalog = ScriptCatalog(
+        (
+            Script("first", ScreenWindow(), (Click(Point(1, 2)),)),
+            Script("second", ScreenWindow(), (Click(Point(3, 4)),)),
+        )
+    )
+
+    def fake_run(script, **kwargs):
+        """记录每个脚本收到的目标应用。"""
+        calls.append((script.name, kwargs["target_application"]))
+        return _script_run_result(0, "completed")
+
+    monkeypatch.setattr(cli, "DEFAULT_SCRIPT_CATALOG", catalog)
+    monkeypatch.setattr(cli, "run_script_on_local_desktop", fake_run)
+
+    assert main(["run-plan", "first", "second", "--target-app", "Safari"]) == 0
+    assert calls == [("first", "Safari"), ("second", "Safari")]
+
+
+def test_star_cli_run_plan_rejects_target_application_in_dry_run(monkeypatch, capsys) -> None:
+    """验证 run-plan dry-run 不允许请求真实应用激活。"""
+    calls = []
+    monkeypatch.setattr(cli, "run_script_on_local_desktop", lambda *args, **kwargs: calls.append(True))
+
+    assert main(["run-plan", "first", "--dry-run", "--target-app", "Safari"]) == 2
+
+    captured = capsys.readouterr()
+    assert "--target-app cannot be used with --dry-run" in captured.err
+    assert calls == []
+
+
 def test_star_cli_run_plan_stops_after_first_error(monkeypatch, capsys) -> None:
     """验证 run-plan 默认遇到失败脚本后停止。"""
     calls = []
@@ -946,6 +980,33 @@ def test_star_cli_run_defaults_to_macos(monkeypatch, capsys) -> None:
         Point(741, 400),
     ]
     assert drags == []
+
+
+def test_star_cli_run_passes_target_application(monkeypatch) -> None:
+    """验证 run 子命令把目标应用交给本地桌面 composition。"""
+    calls = []
+
+    def fake_run(script, **kwargs):
+        """记录真实运行收到的目标应用。"""
+        calls.append((script.name, kwargs["target_application"]))
+        return _script_run_result(0, "completed")
+
+    monkeypatch.setattr(cli, "run_script_on_local_desktop", fake_run)
+
+    assert main(["run", "recorded-clicks", "--target-app", "Safari"]) == 0
+    assert calls == [("recorded-clicks", "Safari")]
+
+
+def test_star_cli_run_rejects_target_application_in_dry_run(monkeypatch, capsys) -> None:
+    """验证 run dry-run 不允许请求真实应用激活。"""
+    calls = []
+    monkeypatch.setattr(cli, "run_script_on_local_desktop", lambda *args, **kwargs: calls.append(True))
+
+    assert main(["run", "recorded-clicks", "--dry-run", "--target-app", "Safari"]) == 2
+
+    captured = capsys.readouterr()
+    assert "--target-app cannot be used with --dry-run" in captured.err
+    assert calls == []
 
 
 def test_star_cli_run_injects_color_reader_for_conditional_script(monkeypatch, capsys) -> None:

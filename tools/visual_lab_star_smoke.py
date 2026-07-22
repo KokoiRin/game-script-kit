@@ -34,6 +34,11 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run Star against the local visual lab.")
     parser.add_argument("--url", default="http://127.0.0.1:8770", help="Running visual lab URL.")
     parser.add_argument(
+        "--target-app",
+        default="Safari",
+        help="Application Star activates before operating the visual lab.",
+    )
+    parser.add_argument(
         "--min-confidence",
         type=float,
         default=0.9,
@@ -60,6 +65,7 @@ def main(argv: list[str] | None = None) -> int:
     result = run_script_on_local_desktop(
         _build_smoke_script(min_confidence=args.min_confidence),
         dry_run=False,
+        target_application=args.target_app,
     )
     truth = _get_json(args.url, "/api/state")
     events = _get_json(args.url, "/api/events")["events"]

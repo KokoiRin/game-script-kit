@@ -161,14 +161,22 @@ curl -X POST http://127.0.0.1:8770/api/reset \
 
 自动化脚本只能通过页面像素和鼠标操作靶场；`/api/state` 与 `/api/events` 只供验收程序读取，避免用 Star 自己报告的结果证明自己成功。
 
-在靶场页面保持可见、屏幕录制和辅助功能权限已经授予的情况下，可以运行真实 Star smoke：
+在 Safari 已经打开靶场页面、屏幕录制和辅助功能权限已经授予的情况下，可以运行真实 Star smoke：
 
 ```bash
 .venv/bin/python tools/visual_lab_star_smoke.py
 ```
 
-该工具通过 API 重置场景，然后只用 Star 的真实截图、OpenCV 匹配和鼠标点击完成任务，最后再读取真值接口确认状态为 `completed`。
-如果从会抢占前台窗口的终端或开发工具启动，可以加 `--start-delay 5`，并在倒计时内把靶场浏览器放回前台。
+该工具通过 API 重置场景，自动激活 Safari，然后只用 Star 的真实截图、OpenCV 匹配和鼠标点击完成任务，最后再读取真值接口确认状态为 `completed`。如果使用其他浏览器，可传入 `--target-app "Google Chrome"`。
+
+普通脚本和 Run Plan 也可以在真实运行前激活目标应用：
+
+```bash
+.venv/bin/star run click-image-demo --target-app Safari
+.venv/bin/star run-plan first-script second-script --target-app Safari
+```
+
+Run Plan 会在每个脚本开始前重新激活一次目标应用。`--target-app` 不能和无桌面副作用的 `--dry-run` 同时使用。
 
 ## 新增或编辑脚本
 

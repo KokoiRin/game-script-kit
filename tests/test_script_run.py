@@ -314,6 +314,102 @@ def test_run_script_real_mode_uses_injected_device_without_color_reader(capsys) 
     ]
 
 
+def test_run_script_activates_target_application_before_creating_device() -> None:
+    """验证真实运行会先激活目标应用，再创建输入设备并执行动作。"""
+    events = []
+
+    class FakeApplicationActivator:
+        def activate(self, application: str) -> None:
+            """记录目标应用激活。"""
+            events.append(("activate", application))
+
+    class FakeInputDevice(InputDevice):
+        def click(self, target) -> None:
+            """记录脚本点击。"""
+            events.append(("click", target))
+
+        def drag_to(self, start, end, duration_seconds: float = 0.0) -> None:
+            """本测试脚本不会拖拽。"""
+
+        def wait(self, duration_seconds: float) -> None:
+            """本测试脚本不会等待。"""
+
+    def build_device() -> FakeInputDevice:
+        """记录输入设备创建时机。"""
+        events.append(("build_device", None))
+        return FakeInputDevice()
+
+    script = Script("activate-first", ScreenWindow(), (Click(Point(5, 6)),))
+
+    result = run_script(
+        script,
+        dry_run=False,
+        target_application="Safari",
+        real_application_activator_factory=FakeApplicationActivator,
+        real_device_factory=build_device,
+    )
+
+    assert result.exit_code == 0
+    assert result.finish_reason == "completed"
+    assert events == [
+        ("activate", "Safari"),
+        ("build_device", None),
+        ("click", Point(5, 6)),
+    ]
+
+
+def test_run_script_reports_target_application_activation_failure_without_device() -> None:
+    """验证目标应用激活失败会阻止真实输入设备创建。"""
+    device_builds = []
+
+    class FailingApplicationActivator:
+        def activate(self, application: str) -> None:
+            """模拟平台无法激活目标应用。"""
+            raise RuntimeError(f"cannot activate {application}")
+
+    def build_device():
+        """记录不应发生的输入设备创建。"""
+        device_builds.append(True)
+        raise AssertionError("device must not be created")
+
+    script = Script("activation-fails", ScreenWindow(), (Click(Point(1, 2)),))
+
+    result = run_script(
+        script,
+        dry_run=False,
+        target_application="Missing App",
+        real_application_activator_factory=FailingApplicationActivator,
+        real_device_factory=build_device,
+    )
+
+    assert result.exit_code == 1
+    assert result.finish_reason == "setup_failed"
+    assert result.error_message == "script run setup failed: cannot activate Missing App"
+    assert device_builds == []
+
+
+def test_run_script_dry_run_does_not_activate_target_application() -> None:
+    """验证 portable dry-run 即使收到目标应用也不会产生桌面副作用。"""
+    activator_builds = []
+
+    def build_activator():
+        """记录不应发生的目标应用 adapter 创建。"""
+        activator_builds.append(True)
+        raise AssertionError("activator must not be created")
+
+    script = Script("dry-run-no-activation", ScreenWindow(), (Click(Point(1, 2)),))
+
+    result = run_script(
+        script,
+        dry_run=True,
+        target_application="Safari",
+        real_application_activator_factory=build_activator,
+    )
+
+    assert result.exit_code == 0
+    assert activator_builds == []
+
+
 def test_run_script_real_mode_injects_color_reader_for_color_script() -> None:
     """验证有颜色需求脚本真实运行时会使用注入的取色 adapter。"""
     clicks = []

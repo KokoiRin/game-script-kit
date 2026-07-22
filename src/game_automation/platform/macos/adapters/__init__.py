@@ -4,6 +4,7 @@
 也不处理命令行模式选择。
 """
 
+from game_automation.platform.macos.adapters.application_activation import MacOSApplicationActivator
 from game_automation.platform.macos.adapters.pointer_device import MacOSPointerDevice
 
-__all__ = ["MacOSPointerDevice"]
+__all__ = ["MacOSApplicationActivator", "MacOSPointerDevice"]

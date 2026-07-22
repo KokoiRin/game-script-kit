@@ -47,6 +47,50 @@ def test_run_script_on_local_desktop_passes_screen_image_locator_factory(monkeyp
     assert captured["kwargs"]["real_image_locator_factory"] is composition.build_real_screen_image_locator
 
 
+def test_run_script_on_local_desktop_passes_target_application_activator(monkeypatch) -> None:
+    """验证本地桌面运行会把目标应用和激活 factory 交给应用层。"""
+    captured = {}
+    script = Script("target-app", ScreenWindow(), (Click(Point(1, 2)),))
+
+    def fake_run_script(*args, **kwargs):
+        """记录本地桌面 composition 传给应用层的目标应用参数。"""
+        captured["kwargs"] = kwargs
+        return "result"
+
+    monkeypatch.setattr(composition, "run_script", fake_run_script)
+
+    result = composition.run_script_on_local_desktop(
+        script,
+        dry_run=False,
+        target_application="Safari",
+    )
+
+    assert result == "result"
+    assert captured["kwargs"]["target_application"] == "Safari"
+    assert (
+        captured["kwargs"]["real_application_activator_factory"]
+        is composition.build_real_application_activator
+    )
+
+
+def test_build_real_application_activator_uses_macos_adapter(monkeypatch) -> None:
+    """验证本地桌面激活 factory 会延迟创建 macOS adapter。"""
+    import game_automation.platform.macos.adapters as macos
+
+    created = {}
+
+    class FakeApplicationActivator:
+        def __init__(self) -> None:
+            """记录 macOS adapter 创建。"""
+            created["activator"] = self
+
+    monkeypatch.setattr(macos, "MacOSApplicationActivator", FakeApplicationActivator)
+
+    activator = composition.build_real_application_activator()
+
+    assert activator is created["activator"]
+
+
 def test_run_script_on_local_desktop_passes_screen_state_reader_factory(monkeypatch) -> None:
     """验证本地桌面运行脚本会把界面状态 reader factory 交给应用层。"""
     captured = {}

@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 from game_automation.portable.application.local_control import LocalControlApplication, ScreenCapture
+from game_automation.portable.application.ports import ApplicationActivator
 from game_automation.portable.application.project_assets import PROJECT_ROOT
 from game_automation.portable.application.project_scripts import load_project_script_catalog_result
 from game_automation.portable.application.script_run import ScriptRunResult, run_script
@@ -27,6 +28,7 @@ def run_script_on_local_desktop(
     dry_run_color: str = "#000000",
     dry_run_images: tuple[str, ...] = (),
     dry_run_screen_state: str = "未知",
+    target_application: str | None = None,
 ) -> ScriptRunResult:
     """用本机桌面 adapter 运行脚本。"""
     return run_script(
@@ -35,11 +37,20 @@ def run_script_on_local_desktop(
         dry_run_color=dry_run_color,
         dry_run_images=dry_run_images,
         dry_run_screen_state=dry_run_screen_state,
+        target_application=target_application,
+        real_application_activator_factory=build_real_application_activator,
         real_device_factory=build_real_input_device,
         real_color_reader_factory=build_real_color_reader,
         real_image_locator_factory=build_real_screen_image_locator,
         real_screen_state_reader_factory=build_real_screen_state_reader,
     )
+
+
+def build_real_application_activator() -> ApplicationActivator:
+    """延迟创建 macOS 应用激活 adapter，避免普通运行触发平台能力。"""
+    from game_automation.platform.macos.adapters import MacOSApplicationActivator
+
+    return MacOSApplicationActivator()
 
 
 def build_local_control_application() -> LocalControlApplication:

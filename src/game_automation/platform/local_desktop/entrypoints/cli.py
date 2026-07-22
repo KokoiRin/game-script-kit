@@ -54,6 +54,9 @@ def _run_list() -> int:
 
 def _run_script(args: argparse.Namespace) -> int:
     """按名称运行脚本。"""
+    target_application_error = _validate_target_application_args(args)
+    if target_application_error != 0:
+        return target_application_error
     if args.dry_run_script_images and not args.dry_run:
         print("--dry-run-script-images requires --dry-run", file=sys.stderr)
         return 2
@@ -96,6 +99,7 @@ def _run_script(args: argparse.Namespace) -> int:
         dry_run_color=args.dry_run_color,
         dry_run_images=dry_run_images,
         dry_run_screen_state=dry_run_screen_state,
+        target_application=args.target_app,
     )
     if result.error_message is not None:
         print(result.error_message, file=sys.stderr)
@@ -104,6 +108,9 @@ def _run_script(args: argparse.Namespace) -> int:
 
 def _run_plan(args: argparse.Namespace) -> int:
     """按用户给定顺序运行一轮脚本计划。"""
+    target_application_error = _validate_target_application_args(args)
+    if target_application_error != 0:
+        return target_application_error
     if args.dry_run_script_images and not args.dry_run:
         print("--dry-run-script-images requires --dry-run", file=sys.stderr)
         return 2
@@ -126,6 +133,7 @@ def _run_plan(args: argparse.Namespace) -> int:
             dry_run=args.dry_run,
             dry_run_color=args.dry_run_color,
             dry_run_screen_state=dry_run_screen_state,
+            target_application=args.target_app,
         ),
         continue_on_error=args.continue_on_error,
     )
@@ -180,6 +188,7 @@ def _run_plan_item(
     dry_run: bool,
     dry_run_color: str,
     dry_run_screen_state: str,
+    target_application: str | None,
 ) -> ScriptPlanScriptResult:
     """运行计划中的单个脚本并捕获输出，供计划摘要统一展示。"""
     stdout = io.StringIO()
@@ -191,6 +200,7 @@ def _run_plan_item(
             dry_run_color=dry_run_color,
             dry_run_images=item.dry_run_images,
             dry_run_screen_state=dry_run_screen_state,
+            target_application=target_application,
         )
     if result.error_message is not None:
         stderr.write(result.error_message)
@@ -229,6 +239,14 @@ def _validate_dry_run_screen_state_args(args: argparse.Namespace) -> int:
         return 2
     if args.dry_run_probed_screen_state and args.dry_run_screen_state is not None:
         print("--dry-run-probed-screen-state conflicts with --dry-run-screen-state", file=sys.stderr)
+        return 2
+    return 0
+
+
+def _validate_target_application_args(args: argparse.Namespace) -> int:
+    """拒绝要求无副作用的 dry-run 同时激活真实应用。"""
+    if args.target_app is not None and args.dry_run:
+        print("--target-app cannot be used with --dry-run", file=sys.stderr)
         return 2
     return 0
 
@@ -644,6 +662,11 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Probe current screen state once and use it for dry-run screen-state conditions.",
     )
+    run_parser.add_argument(
+        "--target-app",
+        default=None,
+        help="Activate this application before a real script run.",
+    )
 
     run_plan_parser = subparsers.add_parser("run-plan", help="Run many named scripts in order.")
     run_plan_parser.add_argument("names", nargs="+", help="Script names to run in order.")
@@ -680,6 +703,11 @@ def main(argv: list[str] | None = None) -> int:
         "--continue-on-error",
         action="store_true",
         help="Continue running later scripts after a script returns a non-zero exit code.",
+    )
+    run_plan_parser.add_argument(
+        "--target-app",
+        default=None,
+        help="Activate this application before every real plan item.",
     )
 
     recorder_parser = subparsers.add_parser("recorder", help="Record screen coordinates.")

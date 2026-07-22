@@ -15,6 +15,7 @@ from game_automation.portable.adapters.dry_run import (
     DryRunScreenImageLocator,
     DryRunScreenStateReader,
 )
+from game_automation.portable.application.ports import ApplicationActivator
 from game_automation.portable.domain import Color, ImageMatch, ImageTemplate, Rect, Script
 from game_automation.portable.engine.ports import (
     CancellationToken,
@@ -32,6 +33,7 @@ InputDeviceFactory = Callable[[], InputDevice]
 PixelColorReaderFactory = Callable[[], PixelColorReader]
 ScreenImageLocatorFactory = Callable[[], ScreenImageLocator]
 ScreenStateReaderFactory = Callable[[], ScreenStateReader]
+ApplicationActivatorFactory = Callable[[], ApplicationActivator]
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,6 +50,8 @@ def run_script(
     dry_run_color: str = "#000000",
     dry_run_images: tuple[str, ...] = (),
     dry_run_screen_state: str = "未知",
+    target_application: str | None = None,
+    real_application_activator_factory: ApplicationActivatorFactory | None = None,
     real_device_factory: InputDeviceFactory | None = None,
     real_color_reader_factory: PixelColorReaderFactory | None = None,
     real_image_locator_factory: ScreenImageLocatorFactory | None = None,
@@ -64,6 +68,11 @@ def run_script(
             details={"script": script.name, "dry_run": str(dry_run)},
         )
     try:
+        _activate_target_application(
+            dry_run=dry_run,
+            target_application=target_application,
+            real_application_activator_factory=real_application_activator_factory,
+        )
         runner = _build_runner(
             script,
             dry_run=dry_run,
@@ -169,6 +178,23 @@ def run_script(
         enabled=emit_step_events,
     )
     return ScriptRunResult(exit_code=0)
+
+
+def _activate_target_application(
+    *,
+    dry_run: bool,
+    target_application: str | None,
+    real_application_activator_factory: ApplicationActivatorFactory | None,
+) -> None:
+    """在真实 runner 创建前通过应用端口激活目标应用。"""
+    if dry_run or target_application is None:
+        return
+    normalized_application = target_application.strip()
+    if not normalized_application:
+        raise ValueError("target application must not be empty")
+    if real_application_activator_factory is None:
+        raise RuntimeError("real application activator factory is required")
+    real_application_activator_factory().activate(normalized_application)
 
 
 def _build_runner(
