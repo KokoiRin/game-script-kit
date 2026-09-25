@@ -36,6 +36,25 @@ def _script_run_result(exit_code: int, finish_reason: str) -> ScriptRunResult:
     return ScriptRunResult(exit_code=exit_code, finish_reason=finish_reason)
 
 
+def test_file_hotkey_runs_in_order_in_dry_run(monkeypatch, tmp_path, capsys) -> None:
+    """文件脚本在循环中粘贴时，模拟运行应按顺序显示等待与 Command+V。"""
+    script_dir = tmp_path / SCRIPT_FOLDER
+    script_dir.mkdir()
+    (script_dir / "paste.json").write_text(json.dumps({
+        "name": "粘贴测试",
+        "steps": [{"wait": 0.2}, {"repeat": {
+            "times": 2, "steps": [{"hotkey": ["command", "v"]}],
+        }}],
+    }), encoding="utf-8")
+    monkeypatch.setattr(cli, "PROJECT_ROOT", tmp_path)
+
+    assert main(["run", "粘贴测试", "--dry-run"]) == 0
+
+    assert capsys.readouterr().out.splitlines() == [
+        "wait 0.2s", "hotkey command+v", "hotkey command+v",
+    ]
+
+
 def test_star_cli_lists_available_scripts(capsys) -> None:
     """验证 list 子命令逐行输出已注册脚本。"""
     assert main(["list"]) == 0

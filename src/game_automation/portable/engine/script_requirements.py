@@ -59,7 +59,7 @@ def _inspect_step(step: Step) -> ScriptRequirements:
     if isinstance(step, Click) and isinstance(step.point, ImageTarget):
         return ScriptRequirements(needs_image_locator=True)
     if isinstance(step, Repeat):
-        return _inspect_steps(step.steps)
+        return _merge_requirements(_inspect_steps(step.steps), _inspect_condition(step.break_if))
     if isinstance(step, If):
         return _merge_requirements(
             _inspect_condition(step.condition),

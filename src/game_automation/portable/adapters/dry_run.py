@@ -1,7 +1,7 @@
 """实现 dry-run adapter。
 
 本 module 只把输入动作打印到 stdout，并为条件脚本提供固定屏幕状态结果；
-它不执行真实鼠标动作、不读取真实屏幕，也不决定 dry-run 模式何时启用。
+它不执行真实输入动作、不读取真实屏幕，也不决定 dry-run 模式何时启用。
 """
 
 from __future__ import annotations
@@ -20,6 +20,10 @@ from game_automation.portable.engine.ports import (
 
 
 class DryRunInputDevice(InputDevice):
+    def hotkey(self, keys: tuple[str, ...]) -> None:
+        """打印组合键，不触发键盘或读取剪贴板。"""
+        print(f"hotkey {'+'.join(keys)}")
+
     def click(self, target: Point) -> None:
         print(f"click {target}")
 

@@ -120,6 +120,7 @@ def _collect_step_state_dependencies(step: Step, states: list[str]) -> None:
             _collect_step_state_dependencies(child, states)
         return
     if isinstance(step, Repeat):
+        _collect_condition_state_dependencies(step.break_if, states)
         for child in step.steps:
             _collect_step_state_dependencies(child, states)
         return
@@ -192,6 +193,7 @@ def _collect_step_image_dependencies(
             _collect_step_image_dependencies(child, images, resources=resources)
         return
     if isinstance(step, Repeat):
+        _collect_condition_image_dependencies(step.break_if, images, resources=resources)
         for child in step.steps:
             _collect_step_image_dependencies(child, images, resources=resources)
         return
@@ -272,6 +274,7 @@ def _collect_step_image_readiness_dependencies(
             _collect_step_image_readiness_dependencies(child, dependencies, resources=resources)
         return
     if isinstance(step, Repeat):
+        _collect_condition_image_readiness_dependencies(step.break_if, dependencies, resources=resources)
         for child in step.steps:
             _collect_step_image_readiness_dependencies(child, dependencies, resources=resources)
         return
@@ -425,6 +428,7 @@ def _collect_step_dependencies(step: Step, dependencies: list[str]) -> None:
             _collect_step_dependencies(child, dependencies)
         return
     if isinstance(step, Repeat):
+        _collect_condition_dependencies(step.break_if, dependencies)
         for child in step.steps:
             _collect_step_dependencies(child, dependencies)
         return

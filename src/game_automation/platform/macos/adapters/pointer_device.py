@@ -1,6 +1,6 @@
-"""实现 engine.ports.InputDevice，通过 pyautogui 驱动 macOS 鼠标。
+"""实现 engine.ports.InputDevice，通过 pyautogui 驱动 macOS 输入设备。
 
-本 module 只封装真实鼠标点击、拖拽和等待；它不解释脚本步骤，
+本 module 只封装真实鼠标点击、拖拽、组合键和等待；它不解释脚本步骤，
 也不处理脚本运行的错误展示。
 """
 
@@ -26,6 +26,31 @@ class MacOSPointerDevice(InputDevice):
     def click(self, target: Point) -> None:
         """把跨平台点击请求转换为 macOS 左键点击。"""
         self._call_backend("click", target.x, target.y, button="left")
+
+    def hotkey(self, keys: tuple[str, ...]) -> None:
+        """依次按下组合键，即使中途失败也尝试逆序释放。"""
+        pressed: list[str] = []
+        try:
+            for key in keys:
+                # 底层可能先发送事件再报错，因此调用前就登记需要清理的键。
+                pressed.append(key)
+                self._call_backend("keyDown", key)
+        finally:
+            failsafe = self._backend.FAILSAFE
+            release_error: RuntimeError | None = None
+            try:
+                # 鼠标移到安全角后 keyUp 也会被拦截；仅释放阶段绕过检查，避免修饰键卡住。
+                self._backend.FAILSAFE = False
+                for key in reversed(pressed):
+                    try:
+                        self._call_backend("keyUp", key)
+                    except RuntimeError as exc:
+                        # 一个键释放失败不能阻止后续修饰键的清理。
+                        release_error = release_error or exc
+            finally:
+                self._backend.FAILSAFE = failsafe
+            if release_error is not None:
+                raise release_error
 
     def drag_to(
         self,
@@ -78,6 +103,6 @@ class MacOSPointerDevice(InputDevice):
             method(*args, **kwargs)
         except Exception as exc:
             raise RuntimeError(
-                "macOS pointer operation failed. Check Accessibility permissions "
+                "macOS input operation failed. Check Accessibility permissions "
                 "for the terminal or Python runtime."
             ) from exc

@@ -7,6 +7,7 @@ from game_automation.portable.application.script_run import run_script
 from game_automation.portable.application.ports import FocusedApplicationWindow
 from game_automation.portable.domain import (
     Click,
+    Hotkey,
     Color,
     ImageExists,
     ImageMatch,
@@ -46,6 +47,63 @@ class FakeRunLogger:
     def log_event(self, event) -> None:
         """记录一条结构化运行事件。"""
         self.events.append(event)
+
+
+def test_hotkey_run_logs_performed_keys() -> None:
+    """组合键执行成功后，运行日志应给出实际执行的键组合，供 CLI/UI 展示。"""
+    logger = FakeRunLogger()
+    script = Script("paste", ScreenWindow(), (Hotkey(("command", "v")),))
+
+    result = run_script(script, dry_run=True, logger=logger, emit_step_events=True)
+
+    assert result.finish_reason == "completed"
+    performed = [event for event in logger.events if event.event_type == "hotkey_performed"]
+    assert len(performed) == 1
+    assert performed[0].details == {"keys": "command+v"}
+
+
+def test_hotkey_failure_stops_script_without_success_event() -> None:
+    """输入设备拒绝粘贴时，脚本应报告失败、停止后续步骤，且不记录组合键成功。"""
+    class FailingKeyboard(InputDevice):
+        def hotkey(self, keys: tuple[str, ...]) -> None:
+            """模拟设备按键失败。"""
+            raise RuntimeError("keyboard blocked")
+
+        def wait(self, duration_seconds: float) -> None:
+            """后续步骤若被误执行，立即让测试失败。"""
+            raise AssertionError("continued after hotkey failure")
+
+    logger = FakeRunLogger()
+    script = Script("paste", ScreenWindow(), (Hotkey(("command", "v")), Wait(1)))
+
+    result = run_script(script, dry_run=False, real_device_factory=FailingKeyboard,
+                        logger=logger, emit_step_events=True)
+
+    assert result.exit_code == 1
+    assert result.finish_reason == "failed"
+    assert "keyboard blocked" in result.error_message
+    assert not any(event.event_type == "hotkey_performed" for event in logger.events)
+
+
+def test_cancelled_script_does_not_send_hotkey() -> None:
+    """执行前已取消的脚本应返回 cancelled，不向设备发送粘贴按键。"""
+    class Cancelled:
+        def is_cancelled(self) -> bool:
+            """模拟用户已请求取消。"""
+            return True
+
+    class UnexpectedKeyboard(InputDevice):
+        def hotkey(self, keys: tuple[str, ...]) -> None:
+            """取消后若仍发送按键则让测试失败。"""
+            raise AssertionError("sent hotkey after cancellation")
+
+    result = run_script(
+        Script("paste", ScreenWindow(), (Hotkey(("command", "v")),)),
+        dry_run=False, real_device_factory=UnexpectedKeyboard, cancellation_token=Cancelled(),
+    )
+
+    assert result.exit_code == 130
+    assert result.finish_reason == "cancelled"
 
 
 def build_wait_until_image_script() -> Script:

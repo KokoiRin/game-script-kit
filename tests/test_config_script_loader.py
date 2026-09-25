@@ -40,6 +40,23 @@ from game_automation.portable.domain import (
 )
 
 
+@pytest.mark.parametrize("keys", [[], "cv", None, {}, ["command", 1],
+                                      ["command", ""], ["command", "typo"],
+                                      ["command", "command"]])
+def test_invalid_hotkey_is_isolated_as_config_error(tmp_path, keys) -> None:
+    """组合键格式或键名无效时，加载阶段应隔离坏脚本并指出 hotkey 配置错误。"""
+    (tmp_path / "bad.json").write_text(json.dumps({
+        "name": "bad", "steps": [{"hotkey": keys}],
+    }), encoding="utf-8")
+
+    result = load_config_scripts_with_errors(tmp_path, asset_root=tmp_path)
+
+    assert result.entries == ()
+    assert len(result.errors) == 1
+    assert "bad.json" in result.errors[0].message
+    assert "hotkey" in result.errors[0].message
+
+
 def test_load_config_script_parses_steps_and_resources(tmp_path) -> None:
     """验证 JSON 脚本可以描述常用步骤和局部资源别名。"""
     script_dir = tmp_path / "scripts"

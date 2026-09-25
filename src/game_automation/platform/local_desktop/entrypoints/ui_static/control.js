@@ -318,6 +318,9 @@
       if (event.type === "step_stopped") {
         return "";
       }
+      if (event.type === "repeat_interrupted") {
+        return `【跳过】${path} ${details.reason}`;
+      }
       if (event.type === "repeat_iteration_started") {
         return `【循环】${path} 第 ${details.iteration || "?"}/${details.total || "?"} 轮开始`;
       }
@@ -347,6 +350,9 @@
       if (event.type === "click_performed") {
         return `【点击】${path} 已点击：${details.point || "未知"}`;
       }
+      if (event.type === "hotkey_performed") {
+        return `【组合键】${path} 已按下并释放：${details.keys || "未知"}`;
+      }
       if (event.type === "drag_resolved") {
         return `【拖拽】${path} 从 ${details.start || "未知"} 到 ${details.end || "未知"}，持续 ${details.duration || "0"} 秒`;
       }
@@ -363,6 +369,7 @@
       const labels = {
         Click: "点击",
         Drag: "拖拽",
+        Hotkey: "组合键",
         Wait: "等待",
         Repeat: "循环",
         If: "条件分支",
@@ -406,6 +413,9 @@
 
       if (line.startsWith("click ")) {
         return `【点击】${line.slice("click ".length)}`;
+      }
+      if (line.startsWith("hotkey ")) {
+        return `【组合键】${line.slice("hotkey ".length)}`;
       }
       if (line.startsWith("wait ") && line.endsWith("s")) {
         return `【等待】${line.slice("wait ".length)}`;

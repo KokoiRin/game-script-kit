@@ -7,7 +7,7 @@
 ## 当前能力
 
 - 使用带名称的 `Script` 表达一组按顺序执行的步骤。
-- 支持原子动作步骤：`Click`、`Drag`、`Wait`。
+- 支持原子动作步骤：`Click`、`Drag`、`Wait`、`Hotkey`。
 - 支持固定次数重复步骤：`Repeat(times, steps)`。
 - 支持颜色条件分支：`If(ColorIs(...), then_steps, else_steps)`。
 - 支持颜色条件等待：`WaitUntil(ColorIs(...), timeout_seconds, interval_seconds)`。
@@ -44,7 +44,7 @@ src/game_automation/
 
 迁移到新平台时，优先保留 `portable/`，替换或重接 `platform/`。旧的 `game_automation.domain`、`game_automation.engine`、`game_automation.adapters` 等导入路径已经移除，新代码统一使用 `game_automation.portable.*` 或 `game_automation.platform.*`。
 
-OpenSpec 规格和已归档变更放在 `openspec/`。
+开发规则见 [AGENTS.md](AGENTS.md)，稳定架构约束见 [docs/architecture.md](docs/architecture.md)。[OpenSpec 历史资料](openspec/README.md) 原地保留用于追溯，新开发不再要求 OpenSpec 流程或校验；自动化测试继续维护。
 
 ## 安装
 
@@ -185,7 +185,28 @@ curl -X POST http://127.0.0.1:8770/api/reset \
 
 ## 新增或编辑脚本
 
-用户脚本优先使用 `scripts/*.json`。可以从 `scripts/file-script-demo.json` 复制一份开始，文件支持局部点位、图片、区域、搜索资源，以及 `wait`、`click`、`repeat`、`if_state`、`wait_until_state` 和 `wait_until_image` 步骤。
+用户脚本优先使用 `scripts/*.json`。可以从 `scripts/file-script-demo.json` 复制一份开始，文件支持局部点位、图片、区域、搜索资源，以及 `wait`、`click`、`hotkey`、`repeat`、`if_state`、`wait_until_state` 和 `wait_until_image` 步骤。
+
+### 粘贴与组合键
+
+把这个步骤插入脚本，即可在当前获得焦点的输入框模拟 Command+V：
+
+```json
+{"hotkey": ["command", "v"]}
+```
+
+现成的 [粘贴脚本](scripts/paste.json) 会等待 3 秒，再执行一次 Command+V：
+
+```bash
+.venv/bin/star run 粘贴 --dry-run
+.venv/bin/star run 粘贴
+```
+
+先复制要粘贴的内容，启动真实运行后在 3 秒内切换并点中目标输入框。也可以在自己的脚本里先用 `click` 点中输入框，再执行 `hotkey`。组合键使用剪贴板已有内容，不写入剪贴板；动作完成只表示按键已发送，不保证目标应用接受了粘贴。真实运行需要辅助功能权限。
+
+键名使用小写，当前支持 `a`–`z`、`0`–`9`、`command`、`ctrl`、`alt`、`shift`、`enter`、`tab`、`esc`、`space`。按列表顺序按下、逆序释放；单键可写成 `{"hotkey": ["enter"]}`。空列表、重复键和不支持的键名会作为配置错误报告。模拟运行只打印动作，不触发真实键盘。
+
+### 编辑流程
 
 新增脚本的最小流程：
 
@@ -380,4 +401,10 @@ ScriptRunner(device).run(script)
 
 ## 项目状态
 
-这是一个早期实验项目，当前重点是领域模型和 port-and-adapter 边界。屏幕图像匹配端口、脚本级图片存在条件和按图片定位点击已经建立；OCR、脚本文件格式、多窗口编排和自动窗口查找都还没有实现。
+这是一个早期实验项目，当前重点是领域模型和 port-and-adapter 边界。已支持 JSON 文件脚本、屏幕识别与图片点击、组合键输入（包括 Command+V）、Run Plan、运行前激活应用和按标题锁定单个目标窗口，并提供独立视觉靶场用于验证。OCR 和多窗口编排尚未实现。
+
+`repeat` 可选 `"break_if_image": {"image": "离开聊天", "min_confidence": 0.9}`：在每个步骤边界和图片等待轮询时检查，命中则结束这一层 repeat，继续它后面的步骤。可用嵌套 repeat 让外层开始下一轮。
+
+显式 `"times": null` 表示无限 repeat；`wait_until_image` 的 `"timeout": null` 表示无限等待。两者都可通过控制台“停止”或 CLI Ctrl+C 取消，省略字段仍按配置错误处理。
+
+`click` 可附带 `"then_hotkeys": [["command", "v"], ["enter"]]`，点击后连续执行这些组合键，中间不进行图片中断检查或固定等待；用户取消仍在每组按键前检查。

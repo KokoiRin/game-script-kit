@@ -10,6 +10,8 @@ import http.client
 import json
 import threading
 
+import pytest
+
 from game_automation.portable.application.local_control import (
     ControlResult,
     ImageMatchPreviewResult,
@@ -52,12 +54,16 @@ def test_local_ui_lists_scripts_over_http() -> None:
     assert "wait-until-color-demo" in payload["scripts"]
 
 
-def test_local_ui_uses_file_backed_scripts_over_http(tmp_path) -> None:
-    """验证 UI HTTP 接口可以列出、描述并启动文件脚本。"""
+@pytest.mark.parametrize("step,summary,output", [
+    ({"wait": 0}, "Wait 0s", "wait 0.0s"),
+    ({"hotkey": ["command", "v"]}, "Hotkey command+v", "hotkey command+v"),
+])
+def test_local_ui_uses_file_backed_scripts_over_http(tmp_path, step, summary, output) -> None:
+    """UI 应能列出文件脚本、展示等待或组合键详情，并通过模拟运行返回对应动作。"""
     script_dir = tmp_path / SCRIPT_FOLDER
     script_dir.mkdir()
     (script_dir / "user.json").write_text(
-        '{"name": "用户脚本", "steps": [{"wait": 0}]}',
+        json.dumps({"name": "用户脚本", "steps": [step]}),
         encoding="utf-8",
     )
     catalog = load_project_script_catalog(tmp_path, base_catalog=ScriptCatalog(()))
@@ -91,8 +97,9 @@ def test_local_ui_uses_file_backed_scripts_over_http(tmp_path) -> None:
 
     assert scripts_payload["scripts"] == ["用户脚本"]
     assert details_payload["name"] == "用户脚本"
-    assert details_payload["steps"] == ["Wait 0s"]
+    assert details_payload["steps"] == [summary]
     assert run_payload["exit_code"] == 0
+    assert output in run_payload["stdout"]
 
 
 def test_local_ui_reports_bad_file_scripts_over_http(tmp_path) -> None:

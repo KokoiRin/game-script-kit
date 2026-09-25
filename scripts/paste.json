@@ -1,0 +1,7 @@
+{
+  "name": "粘贴",
+  "steps": [
+    {"wait": 3},
+    {"hotkey": ["command", "v"]}
+  ]
+}

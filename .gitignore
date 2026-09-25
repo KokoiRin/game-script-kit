@@ -14,7 +14,8 @@ htmlcov/
 .codex/
 .hermes/
 .star/
-assets/
+assets/*
+!assets/anonymous-chat/
 resources/xqtd/
 
 .DS_Store

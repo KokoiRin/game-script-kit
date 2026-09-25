@@ -13,6 +13,7 @@ from typing import Any
 
 from game_automation.portable.domain import (
     Click,
+    Hotkey,
     If,
     ImageExists,
     ImageRef,
@@ -187,7 +188,15 @@ def _parse_step(value: Any) -> Step:
     if step_type == "wait":
         return Wait(_number_value(payload, "wait duration"))
     if step_type == "click":
-        return Click(_parse_click_target(payload))
+        target = _parse_click_target(payload)
+        hotkeys = payload.get("then_hotkeys", [])
+        if not isinstance(hotkeys, list) or any(not isinstance(keys, list) for keys in hotkeys):
+            raise ValueError("click then_hotkeys must be a list of key lists")
+        return Click(target, then_hotkeys=tuple(Hotkey(tuple(keys)) for keys in hotkeys))
+    if step_type == "hotkey":
+        if not isinstance(payload, list):
+            raise ValueError("hotkey must be a non-empty list of key names")
+        return Hotkey(tuple(payload))
     if step_type == "repeat":
         return _parse_repeat(payload)
     if step_type == "if_state":
@@ -227,7 +236,12 @@ def _parse_repeat(value: Any) -> Repeat:
     """解析 repeat 步骤。"""
     if not isinstance(value, dict):
         raise ValueError("repeat step must be an object")
-    return Repeat(times=_int_value(value.get("times"), "repeat times"), steps=_parse_steps(value.get("steps")))
+    return Repeat(
+        times=(None if "times" in value and value["times"] is None
+               else _int_value(value.get("times"), "repeat times")),
+        steps=_parse_steps(value.get("steps")),
+        break_if=_parse_image_exists_condition(value["break_if_image"]) if "break_if_image" in value else None,
+    )
 
 
 def _parse_if_state(value: Any) -> If:
@@ -258,7 +272,8 @@ def _parse_wait_until_image(value: Any) -> WaitUntil:
         raise ValueError("wait_until_image step must be an object")
     return WaitUntil(
         condition=_parse_image_exists_condition(value),
-        timeout_seconds=_number_value(value.get("timeout"), "wait_until_image timeout"),
+        timeout_seconds=(None if "timeout" in value and value["timeout"] is None
+                         else _number_value(value.get("timeout"), "wait_until_image timeout")),
         interval_seconds=_number_value(value.get("interval"), "wait_until_image interval"),
     )
 
@@ -273,6 +288,8 @@ def _parse_screen_state_condition(value: dict[str, Any]) -> ScreenStateIs:
 
 def _parse_image_exists_condition(value: dict[str, Any]) -> ImageExists:
     """解析图片存在条件，支持命名搜索和命名图片。"""
+    if not isinstance(value, dict):
+        raise ValueError("image condition must be an object")
     min_confidence = _parse_optional_confidence(value.get("min_confidence"))
     if "search" in value:
         return ImageExists(

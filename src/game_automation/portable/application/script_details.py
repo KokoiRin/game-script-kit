@@ -15,6 +15,7 @@ from game_automation.portable.domain import (
     Click,
     ColorIs,
     Drag,
+    Hotkey,
     If,
     ImageExists,
     ImageRef,
@@ -142,16 +143,20 @@ def _collect_state_decisions(
 def _describe_step(step: Step, *, indent: str) -> tuple[str, ...]:
     """把单个脚本步骤转换成摘要行。"""
     if isinstance(step, Click):
-        return (f"{indent}Click {_describe_target(step.point)}",)
+        keys = " → ".join("+".join(action.keys) for action in step.then_hotkeys)
+        return (f"{indent}Click {_describe_target(step.point)}" + (f" → {keys}" if keys else ""),)
     if isinstance(step, Drag):
         return (
             f"{indent}Drag {step.start} -> {step.end} duration={step.duration_seconds:g}s",
         )
     if isinstance(step, Wait):
         return (f"{indent}Wait {step.duration_seconds:g}s",)
+    if isinstance(step, Hotkey):
+        return (f"{indent}Hotkey {'+'.join(step.keys)}",)
     if isinstance(step, Repeat):
         return (
-            f"{indent}Repeat {step.times} times",
+            f"{indent}Repeat {'无限' if step.times is None else str(step.times) + ' times'}"
+            + (f" break_if={_describe_condition(step.break_if)}" if step.break_if is not None else ""),
             *_describe_steps(step.steps, indent=f"{indent}  "),
         )
     if isinstance(step, If):
@@ -161,9 +166,10 @@ def _describe_step(step: Step, *, indent: str) -> tuple[str, ...]:
             lines.extend(f"{indent}  else {line}" for line in _describe_steps(step.else_steps))
         return tuple(lines)
     if isinstance(step, WaitUntil):
+        timeout = "无限" if step.timeout_seconds is None else f"{step.timeout_seconds:g}s"
         return (
             f"{indent}WaitUntil {_describe_condition(step.condition)} "
-            f"timeout={step.timeout_seconds:g}s interval={step.interval_seconds:g}s",
+            f"timeout={timeout} interval={step.interval_seconds:g}s",
         )
     return (f"{indent}{step}",)
 

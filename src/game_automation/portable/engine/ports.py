@@ -20,6 +20,10 @@ from game_automation.portable.domain import (
 
 
 class InputDevice(Protocol):
+    def hotkey(self, keys: tuple[str, ...]) -> None:
+        """依次按下并逆序释放指定键，失败时尝试释放全部已按下的键。"""
+        raise NotImplementedError("input device does not support hotkey")
+
     def click(self, target: Point) -> None:
         """在屏幕坐标点执行一次跨平台点击。"""
 

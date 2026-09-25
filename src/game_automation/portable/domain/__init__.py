@@ -4,7 +4,7 @@
 也不承载应用编排逻辑。
 """
 
-from game_automation.portable.domain.actions import Click, ClickTarget, Drag, If, PrimitiveAction, Repeat, Step, Wait, WaitUntil
+from game_automation.portable.domain.actions import Click, ClickTarget, Drag, Hotkey, If, PrimitiveAction, Repeat, Step, Wait, WaitUntil
 from game_automation.portable.domain.color import Color
 from game_automation.portable.domain.conditions import ColorIs, Condition, ImageExists, ScreenStateIs
 from game_automation.portable.domain.geometry import Point, Rect
@@ -50,6 +50,7 @@ __all__ = [
     "ColorIs",
     "Condition",
     "Drag",
+    "Hotkey",
     "If",
     "ImageExists",
     "ImageBatchMatchResult",
