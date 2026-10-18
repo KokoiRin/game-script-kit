@@ -14,8 +14,13 @@ htmlcov/
 .codex/
 .hermes/
 .star/
+/workspaces/
+scripts/*
+!scripts/file-script-demo.json
+!scripts/paste.json
 assets/*
-!assets/anonymous-chat/
+!assets/start.png
+!assets/screen-states.json
 resources/xqtd/
 
 .DS_Store

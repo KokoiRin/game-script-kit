@@ -1,82 +1,92 @@
 # Star
 
-Star 用 JSON 脚本描述桌面操作，在 macOS 上执行点击、组合键、识图、条件等待和循环。当前重点是把一个实际任务稳定跑通。用户描述任务，Agent 负责生成和维护脚本；产品方向见 [项目上下文](CONTEXT.md)，能力与缺口见 [当前状态](docs/current-state.md)，近期推进见 [重启计划](docs/restart-plan.md)。
+Star 是本地桌面自动化框架，在 macOS 上执行点击、组合键、识图、条件等待和循环。用户描述任务，Agent 生成和维护脚本。主仓保存框架与通用示例，具体任务保存在仓库外的本地工作区；边界见 [ADR 0006](docs/adr/0006-local-task-workspaces.md)，能力与缺口见 [当前状态](docs/current-state.md)。
 
-## 安装和启动
+## 安装与上手
 
 要求 Python 3.14 或更新版本。已有 `.venv` 时可直接使用。
 
 ```bash
 python3.14 -m venv .venv
 .venv/bin/python -m pip install -e ".[dev]"
-.venv/bin/star ui --host 127.0.0.1 --port 8766 --no-open
+.venv/bin/star list
+.venv/bin/star run demo --dry-run
 ```
 
-浏览器打开 <http://127.0.0.1:8766/>，选择脚本，先用“模拟运行”检查步骤，再按需执行真实操作。控制台保留脚本详情、运行、停止和运行日志。`star ui` 不指定端口时仍默认使用 8765。
+不指定工作区时，使用主仓的通用示例。`scripts/` 只保留文件格式示例与粘贴示例；具体游戏、聊天或其他业务任务由外部工作区保存和维护。
 
-真实运行需要在 macOS 系统设置中给终端或 Python 运行时授予“辅助功能”权限；识图和取色还需要“屏幕录制”权限。模板应与当前游戏缩放、主题和分辨率一致。
+## 使用本地任务工作区
 
-## 列出、检查和运行脚本
+工作区是一个已存在的目录，常用位置为 `~/StarWorkspaces/<name>`：
+
+```text
+my-tasks/
+├── scripts/                 # 命名 JSON 脚本
+├── assets/                  # 模板图片，可分子目录
+│   └── screen-states.json   # 按需配置的状态与共享资源
+└── …                        # 任务说明、运行记录与证据
+```
+
+例如建立一个仅含粘贴示例的工作区：
 
 ```bash
-.venv/bin/star list
-.venv/bin/star details 师门任务
-.venv/bin/star run demo --dry-run
-.venv/bin/star run 粘贴 --dry-run
-.venv/bin/star run 粘贴
+mkdir -p ~/StarWorkspaces/my-tasks/scripts ~/StarWorkspaces/my-tasks/assets
+cp scripts/paste.json ~/StarWorkspaces/my-tasks/scripts/
+.venv/bin/star --workspace ~/StarWorkspaces/my-tasks list
+.venv/bin/star --workspace ~/StarWorkspaces/my-tasks details 粘贴
+.venv/bin/star --workspace ~/StarWorkspaces/my-tasks run 粘贴 --dry-run
+.venv/bin/star --workspace ~/StarWorkspaces/my-tasks run-plan 粘贴 粘贴 --dry-run
+.venv/bin/star --workspace ~/StarWorkspaces/my-tasks ui --port 8766 --no-open
 ```
 
-`粘贴` 脚本等待 3 秒后执行 Command+V；先复制内容，再在等待期间切到目标输入框。按键已发送不保证目标应用接受了内容。
+`--workspace` 是全局参数，放在 `list/details/run/run-plan/ui` 之前。显式指定后只加载该根的 `scripts/*.json`，并使用同根 `assets/`、状态配置和共享资源，不混入内置或主仓示例。任务资料不随框架仓库上传，需要单独备份。
 
-模拟运行不操作真实桌面，可指定固定的颜色、图片和界面状态：
+浏览器打开 <http://127.0.0.1:8766/>，页面会显示当前工作区路径。一个服务绑定一个工作区；切换时启动对应服务。控制台提供脚本详情、模拟或真实运行、停止和运行记录，没有项目选择器；修改脚本后需重启服务。默认 UI 端口仍为 8765。
+
+## 运行与停止
+
+先模拟检查步骤，再执行真实操作：
+
+```bash
+.venv/bin/star --workspace ~/StarWorkspaces/my-tasks run 粘贴
+```
+
+粘贴示例等待 3 秒后执行 Command+V；先复制内容，再在等待期间切到目标输入框。动作发出不保证应用接受内容。真实运行需要 macOS“辅助功能”权限，识图和取色还需要“屏幕录制”权限。
+
+模拟运行不读取或操作真实桌面。可指定固定颜色、图片集合和状态，例如在通用示例模式下：
 
 ```bash
 .venv/bin/star run conditional-color-demo --dry-run --dry-run-color '#102030'
-.venv/bin/star run click-image-demo --dry-run --dry-run-image assets/start.png
+.venv/bin/star run click-image-demo --dry-run --dry-run-script-images
 .venv/bin/star run file-script-demo --dry-run --dry-run-screen-state 主页
 ```
 
-`--dry-run-script-images` 可将当前脚本依赖的图片全部模拟为找到，适合检查执行顺序；这些模拟结果不证明真实识图或任务完成。
+`--dry-run-script-images` 把当前脚本的图片依赖全部模拟为找到；这不能证明真实识图或任务完成。Run Plan 默认在首个未正常结束项后停止，`--continue-on-error` 可继续收集后续结果，其取消传播限制见当前状态。
+手动使用 `--dry-run-image assets/start.png` 时，相对路径基于所选工作区根；绝对路径保持原样。
 
-按顺序执行多个脚本：
+CLI 按 Ctrl+C 取消；控制台点击“停止”。取消在执行边界生效，正在进行的等待或平台调用可能延迟响应。`completed` 表示按所选分支与循环规则正常结束；`stopped_unmet_condition` 表示必要条件未满足。退出码 0 本身不证明业务任务完成。
 
-```bash
-.venv/bin/star run-plan demo repeat-demo --dry-run
-```
+## 目标窗口
 
-Run Plan 默认在第一个未正常结束的脚本后停止；`--continue-on-error` 可继续收集后续结果。检查 `finish_reason`：`completed` 表示脚本按所选分支与循环规则正常结束，`stopped_unmet_condition` 表示条件未满足。退出码 0 本身不能证明游戏任务完成。
-
-CLI 运行时按 Ctrl+C 取消；控制台运行时点击“停止”。无限循环和无限图片等待也支持取消。
-
-## 绑定目标应用和窗口
-
-真实运行可先激活应用，并限制到标题唯一匹配的可见顶层窗口：
+CLI 可在真实运行前激活应用，并按标题绑定唯一的可见顶层窗口：
 
 ```bash
-.venv/bin/star run click-image-demo \
-  --target-app Safari \
-  --target-window-title "Star 视觉自动化靶场"
-.venv/bin/star run-plan first-script second-script --target-app Safari
+.venv/bin/star --workspace ~/StarWorkspaces/my-tasks run 粘贴 \
+  --target-app TextEdit --target-window-title "目标文档标题"
 ```
 
-指定窗口后，点位按该窗口左上角偏移，未声明 region 的图片搜索限制在窗口内；Run Plan 在每个脚本开始前重新读取窗口位置。浏览器标签页不是独立窗口，必要时把目标页面移到单独窗口。
+绑定后，点位按窗口左上角偏移，默认图片搜索限制在窗口内。Run Plan 在每个脚本开始前重新读取窗口位置。`--target-window-title` 要求同时指定 `--target-app`；目标应用参数不能与 `--dry-run` 同用。
 
-`--target-window-title` 要求同时提供 `--target-app`；目标应用参数不能与 `--dry-run` 同用。控制台目前尚未接入目标应用和窗口选择，需使用 CLI 指定。
+控制台尚未接入目标窗口选择。状态配置的区域仍是屏幕绝对坐标，不随窗口移动；模板也需要匹配当前缩放和主题。
 
-界面状态配置中的区域目前仍使用屏幕绝对坐标，不会随目标窗口移动；使用状态判断的脚本仍需保持约定的窗口位置。
+## 创建和维护任务
 
-## 编写脚本
-
-通常由用户描述任务、Agent 创建和维护下面的文件；用户无需手写 JSON。这里保留格式参考，便于检查或自行调整。
-
-用户脚本放在 `scripts/*.json`，模板图片放在 `assets/`。例如新建 `scripts/my-click.json`：
+用户描述目标与业务选择，Agent 在外部工作区创建脚本和素材、验证并维护。以下是 `<workspace>/scripts/my-click.json` 的最小格式参考：
 
 ```json
 {
   "name": "我的点击",
-  "resources": {
-    "points": {"按钮": {"x": 100, "y": 200}}
-  },
+  "resources": {"points": {"按钮": {"x": 100, "y": 200}}},
   "steps": [
     {"wait": 1},
     {"click": {"point": "按钮"}},
@@ -85,37 +95,26 @@ CLI 运行时按 Ctrl+C 取消；控制台运行时点击“停止”。无限�
 }
 ```
 
-用 `list` 确认名称可见，`details 我的点击` 检查依赖，再 `run 我的点击 --dry-run` 检查顺序。默认点位是屏幕坐标；绑定目标窗口后使用窗口内坐标。无效脚本单独报告，不阻塞其他有效脚本。
+用相同 `--workspace` 执行 `list`、`details 我的点击` 与 `run 我的点击 --dry-run`。图片路径相对该根的 `assets/`，状态条件使用其中的 `screen-states.json`。无效脚本单独报告，不阻塞其他有效脚本。
 
-可参考 [师门任务](scripts/master-task.json) 的区域识图和状态等待，以及 [匿名聊天循环](scripts/ssby-chat-loop.json) 的嵌套循环。这些脚本是现有素材，真实任务闭环状态见重启计划。
+`repeat.times: null` 表示无限循环；`wait_until_image.timeout: null` 表示无限等待。`break_if_image` 退出当前层循环，`click.then_hotkeys` 在点击后连续发送组合键。当前没有通用重试、任务路由或子脚本调用；局部恢复仍在 [讨论稿](docs/design/local-recovery.md) 中。
 
-- `repeat` 的 `times: null` 表示无限循环；`wait_until_image` 的 `timeout: null` 表示无限等待，省略字段不等于无限。
-- `break_if_image` 在步骤边界和图片等待轮询时检查，命中后退出当前层循环。
-- `click.then_hotkeys` 在点击后连续发送组合键；取消仍在每组按键前检查。
-- `if_state` 和 `wait_until_state` 使用 `assets/screen-states.json` 中的界面识别配置。
+运行 `.venv/bin/star recorder` 可记录屏幕坐标与颜色；终端保持焦点，按 `1` 记录、`Q` 结束。它只输出素材，不创建任务脚本。
 
-记录鼠标所在位置和颜色：
+## 开发与验证
 
-```bash
-.venv/bin/star recorder
-```
-
-保持终端焦点，按 `1` 记录，按 `Q` 结束；记录结果是屏幕绝对坐标。
-
-## 开发和验证
-
-核心规则位于 `src/game_automation/portable/`；桌面适配和 CLI/UI 入口位于 `src/game_automation/platform/`。开发前阅读 [AGENTS.md](AGENTS.md)，按 [文档入口](docs/README.md) 接续上下文、架构和相关决策。Windows adapter 尚未实现。
+从 [AGENTS](AGENTS.md)、[项目上下文](CONTEXT.md) 和 [文档导航](docs/README.md) 接续开发。`main` 保持稳定，框架改动使用短生命周期的通用能力分支；业务任务留在外部工作区。Windows adapter 尚未实现。
 
 ```bash
 .venv/bin/python -m pytest
 git diff --check
 ```
 
-`star-lab` 仅用于开发验收，是独立目标应用，可验证真实截图、识图、点击和等待：
+独立靶场只用于开发验收：
 
 ```bash
 .venv/bin/star-lab --no-open
 .venv/bin/python tools/visual_lab_star_smoke.py
 ```
 
-靶场默认地址 <http://127.0.0.1:8770/>。真实 smoke 要求 Safari 已打开靶场页面，并已授予屏幕录制和辅助功能权限；验收通过靶场真值接口确认结果。靶场通过不等于真实游戏任务已完成。
+靶场默认地址 <http://127.0.0.1:8770/>。真实 smoke 要求 Safari 已打开靶场且已授予桌面权限；通过独立真值核对结果，仍不能替代具体业务任务验收。

@@ -6,7 +6,18 @@
 
 from __future__ import annotations
 
-from game_automation.portable.domain import Click, ImageExists, ImageTemplate, Point, ScreenWindow, Script, WaitUntil
+from game_automation.portable.domain import (
+    Click,
+    ImageExists,
+    ImageRef,
+    ImageTemplate,
+    NamedImage,
+    Point,
+    ScreenWindow,
+    Script,
+    TargetCatalog,
+    WaitUntil,
+)
 
 
 WAIT_UNTIL_IMAGE_DEMO_TEMPLATE = "assets/start.png"
@@ -15,9 +26,10 @@ WAIT_UNTIL_IMAGE_DEMO_TEMPLATE = "assets/start.png"
 WAIT_UNTIL_IMAGE_DEMO_SCRIPT = Script(
     name="wait-until-image-demo",
     window=ScreenWindow(),
+    resources=TargetCatalog(images=(NamedImage("开始", ImageTemplate(WAIT_UNTIL_IMAGE_DEMO_TEMPLATE)),)),
     steps=(
         WaitUntil(
-            condition=ImageExists(ImageTemplate(WAIT_UNTIL_IMAGE_DEMO_TEMPLATE)),
+            condition=ImageExists(ImageRef("开始")),
             timeout_seconds=1,
             interval_seconds=0.5,
         ),

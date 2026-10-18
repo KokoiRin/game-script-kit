@@ -7,7 +7,7 @@
 ## 使用方向与作者方式
 
 - 用户已明确：由用户描述任务和结果要求，Agent 负责观察目标画面、补齐流程、生成并维护脚本。
-- 当前产品目标是完成一款游戏的实际日常任务；已有脚本主要完成任务入口操作。
+- 当前使用目标是完成一款游戏的实际日常任务；具体业务脚本、素材与进度由外部本地工作区维护。
 - 手写 JSON 是现有存储和加载方式，并不意味着用户需要亲自学习全部 JSON 语法。
 - 当前控制台负责选脚本、看详情、模拟或真实运行、停止和查看结果。
 - 创建、编辑、保存脚本仍通过文件完成；没有控制台编辑器、项目选择器或脚本热加载。
@@ -19,23 +19,23 @@
 以下是 Agent 接到任务后需要完成的工作；用户提供目标和必要业务选择，Agent 负责可以自行观察、采集与验证的部分。
 
 1. 明确起始画面、前置条件、动作、可观察的完成标志和停止条件。
-2. 准备 `assets/` 模板图片；固定点位可由坐标记录器辅助获取。
-3. Agent 创建 `scripts/*.json`，声明局部资源和步骤；使用状态条件时配置 `assets/screen-states.json`。
-4. `list` 列出可用脚本并报告坏文件；`details` 展示步骤与依赖摘要。
+2. 选定仓库外的任务工作区，准备其中的 `assets/` 模板图片；固定点位可由坐标记录器辅助获取。
+3. Agent 在该根创建 `scripts/*.json`，声明局部资源和步骤；使用状态条件时配置同根 `assets/screen-states.json`。
+4. 通过全局 `--workspace PATH` 使用 `list` 列出脚本、报告坏文件，使用 `details` 展示步骤与依赖摘要。
 5. 模拟运行检查一组固定假条件下的执行路径；随后在真实目标中核对操作和任务结果。
 6. 根据真实失败点修改脚本或资源，再分别报告自动化验证与真实任务验证。
 
-[项目脚本装配](../src/game_automation/portable/application/project_scripts.py) 合并内置 Python 脚本与顶层 `scripts/*.json`。
+[项目脚本装配](../src/game_automation/portable/application/project_scripts.py) 在显式工作区模式下只加载该根的顶层 `scripts/*.json`，不混入内置脚本；无参数时使用仓库根的通用文件示例与内置示例。
 JSON 文件按文件名排序加载，不递归读取子目录；脚本名来自 JSON 的 `name`，与文件名可以不同。
 单个文件格式错误、动作不支持或名称重复会被隔离，其他有效脚本继续可用。
-项目路径由 [project_assets.py](../src/game_automation/portable/application/project_assets.py) 定义，尚无任意项目目录入口。
+`star --workspace PATH list/details/run/run-plan/ui` 选择已存在的目录，参数放在子命令之前。路径解析与入口传递见 [CLI](../src/game_automation/platform/local_desktop/entrypoints/cli.py)，同根资源约定见 [project_assets.py](../src/game_automation/portable/application/project_assets.py) 和 [ADR 0006](adr/0006-local-task-workspaces.md)。
 
 | 入口 | 可用控制 | 生命周期与边界 |
 | --- | --- | --- |
 | CLI `list/details/run` | 查列表、查依赖、单脚本运行；CLI 默认真实运行，需显式选择模拟 | 每次调用重新读取脚本 JSON |
 | CLI `run-plan` | 按顺序运行多个已有脚本，选择停止或继续策略 | 每项开始前重新激活并绑定所选窗口 |
 | CLI `recorder` | 打印鼠标屏幕坐标和颜色；终端保持焦点，按 `1` 记录、`Q` 结束 | 只打印结果，不创建 JSON 或模板 |
-| 本地 UI | 默认模拟；选择、运行、停止、日志、折叠详情与模拟设置 | 服务启动时保存 catalog；改脚本后需重启服务，刷新网页不足以更新 |
+| 本地 UI | 默认模拟；显示工作区路径，选择、运行、停止、日志、折叠详情与模拟设置 | 一个服务绑定一个根并在启动时保存 catalog；改脚本后需重启，刷新网页不足以更新 |
 
 UI 只允许一个后台脚本会话；运行中禁止切换和重复启动，服务端也拒绝第二次启动。
 断网时 UI 自动重试状态查询；启动 POST 没收到结果时不会自动重发，避免重复执行。
@@ -73,14 +73,15 @@ JSON 也没有变量、通用函数/脚本调用、文本输入、剪贴板赋�
 | 概念 | 当前表达 | 生命周期或限制 |
 | --- | --- | --- |
 | 点位 | `resources.points` 的命名 `{x,y}` | JSON 加载时保存；点击时解析别名 |
-| 图片 | `resources.images` 的名称到文件路径 | 路径相对项目 `assets/`，允许子目录；loader 本身不检查文件存在 |
+| 图片 | `resources.images` 的名称到文件路径 | 路径相对所选根的 `assets/`，允许子目录；loader 本身不检查文件存在 |
 | 区域 | `resources.regions` 的命名矩形 | 必须有正宽高；用于搜索范围 |
 | 搜索 | `resources.searches` 组合图片、区域、置信度 | 可在步骤中引用搜索名称 |
 | 状态 | `assets/screen-states.json` 的 groups/searches | 顺序代表优先级，首次命中停止；每次状态读取重新加载配置并识别当前画面 |
 | 共享资源 | 状态配置提供的 regions/searches | 每次描述或启动脚本时合并；脚本局部同名资源覆盖共享资源 |
 
 共享资源装配见 [script_resources.py](../src/game_automation/portable/application/script_resources.py)，实时状态读取见 [screen_state_reader.py](../src/game_automation/portable/application/screen_state_reader.py)。
-没有状态配置时，reader 保留按 `assets/` 顶层图片文件名推断状态名称的兼容路径。
+基础 Python catalog 的命名图片资源及搜索中的直接模板在 catalog 装配时按工作区根绑定（例如 `assets/start.png`）；JSON 图片路径仍相对 `assets/`。两个通用图片示例通过资源引用使用绑定后的路径，避免依赖启动目录。
+状态配置与共享资源均读取所选工作区的 `assets/`，不回退到主仓。没有状态配置时，reader 保留按该根 `assets/` 顶层图片文件名推断状态名称的兼容路径。
 候选配置自己的阈值优先于状态读取参数；状态读取默认阈值为 0.8。
 
 - JSON 初始使用 `ScreenWindow`，默认点位和搜索区域是屏幕绝对坐标。
@@ -100,7 +101,7 @@ UI 自动把所选脚本解析出的图片依赖全部视为找到；CLI 通过�
 
 因此模拟运行只执行“固定假画面下的一条路径”，不能演练状态迁移：
 
-- `师门任务` 依次要求“主页 → 活动”，任一固定模拟状态都无法走完整条成功路径。
+- 脚本依次要求“状态 A → 状态 B”时，任一固定模拟状态都无法走完整条成功路径。
 - 图片全部模拟命中时，`break_if_image` 可能立即退出循环；这不代表真实流程分支正确。
 - 无限循环配合模拟等待仍会持续快速运行和产生日志，模拟不保证自动结束。
 - 模拟匹配位置来自假矩形，不能验证真实点击点、模板质量、目标应用响应或业务完成。
@@ -127,18 +128,15 @@ UI 自动把所选脚本解析出的图片依赖全部视为找到；CLI 通过�
 实现见 [runner.py](../src/game_automation/portable/engine/runner.py) 与 [run_plan.py](../src/game_automation/portable/application/run_plan.py)。
 相关行为测试见 [test_runner.py](../tests/test_runner.py)、[test_repeat_break_image.py](../tests/test_repeat_break_image.py)、[test_run_plan.py](../tests/test_run_plan.py) 和 [test_local_control.py](../tests/test_local_control.py)。
 
-## 现有任务素材做到哪里
+## 框架示例与本地业务资料
 
-| 脚本 | 文件所表达的终点 | 尚未覆盖的业务结果 |
-| --- | --- | --- |
-| [师门任务](../scripts/master-task.json) | 主页 → 活动面板 → 定位并点击任务入口 | 接取后的任务过程、完成确认、领取结果 |
-| [秘境降妖](../scripts/secret-realm-task.json) | 同样推进到定位并点击任务入口 | 战斗/挑战过程及完成确认 |
-| [宝图任务](../scripts/treasure-map-task.json) | 点击任务入口后，等对话并点击确认 | 后续任务过程、交付与完成结果 |
-| [匿名聊天无限循环](../scripts/ssby-chat-loop.json) | 离开 → 重匹配 → 偏移点击输入区 → 粘贴与 Enter | 消息是否被接收、会话结果及稳定重复使用 |
-| [粘贴](../scripts/paste.json) | 等待后发送 Command+V | 目标输入框是否接收内容 |
+主仓保留 8 个通用 Python 示例，以及 [文件格式示例](../scripts/file-script-demo.json) 和 [粘贴示例](../scripts/paste.json)。固定个人坐标点击示例与专用离开重试示例已从内置目录删除。
 
-[视觉靶场](../src/star_visual_lab/server.py) 是独立开发验收目标，通过真值接口核对结果；它不证明真实游戏任务已完成。
-现有素材可作为后续任务起点；本快照没有新增真实游戏完成证据。
+业务脚本、图像与玩法上下文已移至仓库外的本地任务工作区。主仓不再维护业务素材表或操作进度；继续任务时读取对应工作区的说明、记录和证据。选定根只控制数据来源，不构成操作系统沙箱。
+
+[视觉靶场](../src/star_visual_lab/server.py) 保留为独立开发验收目标，通过真值接口核对结果；它不证明真实任务已完成。本轮工作区隔离不新增真实业务完成证据。
+
+未合并的任务路由与子脚本调用实验不属于主线能力；本地归档保留实验，主线不因此支持 `run-task` 或 `call`。
 
 ## 已知缺口与证据等级
 
@@ -165,7 +163,8 @@ UI 自动把所选脚本解析出的图片依赖全部视为找到；CLI 通过�
 
 ## 验证记录
 
-- **2026-10-18 主分支整理前验证**：完整测试重新执行，`471 passed`；`git diff --check`、JavaScript 语法检查和 177 个本地文档链接/锚点检查通过。
-- **同日前轮浏览器证据**：确认控制台脚本选择、详情、图片/组合键模拟，以及条件未满足结果展示。
-- 浏览器和前轮纯 fake 复现没有在本次提交前重复执行；近期推进建议见 [重启计划](restart-plan.md)。
+- **2026-10-18 本轮自动化**：完整测试 `494 passed`；`git diff --check`、JavaScript 语法检查和 193 个本地文档链接/锚点检查通过。覆盖 CLI/HTTP 工作区隔离、状态 reader 装配、资源根与启动目录无关，以及显式图片模拟路径兼容。
+- **本轮迁移**：32 份原始任务文件按大小与 SHA256 校验一致；旧分支和完整 stash 保存到仓库外的自包含 Git bundle，`git bundle verify` 通过。未采纳实验没有合入主线。
+- **本轮浏览器证据**：控制台显示外部任务工作区的绝对路径，列表只含该根的四个脚本，初始仍为模拟模式；个人坐标脚本和粘贴计划已通过 CLI 模拟。
+- **同日前轮浏览器证据**：确认脚本选择、详情、图片/组合键模拟，以及条件未满足结果展示。前轮两项债务的纯 fake 复现本轮未重跑；近期推进建议见 [重启计划](restart-plan.md)。
 - **真实游戏验证**：尚无本轮完整任务验收；模拟、测试和靶场结果均不替代真实游戏的完成证据。

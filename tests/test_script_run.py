@@ -24,7 +24,6 @@ from game_automation.portable.domain import (
 from game_automation.portable.engine.ports import InputDevice
 from game_automation.portable.scripts_manager import (
     CONDITIONAL_COLOR_DEMO_SCRIPT,
-    RECORDED_CLICKS_SCRIPT,
     WAIT_UNTIL_COLOR_DEMO_SCRIPT,
 )
 
@@ -106,6 +105,15 @@ def test_cancelled_script_does_not_send_hotkey() -> None:
     assert result.finish_reason == "cancelled"
 
 
+def build_plain_action_script() -> Script:
+    """构造不依赖个人坐标和素材的通用动作测试脚本。"""
+    return Script(
+        name="plain-actions-test",
+        window=ScreenWindow(),
+        steps=(Wait(0.25), Click(Point(10, 20)), Wait(0.5), Click(Point(30, 40))),
+    )
+
+
 def build_wait_until_image_script() -> Script:
     """构造应用层测试用图片等待脚本。"""
     return Script(
@@ -150,14 +158,16 @@ def build_screen_state_branch_script() -> Script:
 
 def test_run_script_dry_run_prints_plain_script_operations(capsys) -> None:
     """验证 dry-run 会使用打印 adapter 执行普通脚本。"""
-    result = run_script(RECORDED_CLICKS_SCRIPT, dry_run=True)
+    result = run_script(build_plain_action_script(), dry_run=True)
 
     output = capsys.readouterr().out
     assert result.exit_code == 0
     assert result.finish_reason == "completed"
     assert result.error_message is None
-    assert "wait 3s" in output
-    assert "Point(x=242, y=92)" in output
+    assert output.splitlines() == [
+        "wait 0.25s", "click Point(x=10, y=20)",
+        "wait 0.5s", "click Point(x=30, y=40)",
+    ]
 
 
 def test_run_script_reports_invalid_dry_run_color_without_running(capsys) -> None:
@@ -351,13 +361,13 @@ def test_run_script_real_mode_uses_injected_device_without_color_reader(capsys) 
             clicks.append(target)
 
         def drag_to(self, start, end, duration_seconds: float = 0.0) -> None:
-            """recorded-clicks 不会拖拽。"""
+            """通用动作脚本不会拖拽。"""
 
         def wait(self, duration_seconds: float) -> None:
             """测试中不真实等待。"""
 
     result = run_script(
-        RECORDED_CLICKS_SCRIPT,
+        build_plain_action_script(),
         dry_run=False,
         real_device_factory=FakeMacOSPointerDevice,
     )
@@ -366,11 +376,7 @@ def test_run_script_real_mode_uses_injected_device_without_color_reader(capsys) 
     assert captured.out == ""
     assert result.exit_code == 0
     assert result.error_message is None
-    assert clicks == [
-        Point(242, 92),
-        Point(736, 323),
-        Point(741, 400),
-    ]
+    assert clicks == [Point(10, 20), Point(30, 40)]
 
 
 def test_run_script_activates_target_application_before_creating_device() -> None:

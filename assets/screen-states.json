@@ -1,0 +1,14 @@
+{
+  "groups": [
+    {
+      "state": "主页",
+      "searches": [
+        {
+          "name": "开始标识",
+          "image": "start.png",
+          "min_confidence": 0.9
+        }
+      ]
+    }
+  ]
+}

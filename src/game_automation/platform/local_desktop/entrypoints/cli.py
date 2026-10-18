@@ -1,6 +1,6 @@
 """star 命令行入口。
 
-本 module 负责解析命令行参数、查找内置脚本并打印用户可见结果；脚本运行和
+本 module 负责解析命令行参数、选择本地工作区并打印用户可见结果；脚本运行和
 本地 UI 委托应用/入口编排层，recorder 子命令保留终端工具组装但不解释脚本步骤。
 """
 
@@ -10,6 +10,7 @@ import argparse
 import io
 import sys
 from contextlib import redirect_stderr, redirect_stdout
+from pathlib import Path
 
 from game_automation.platform.local_desktop.composition import (
     run_script_on_local_desktop,
@@ -38,12 +39,14 @@ from game_automation.portable.application.script_resources import (
     script_with_shared_resources,
 )
 from game_automation.portable.scripts_manager import DEFAULT_SCRIPT_CATALOG
-from game_automation.portable.scripts_manager.catalog import ScriptNotFoundError
+from game_automation.portable.scripts_manager.catalog import ScriptCatalog, ScriptNotFoundError
 
 
-def _run_list() -> int:
+def _run_list(args: argparse.Namespace) -> int:
     """列出所有可用脚本。"""
-    catalog_result = _load_cli_script_catalog_result()
+    catalog_result = _load_cli_script_catalog_result(
+        args.project_root, include_builtin_scripts=args.workspace is None,
+    )
     for name in catalog_result.catalog.list_names():
         print(name)
     _print_script_config_errors(catalog_result)
@@ -59,7 +62,9 @@ def _run_script(args: argparse.Namespace) -> int:
         print("--dry-run-script-images requires --dry-run", file=sys.stderr)
         return 2
     try:
-        script = _load_cli_script_catalog_result().catalog.get(args.name)
+        script = _load_cli_script_catalog_result(
+            args.project_root, include_builtin_scripts=args.workspace is None,
+        ).catalog.get(args.name)
     except ScriptNotFoundError as exc:
         print(exc, file=sys.stderr)
         return 1
@@ -67,17 +72,17 @@ def _run_script(args: argparse.Namespace) -> int:
         print(f"script configuration failed: {exc}", file=sys.stderr)
         return 2
     try:
-        script = script_with_shared_resources(script, load_shared_script_resources(PROJECT_ROOT))
+        script = script_with_shared_resources(script, load_shared_script_resources(args.project_root))
     except (LookupError, ValueError) as exc:
         print(f"script resource configuration failed: {exc}", file=sys.stderr)
         return 2
 
-    dry_run_images = tuple(args.dry_run_image)
+    dry_run_images = _resolve_dry_run_images(args.dry_run_image, args.project_root)
     if args.dry_run_script_images:
         try:
             dry_run_images = _merge_dry_run_images(
                 dry_run_images,
-                _describe_script(script).image_dependencies,
+                _describe_script(script, args.project_root).image_dependencies,
             )
         except (LookupError, ValueError) as exc:
             print(f"script details configuration failed: {exc}", file=sys.stderr)
@@ -93,6 +98,7 @@ def _run_script(args: argparse.Namespace) -> int:
         dry_run_screen_state=dry_run_screen_state,
         target_application=args.target_app,
         target_window_title=args.target_window_title,
+        project_root=args.project_root,
     )
     if result.error_message is not None:
         print(result.error_message, file=sys.stderr)
@@ -122,6 +128,7 @@ def _run_plan(args: argparse.Namespace) -> int:
             dry_run_screen_state=dry_run_screen_state,
             target_application=args.target_app,
             target_window_title=args.target_window_title,
+            project_root=args.project_root,
         ),
         continue_on_error=args.continue_on_error,
     )
@@ -131,7 +138,9 @@ def _run_plan(args: argparse.Namespace) -> int:
 
 def _resolve_plan_items(args: argparse.Namespace) -> tuple[ScriptPlanItem, ...] | int:
     """解析 Run Plan 中每个脚本名和该脚本自己的 dry-run 图片依赖。"""
-    catalog_result = _load_cli_script_catalog_result()
+    catalog_result = _load_cli_script_catalog_result(
+        args.project_root, include_builtin_scripts=args.workspace is None,
+    )
     scripts = []
     for script_name in args.names:
         try:
@@ -144,7 +153,7 @@ def _resolve_plan_items(args: argparse.Namespace) -> tuple[ScriptPlanItem, ...] 
             return 2
         scripts.append((script_name, script))
     try:
-        shared_resources = load_shared_script_resources(PROJECT_ROOT)
+        shared_resources = load_shared_script_resources(args.project_root)
     except (LookupError, ValueError) as exc:
         print(f"script resource configuration failed: {exc}", file=sys.stderr)
         return 2
@@ -156,12 +165,12 @@ def _resolve_plan_items(args: argparse.Namespace) -> tuple[ScriptPlanItem, ...] 
         except (LookupError, ValueError) as exc:
             print(f"script resource configuration failed: {exc}", file=sys.stderr)
             return 2
-        dry_run_images = tuple(args.dry_run_image)
+        dry_run_images = _resolve_dry_run_images(args.dry_run_image, args.project_root)
         if args.dry_run_script_images:
             try:
                 dry_run_images = _merge_dry_run_images(
                     dry_run_images,
-                    _describe_script(script).image_dependencies,
+                    _describe_script(script, args.project_root).image_dependencies,
                 )
             except (LookupError, ValueError) as exc:
                 print(f"script details configuration failed: {exc}", file=sys.stderr)
@@ -178,6 +187,7 @@ def _run_plan_item(
     dry_run_screen_state: str,
     target_application: str | None,
     target_window_title: str | None,
+    project_root: Path,
 ) -> ScriptPlanScriptResult:
     """运行计划中的单个脚本并捕获输出，供计划摘要统一展示。"""
     stdout = io.StringIO()
@@ -191,6 +201,7 @@ def _run_plan_item(
             dry_run_screen_state=dry_run_screen_state,
             target_application=target_application,
             target_window_title=target_window_title,
+            project_root=project_root,
         )
     if result.error_message is not None:
         stderr.write(result.error_message)
@@ -236,7 +247,9 @@ def _validate_target_application_args(args: argparse.Namespace) -> int:
 def _run_details(args: argparse.Namespace) -> int:
     """按名称展示脚本详情。"""
     try:
-        script = _load_cli_script_catalog_result().catalog.get(args.name)
+        script = _load_cli_script_catalog_result(
+            args.project_root, include_builtin_scripts=args.workspace is None,
+        ).catalog.get(args.name)
     except ScriptNotFoundError as exc:
         print(exc, file=sys.stderr)
         return 1
@@ -244,8 +257,8 @@ def _run_details(args: argparse.Namespace) -> int:
         print(f"script configuration failed: {exc}", file=sys.stderr)
         return 2
     try:
-        script = script_with_shared_resources(script, load_shared_script_resources(PROJECT_ROOT))
-        details = _describe_script(script)
+        script = script_with_shared_resources(script, load_shared_script_resources(args.project_root))
+        details = _describe_script(script, args.project_root)
     except (LookupError, ValueError) as exc:
         print(f"script details configuration failed: {exc}", file=sys.stderr)
         return 2
@@ -253,9 +266,14 @@ def _run_details(args: argparse.Namespace) -> int:
     return details.exit_code
 
 
-def _load_cli_script_catalog_result() -> ProjectScriptCatalogResult:
-    """加载 CLI 当前项目可用脚本 catalog 和配置错误。"""
-    return load_project_script_catalog_result(PROJECT_ROOT, base_catalog=DEFAULT_SCRIPT_CATALOG)
+def _load_cli_script_catalog_result(
+    project_root: Path,
+    *,
+    include_builtin_scripts: bool,
+) -> ProjectScriptCatalogResult:
+    """加载选定工作区脚本，显式工作区只包含自己的 JSON 脚本。"""
+    base_catalog = DEFAULT_SCRIPT_CATALOG if include_builtin_scripts else ScriptCatalog(())
+    return load_project_script_catalog_result(project_root, base_catalog=base_catalog)
 
 
 def _print_script_config_errors(catalog_result: ProjectScriptCatalogResult) -> None:
@@ -267,13 +285,21 @@ def _print_script_config_errors(catalog_result: ProjectScriptCatalogResult) -> N
         print(f"- {error.message}", file=sys.stderr)
 
 
-def _describe_script(script) -> ScriptDetailsResult:
+def _describe_script(script, project_root: Path) -> ScriptDetailsResult:
     """生成 CLI 复用的脚本详情。"""
     return describe_script_details(
         script,
-        asset_root=image_asset_root(PROJECT_ROOT),
+        asset_root=image_asset_root(project_root),
         supported_image_suffixes=IMAGE_ASSET_SUFFIXES,
-        state_names=_configured_screen_state_names(),
+        state_names=_configured_screen_state_names(project_root),
+    )
+
+
+def _resolve_dry_run_images(image_paths: list[str], project_root: Path) -> tuple[str, ...]:
+    """把显式模拟图片的相对路径绑定工作区，绝对模板路径保持原样。"""
+    return tuple(
+        value if Path(value).is_absolute() else str((project_root / value).resolve())
+        for value in image_paths
     )
 
 
@@ -285,10 +311,10 @@ def _merge_dry_run_images(
     return tuple(dict.fromkeys((*explicit_images, *script_images)))
 
 
-def _configured_screen_state_names() -> tuple[str, ...] | None:
+def _configured_screen_state_names(project_root: Path) -> tuple[str, ...] | None:
     """读取状态配置中的状态名，配置不可用时返回 None。"""
     try:
-        return load_screen_state_names(image_asset_root(PROJECT_ROOT) / SCREEN_STATE_CONFIG_NAME)
+        return load_screen_state_names(image_asset_root(project_root) / SCREEN_STATE_CONFIG_NAME)
     except ValueError:
         return None
 
@@ -372,11 +398,29 @@ def _run_ui(args: argparse.Namespace) -> int:
         host=args.host,
         port=args.port,
         open_browser=not args.no_open,
+        project_root=args.project_root,
+        include_builtin_scripts=args.workspace is None,
     )
 
 
+def _resolve_workspace(workspace: str | None) -> Path:
+    """校验显式工作区并返回绝对目录，默认沿用当前项目根目录。"""
+    if workspace is None:
+        return PROJECT_ROOT
+    root = Path(workspace).expanduser().resolve()
+    if not root.is_dir():
+        raise ValueError(f"workspace must be an existing directory: {root}")
+    return root
+
+
 def main(argv: list[str] | None = None) -> int:
+    """解析工作区与子命令，完成路径校验后调用对应入口。"""
     parser = argparse.ArgumentParser(prog="star", description="Game automation toolkit.")
+    parser.add_argument(
+        "--workspace",
+        metavar="PATH",
+        help="Use scripts and assets from this existing local workspace (before the command).",
+    )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     subparsers.add_parser("list", help="List available scripts.")
@@ -398,7 +442,7 @@ def main(argv: list[str] | None = None) -> int:
         "--dry-run-image",
         action="append",
         default=[],
-        help="Template path treated as found when dry-running image conditions. Can be repeated.",
+        help="Template path treated as found; relative to the workspace (for example assets/start.png). Can be repeated.",
     )
     run_parser.add_argument(
         "--dry-run-script-images",
@@ -435,7 +479,7 @@ def main(argv: list[str] | None = None) -> int:
         "--dry-run-image",
         action="append",
         default=[],
-        help="Template path treated as found when dry-running image conditions. Can be repeated.",
+        help="Template path treated as found; relative to the workspace (for example assets/start.png). Can be repeated.",
     )
     run_plan_parser.add_argument(
         "--dry-run-script-images",
@@ -473,9 +517,14 @@ def main(argv: list[str] | None = None) -> int:
     ui_parser.add_argument("--no-open", action="store_true", help="Do not open a browser window after starting.")
 
     args = parser.parse_args(argv)
+    try:
+        args.project_root = _resolve_workspace(args.workspace)
+    except (OSError, RuntimeError, ValueError) as exc:
+        print(f"invalid workspace: {exc}", file=sys.stderr)
+        return 2
 
     if args.command == "list":
-        return _run_list()
+        return _run_list(args)
     elif args.command == "details":
         return _run_details(args)
     elif args.command == "run":

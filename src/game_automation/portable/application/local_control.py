@@ -212,6 +212,11 @@ class LocalControlApplication:
         self._run_lock = threading.Lock()
         self._current_run: _BackgroundScriptRun | None = None
 
+    @property
+    def workspace_path(self) -> Path:
+        """返回此控制会话绑定的工作区，供入口明确展示任务来源。"""
+        return self._project_root
+
     def list_scripts(self) -> tuple[str, ...]:
         """返回 UI 可展示的脚本名称列表。"""
         return self._catalog.list_names()

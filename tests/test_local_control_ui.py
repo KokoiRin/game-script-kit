@@ -9,6 +9,7 @@ from __future__ import annotations
 import http.client
 import json
 import threading
+import time
 
 import pytest
 
@@ -481,3 +482,77 @@ def test_local_ui_preserves_finish_reason_in_status(control_server, monkeypatch,
     payload = _request_json(address, "GET", "/api/script-run")
     assert payload["finish_reason"] == finish_reason
     assert payload["exit_code"] == exit_code
+
+
+def test_local_ui_workspace_uses_real_composition_for_catalog_details_and_dry_run(tmp_path, monkeypatch) -> None:
+    """不注入 application 时，HTTP 全链路从同一外部工作区加载并模拟运行自己的脚本。"""
+    from game_automation.platform.local_desktop import composition
+
+    scripts = tmp_path / "scripts"
+    assets = tmp_path / "assets"
+    scripts.mkdir()
+    assets.mkdir()
+    image = assets / "workspace-button.png"
+    image.write_bytes(b"fake")
+    (assets / "screen-states.json").write_text(json.dumps({
+        "groups": [{"state": "工作区主页", "searches": [{
+            "name": "工作区按钮", "image": image.name, "min_confidence": 0.8,
+        }]}],
+    }, ensure_ascii=False), encoding="utf-8")
+    (scripts / "demo.json").write_text(json.dumps({
+        "name": "demo",
+        "steps": [
+            {"wait_until_state": {"state": "工作区主页", "timeout": 1, "interval": 0.1}},
+            {"click": {"search": "工作区按钮"}},
+            {"hotkey": ["command", "v"]},
+        ],
+    }, ensure_ascii=False), encoding="utf-8")
+
+    def reject_real_desktop():
+        """确保 HTTP 浏览信息和模拟运行不会初始化真实桌面能力。"""
+        raise AssertionError("dry-run must not initialize real desktop adapters")
+
+    for factory in (
+        "build_real_input_device", "build_real_color_reader",
+        "build_real_screen_image_locator", "build_real_screen_image_batch_locator",
+    ):
+        monkeypatch.setattr(composition, factory, reject_real_desktop)
+    server = create_local_control_server(
+        host="127.0.0.1", port=0, project_root=tmp_path, include_builtin_scripts=False,
+    )
+    thread = threading.Thread(target=lambda: server.serve_forever(poll_interval=0.01))
+    thread.start()
+    try:
+        address = server.server_address
+        workspace = _request_json(address, "GET", "/api/workspace")
+        catalog = _request_json(address, "GET", "/api/scripts")
+        states = _request_json(address, "GET", "/api/screen-state-names")
+        details = _request_json(address, "GET", "/api/script-details?name=demo")
+        status = _request_json(address, "POST", "/api/run-script", {
+            "name": "demo", "dry_run": True,
+            "dry_run_screen_state": "工作区主页",
+            "dry_run_images": details["image_dependencies"],
+        })
+        deadline = time.monotonic() + 2
+        while status["running"] and time.monotonic() < deadline:
+            status = _request_json(address, "GET", "/api/script-run")
+            if status["running"]:
+                time.sleep(0.01)
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+    assert workspace == {"path": str(tmp_path.resolve())}
+    assert catalog == {"scripts": ["demo"], "script_config_errors": []}
+    assert states == {"states": ["工作区主页"]}
+    assert details["exit_code"] == 0
+    assert details["state_dependencies"] == ["工作区主页"]
+    assert details["image_dependencies"] == [str(image)]
+    assert [item["status"] for item in details["readiness"]] == ["ok", "ok"]
+    assert not status["running"]
+    assert status["exit_code"] == 0
+    assert status["finish_reason"] == "completed"
+    assert "click Point(x=0, y=0)" in status["stdout"]
+    assert "hotkey command+v" in status["stdout"]
+    assert status["stderr"] == ""

@@ -15,6 +15,7 @@
   const configErrors = document.querySelector("#script-config-errors");
   const connectionEl = document.querySelector("#connection-status");
   const connectionError = document.querySelector("#connection-error");
+  const workspaceEl = document.querySelector("#workspace-path");
   let activeRun = false;
   let requestPending = false;
   let connectionLost = true;
@@ -136,7 +137,10 @@
   }
 
   async function loadScripts() {
-    const result = await request("/api/scripts");
+    const [result, workspace] = await Promise.all([
+      request("/api/scripts"), request("/api/workspace"),
+    ]);
+    workspaceEl.textContent = `工作区：${workspace.path}`;
     scriptSelect.replaceChildren();
     for (const name of result.scripts || []) {
       const option = document.createElement("option");
@@ -153,7 +157,7 @@
       option.value = "";
       option.textContent = "暂无可运行脚本";
       scriptSelect.append(option);
-      detailsEl.textContent = "在项目 scripts/ 目录添加脚本后重启控制台。";
+      detailsEl.textContent = "在当前工作区的 scripts/ 目录添加脚本后重启控制台。";
     } else {
       await loadScriptDetails();
     }

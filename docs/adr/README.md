@@ -9,6 +9,7 @@ ADR 保存重要设计取舍的状态、理由和代价。下表收录当前已�
 - 判断控制台该保留什么：读 [0004](0004-small-console.md)，具体已实现范围看 [当前状态](../current-state.md)。
 - 整理仓库资料：读 [0005](0005-repository-documentation.md) 和 [文档导航](../README.md)。
 - 讨论循环失败恢复：读 [局部恢复设计稿](../design/local-recovery.md)；它尚未成为已采纳决策。
+- 创建任务、选择脚本和资源数据根、整理框架分支：读 [0006](0006-local-task-workspaces.md)。
 
 | 编号 | 状态 | 决策 | 来源 |
 | --- | --- | --- | --- |
@@ -17,6 +18,7 @@ ADR 保存重要设计取舍的状态、理由和代价。下表收录当前已�
 | [0003](0003-results-and-verification.md) | accepted | 执行结果与业务完成分离，验收使用独立证据 | 记录并沿用既有行为与验收原则 |
 | [0004](0004-small-console.md) | accepted | 控制台聚焦脚本运行，删除外围调试工作台 | 本轮用户授权精简，工作区已实现 |
 | [0005](0005-repository-documentation.md) | accepted | 使用仓库内上下文与决策文档，移除 OpenSpec 目录并通过 Git 追溯 | 本轮用户明确确认 |
+| [0006](0006-local-task-workspaces.md) | accepted | 框架主仓与外部本地任务工作区分离 | 本轮用户确认并授权实施 |
 
 ## 如何新增
 

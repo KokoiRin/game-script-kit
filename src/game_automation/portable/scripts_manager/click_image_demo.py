@@ -8,10 +8,13 @@ from __future__ import annotations
 
 from game_automation.portable.domain import (
     Click,
+    ImageRef,
     ImageTarget,
     ImageTemplate,
+    NamedImage,
     ScreenWindow,
     Script,
+    TargetCatalog,
 )
 
 
@@ -21,7 +24,8 @@ CLICK_IMAGE_DEMO_TEMPLATE = "assets/start.png"
 CLICK_IMAGE_DEMO_SCRIPT = Script(
     name="click-image-demo",
     window=ScreenWindow(),
-    steps=(Click(ImageTarget(ImageTemplate(CLICK_IMAGE_DEMO_TEMPLATE))),),
+    resources=TargetCatalog(images=(NamedImage("开始", ImageTemplate(CLICK_IMAGE_DEMO_TEMPLATE)),)),
+    steps=(Click(ImageTarget(ImageRef("开始"))),),
 )
 
 

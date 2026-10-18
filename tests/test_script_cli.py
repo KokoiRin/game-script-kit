@@ -1,6 +1,7 @@
 """验证 star CLI 可以列出和按名称运行脚本。"""
 
 import json
+from pathlib import Path
 from types import ModuleType
 
 import pytest
@@ -58,9 +59,8 @@ def test_star_cli_lists_available_scripts(capsys) -> None:
     assert main(["list"]) == 0
 
     output = capsys.readouterr().out.splitlines()
-    assert output[:11] == [
+    assert output[:8] == [
         "demo",
-        "recorded-clicks",
         "repeat-demo",
         "conditional-color-demo",
         "conditional-screen-state-demo",
@@ -68,9 +68,8 @@ def test_star_cli_lists_available_scripts(capsys) -> None:
         "wait-until-image-demo",
         "wait-until-screen-state-demo",
         "click-image-demo",
-        "click-leave-or-retry-loop",
-        "file-script-demo",
     ]
+    assert "file-script-demo" in output
 
 
 def test_star_cli_lists_file_backed_scripts(monkeypatch, tmp_path, capsys) -> None:
@@ -385,14 +384,14 @@ def test_star_cli_run_plan_rejects_unknown_script_before_running(monkeypatch, ca
 
 def test_star_cli_runs_named_script_with_dry_run(capsys) -> None:
     """验证 dry-run 可以按名称运行指定脚本并打印操作。"""
-    assert main(["run", "recorded-clicks", "--dry-run"]) == 0
+    assert main(["run", "demo", "--dry-run"]) == 0
 
     output = capsys.readouterr().out
-    assert "wait 3s" in output
-    assert "Point(x=242, y=92)" in output
-    assert "Point(x=736, y=323)" in output
-    assert "Point(x=741, y=400)" in output
-    assert "wait 10s" in output
+    assert output.splitlines() == [
+        "click Point(x=300, y=300)",
+        "drag Point(x=300, y=300) -> Point(x=460, y=360) (duration=0.4s)",
+        "wait 0.1s",
+    ]
 
 
 def test_star_cli_shows_script_details(capsys) -> None:
@@ -402,11 +401,11 @@ def test_star_cli_shows_script_details(capsys) -> None:
     output = capsys.readouterr().out
     assert "脚本：click-image-demo" in output
     assert "步骤：" in output
-    assert "- Click ImageTarget(assets/start.png, min_confidence=1)" in output
+    assert '- Click ImageTarget(ImageRef("开始"), min_confidence=1)' in output
     assert "依赖：" in output
-    assert "- 图片: assets/start.png" in output
+    assert '- 图片: ImageRef("开始")' in output
     assert "图片依赖：" in output
-    assert "- assets/start.png" in output
+    assert f"- {cli.PROJECT_ROOT / 'assets' / 'start.png'}" in output
     assert "依赖检查：" in output
 
 
@@ -656,16 +655,12 @@ def test_star_cli_run_defaults_to_macos(monkeypatch, capsys) -> None:
         fake_macos_module,
     )
 
-    assert main(["run", "recorded-clicks"]) == 0
+    assert main(["run", "demo"]) == 0
 
     captured = capsys.readouterr()
     assert captured.out == ""
-    assert clicks == [
-        Point(242, 92),
-        Point(736, 323),
-        Point(741, 400),
-    ]
-    assert drags == []
+    assert clicks == [Point(300, 300)]
+    assert drags == [(Point(300, 300), Point(460, 360), 0.4)]
 
 
 def test_star_cli_run_passes_target_application(monkeypatch) -> None:
@@ -679,8 +674,8 @@ def test_star_cli_run_passes_target_application(monkeypatch) -> None:
 
     monkeypatch.setattr(cli, "run_script_on_local_desktop", fake_run)
 
-    assert main(["run", "recorded-clicks", "--target-app", "Safari"]) == 0
-    assert calls == [("recorded-clicks", "Safari")]
+    assert main(["run", "demo", "--target-app", "Safari"]) == 0
+    assert calls == [("demo", "Safari")]
 
 
 def test_star_cli_run_rejects_target_application_in_dry_run(monkeypatch, capsys) -> None:
@@ -688,7 +683,7 @@ def test_star_cli_run_rejects_target_application_in_dry_run(monkeypatch, capsys)
     calls = []
     monkeypatch.setattr(cli, "run_script_on_local_desktop", lambda *args, **kwargs: calls.append(True))
 
-    assert main(["run", "recorded-clicks", "--dry-run", "--target-app", "Safari"]) == 2
+    assert main(["run", "demo", "--dry-run", "--target-app", "Safari"]) == 2
 
     captured = capsys.readouterr()
     assert "--target-app cannot be used with --dry-run" in captured.err
@@ -709,7 +704,7 @@ def test_star_cli_run_passes_target_window_title(monkeypatch) -> None:
     assert main(
         [
             "run",
-            "recorded-clicks",
+            "demo",
             "--target-app",
             "Safari",
             "--target-window-title",
@@ -725,7 +720,7 @@ def test_star_cli_run_rejects_target_window_without_application(monkeypatch, cap
     monkeypatch.setattr(cli, "run_script_on_local_desktop", lambda *args, **kwargs: calls.append(True))
 
     assert main(
-        ["run", "recorded-clicks", "--target-window-title", "视觉自动化靶场"]
+        ["run", "demo", "--target-window-title", "视觉自动化靶场"]
     ) == 2
 
     captured = capsys.readouterr()
@@ -835,7 +830,7 @@ def test_star_cli_run_injects_image_locator_for_image_script(monkeypatch, capsys
 
     captured = capsys.readouterr()
     assert captured.out == ""
-    assert located_templates == [ImageTemplate("assets/start.png")]
+    assert located_templates == [ImageTemplate(str(cli.PROJECT_ROOT / "assets" / "start.png"))]
     assert clicks == [Point(100, 200)]
 
 
@@ -1037,12 +1032,15 @@ def test_star_cli_ui_starts_local_control_without_opening_browser(monkeypatch, c
 
     calls = []
 
-    def fake_serve_local_control_ui(*, host, port, open_browser):
+    def fake_serve_local_control_ui(*, host, port, open_browser, project_root, include_builtin_scripts):
+        """记录 UI 启动使用的参数与工作区。"""
         calls.append(
             {
                 "host": host,
                 "port": port,
                 "open_browser": open_browser,
+                "project_root": project_root,
+                "include_builtin_scripts": include_builtin_scripts,
             }
         )
         return 0
@@ -1058,6 +1056,8 @@ def test_star_cli_ui_starts_local_control_without_opening_browser(monkeypatch, c
             "host": "127.0.0.1",
             "port": 8765,
             "open_browser": False,
+            "project_root": cli.PROJECT_ROOT,
+            "include_builtin_scripts": True,
         }
     ]
 
@@ -1183,3 +1183,235 @@ def test_star_cli_rejects_removed_live_probe_dry_run_option(command, names, caps
         main([command, *names, "--dry-run", "--dry-run-probed-screen-state"])
     assert exc.value.code == 2
     assert "unrecognized arguments" in capsys.readouterr().err
+
+
+def _write_workspace_script(root: Path, name: str, steps, *, resources=None) -> None:
+    """在测试工作区写入独立脚本，不向主仓添加素材。"""
+    script_dir = root / "scripts"
+    script_dir.mkdir(parents=True, exist_ok=True)
+    (script_dir / f"{name}.json").write_text(json.dumps({
+        "name": name, "steps": steps, "resources": resources or {},
+    }, ensure_ascii=False), encoding="utf-8")
+
+
+def _write_workspace_state(root: Path, state: str, search_name: str, image_name: str) -> None:
+    """写入独立工作区的共享状态图片和搜索别名。"""
+    assets = root / "assets"
+    assets.mkdir(parents=True, exist_ok=True)
+    (assets / image_name).write_bytes(b"fake")
+    (assets / "screen-states.json").write_text(json.dumps({
+        "groups": [{"state": state, "searches": [{
+            "name": search_name, "image": image_name, "min_confidence": 0.8,
+        }]}],
+    }, ensure_ascii=False), encoding="utf-8")
+
+
+def test_star_cli_workspace_lists_only_its_json_even_with_builtin_name(tmp_path, capsys) -> None:
+    """显式工作区只有自己的脚本，同名 demo 不与内置示例冲突。"""
+    _write_workspace_script(tmp_path, "demo", [{"wait": 0.75}])
+
+    assert main(["--workspace", str(tmp_path), "list"]) == 0
+
+    captured = capsys.readouterr()
+    assert captured.out.splitlines() == ["demo"]
+    assert captured.err == ""
+
+
+def test_star_cli_workspace_details_uses_its_images_states_and_shared_search(tmp_path, capsys) -> None:
+    """详情以工作区 assets 检查图片和状态，解析该工作区的共享搜索。"""
+    _write_workspace_state(tmp_path, "独立主页", "工作区按钮", "button.png")
+    _write_workspace_script(tmp_path, "检查", [
+        {"wait_until_state": {"state": "独立主页", "timeout": 1, "interval": 0.1}},
+        {"click": {"search": "工作区按钮"}},
+    ])
+
+    assert main(["--workspace", str(tmp_path), "details", "检查"]) == 0
+
+    captured = capsys.readouterr()
+    assert "[OK] 状态: 独立主页" in captured.out
+    assert "[OK] 图片: SearchRef" in captured.out
+    assert str(tmp_path / "assets" / "button.png") in captured.out
+    assert captured.err == ""
+
+
+def test_star_cli_workspace_dry_run_uses_its_resources_and_fixed_state(tmp_path, capsys) -> None:
+    """外部工作区模拟运行使用同根目录的共享搜索、图片与固定状态。"""
+    _write_workspace_state(tmp_path, "独立主页", "工作区按钮", "button.png")
+    _write_workspace_script(tmp_path, "独立运行", [
+        {"wait_until_state": {"state": "独立主页", "timeout": 1, "interval": 0.1}},
+        {"click": {"search": "工作区按钮"}},
+    ])
+
+    assert main([
+        "--workspace", str(tmp_path), "run", "独立运行", "--dry-run",
+        "--dry-run-screen-state", "独立主页", "--dry-run-script-images",
+    ]) == 0
+
+    captured = capsys.readouterr()
+    assert captured.out.splitlines() == ["click Point(x=0, y=0)"]
+    assert captured.err == ""
+
+
+def test_star_cli_workspace_plan_uses_each_external_script_image(tmp_path, capsys) -> None:
+    """计划中每一项都解析外部工作区图片，且依次模拟执行。"""
+    for name in ("first", "second"):
+        _write_workspace_script(tmp_path, name, [{"click": {"image": "按钮"}}], resources={
+            "images": {"按钮": f"{name}.png"},
+        })
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    for name in ("first", "second"):
+        (assets / f"{name}.png").write_bytes(b"fake")
+
+    assert main([
+        "--workspace", str(tmp_path), "run-plan", "first", "second",
+        "--dry-run", "--dry-run-script-images",
+    ]) == 0
+
+    captured = capsys.readouterr()
+    assert "Run Plan: exit_code=0 finish_reason=completed" in captured.out
+    assert "[1] first: exit_code=0 finish_reason=completed" in captured.out
+    assert "[2] second: exit_code=0 finish_reason=completed" in captured.out
+    assert captured.out.count("click Point(x=0, y=0)") == 2
+    assert captured.err == ""
+
+
+@pytest.mark.parametrize("command", [["details", "demo"], ["run", "demo", "--dry-run"], ["run-plan", "demo", "--dry-run"]])
+def test_star_cli_workspace_cannot_resolve_builtin_scripts(tmp_path, capsys, command) -> None:
+    """显式空工作区不能从内置 catalog 偷取同名脚本。"""
+    assert main(["--workspace", str(tmp_path), *command]) == 1
+    assert "unknown script: demo" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("command", [
+    ["list"], ["details", "demo"], ["run", "demo"],
+    ["run-plan", "demo"], ["ui", "--no-open"],
+])
+@pytest.mark.parametrize("kind", ["missing", "file"])
+def test_star_cli_invalid_workspace_fails_before_loading_or_desktop(tmp_path, monkeypatch, capsys, command, kind) -> None:
+    """不存在或非目录工作区返回 2，不创建目录、不加载脚本、不启动桌面或 UI。"""
+    workspace = tmp_path / kind
+    if kind == "file":
+        workspace.write_text("not a directory")
+
+    def reject_side_effect(*args, **kwargs):
+        """阻止路径校验完成前进入任何加载或运行入口。"""
+        raise AssertionError("invalid workspace must be rejected first")
+
+    import game_automation.platform.local_desktop.entrypoints.local_ui as local_ui
+    monkeypatch.setattr(cli, "load_project_script_catalog_result", reject_side_effect)
+    monkeypatch.setattr(cli, "run_script_on_local_desktop", reject_side_effect)
+    monkeypatch.setattr(local_ui, "serve_local_control_ui", reject_side_effect)
+
+    assert main(["--workspace", str(workspace), *command]) == 2
+
+    captured = capsys.readouterr()
+    assert "invalid workspace" in captured.err
+    assert captured.out == ""
+    if kind == "missing":
+        assert not workspace.exists()
+
+
+def test_star_cli_workspace_ui_expands_home_and_disables_builtin_scripts(monkeypatch) -> None:
+    """UI 收到展开后的绝对工作区，并禁止混入内置脚本。"""
+    import game_automation.platform.local_desktop.entrypoints.local_ui as local_ui
+    calls = []
+
+    def fake_serve(**kwargs):
+        """只记录 UI 参数，不启动网络服务。"""
+        calls.append(kwargs)
+        return 0
+
+    monkeypatch.setattr(local_ui, "serve_local_control_ui", fake_serve)
+
+    assert main(["--workspace", "~", "ui", "--port", "8989", "--no-open"]) == 0
+
+    assert calls == [{
+        "host": "127.0.0.1", "port": 8989, "open_browser": False,
+        "project_root": Path.home().resolve(), "include_builtin_scripts": False,
+    }]
+
+
+@pytest.mark.parametrize("command", [["run", "workspace-task"], ["run-plan", "workspace-task", "workspace-next"]])
+def test_star_cli_real_execution_receives_normalized_workspace(tmp_path, monkeypatch, command) -> None:
+    """真实运行和计划中的每项都接收同一规范化工作区，不创建真实设备。"""
+    root = tmp_path / "workspace"
+    _write_workspace_script(root, "workspace-task", [{"wait": 0}])
+    _write_workspace_script(root, "workspace-next", [{"wait": 0}])
+    monkeypatch.chdir(tmp_path)
+    calls = []
+
+    def fake_run(script, **kwargs):
+        """记录真实模式收到的工作区、脚本名称和运行方式。"""
+        calls.append((script.name, kwargs["project_root"], kwargs["dry_run"]))
+        return _script_run_result(0, "completed")
+
+    monkeypatch.setattr(cli, "run_script_on_local_desktop", fake_run)
+
+    assert main(["--workspace", "workspace/../workspace", *command]) == 0
+
+    assert calls == [(name, root.resolve(), False) for name in command[1:]]
+
+
+def test_star_cli_repeated_main_calls_do_not_leak_workspace(tmp_path, monkeypatch, capsys) -> None:
+    """同进程先后选择两个工作区再回默认项目时，目录与 catalog 都不串用。"""
+    first, second, default = (tmp_path / name for name in ("first", "second", "default"))
+    _write_workspace_script(first, "相同名称", [{"wait": 0.1}])
+    _write_workspace_script(second, "相同名称", [{"wait": 0.2}])
+    _write_workspace_script(default, "默认文件", [{"wait": 0.3}])
+    monkeypatch.setattr(cli, "PROJECT_ROOT", default)
+
+    assert main(["--workspace", str(first), "run", "相同名称", "--dry-run"]) == 0
+    assert capsys.readouterr().out.splitlines() == ["wait 0.1s"]
+    assert main(["--workspace", str(second), "run", "相同名称", "--dry-run"]) == 0
+    assert capsys.readouterr().out.splitlines() == ["wait 0.2s"]
+    assert main(["run", "默认文件", "--dry-run"]) == 0
+    assert capsys.readouterr().out.splitlines() == ["wait 0.3s"]
+    assert main(["list"]) == 0
+    names = capsys.readouterr().out.splitlines()
+    assert "demo" in names
+    assert "默认文件" in names
+    assert "相同名称" not in names
+    assert cli.PROJECT_ROOT == default
+
+
+@pytest.mark.parametrize("command", [["run", "external-image"], ["run-plan", "external-image"]])
+@pytest.mark.parametrize("absolute_image", [False, True])
+def test_star_cli_external_cwd_resolves_explicit_dry_run_image_in_workspace(tmp_path, monkeypatch, capsys, command, absolute_image) -> None:
+    """在仓库外目录运行时，相对 assets 模板按显式工作区解析，绝对路径也保持可用。"""
+    workspace = tmp_path / "workspace"
+    _write_workspace_script(workspace, "external-image", [{"click": {"image": "按钮"}}], resources={
+        "images": {"按钮": "button.png"},
+    })
+    assets = workspace / "assets"
+    assets.mkdir()
+    image = assets / "button.png"
+    image.write_bytes(b"fake")
+    caller = tmp_path / "caller"
+    caller.mkdir()
+    monkeypatch.chdir(caller)
+    image_arg = str(image) if absolute_image else "assets/button.png"
+
+    assert main([
+        "--workspace", str(workspace), *command,
+        "--dry-run", "--dry-run-image", image_arg,
+    ]) == 0
+
+    captured = capsys.readouterr()
+    assert "click Point(x=0, y=0)" in captured.out
+    if command[0] == "run-plan":
+        assert "finish_reason=completed" in captured.out
+    assert captured.err == ""
+
+
+def test_star_cli_default_demo_image_uses_project_root_from_external_cwd(tmp_path, monkeypatch, capsys) -> None:
+    """默认通用图片示例在仓库外启动时仍接受旧 assets/start.png 模拟参数。"""
+    monkeypatch.chdir(tmp_path)
+
+    assert main([
+        "run", "click-image-demo", "--dry-run", "--dry-run-image", "assets/start.png",
+    ]) == 0
+
+    captured = capsys.readouterr()
+    assert captured.out.splitlines() == ["click Point(x=0, y=0)"]
+    assert captured.err == ""

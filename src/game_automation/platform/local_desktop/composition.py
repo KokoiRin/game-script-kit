@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from game_automation.portable.application.local_control import LocalControlApplication
 from game_automation.portable.application.ports import ApplicationActivator, ApplicationWindowController
 from game_automation.portable.application.project_assets import PROJECT_ROOT
@@ -20,6 +22,8 @@ from game_automation.portable.engine.ports import (
     ScreenImageLocator,
     ScreenStateReader,
 )
+from game_automation.portable.scripts_manager import DEFAULT_SCRIPT_CATALOG
+from game_automation.portable.scripts_manager.catalog import ScriptCatalog
 
 
 def run_script_on_local_desktop(
@@ -31,6 +35,7 @@ def run_script_on_local_desktop(
     dry_run_screen_state: str = "未知",
     target_application: str | None = None,
     target_window_title: str | None = None,
+    project_root: Path = PROJECT_ROOT,
 ) -> ScriptRunResult:
     """用本机桌面 adapter 运行脚本。"""
     return run_script(
@@ -46,7 +51,7 @@ def run_script_on_local_desktop(
         real_device_factory=build_real_input_device,
         real_color_reader_factory=build_real_color_reader,
         real_image_locator_factory=build_real_screen_image_locator,
-        real_screen_state_reader_factory=build_real_screen_state_reader,
+        real_screen_state_reader_factory=lambda: build_real_screen_state_reader(project_root=project_root),
     )
 
 
@@ -64,10 +69,16 @@ def build_real_application_window_controller() -> ApplicationWindowController:
     return MacOSApplicationWindowController()
 
 
-def build_local_control_application() -> LocalControlApplication:
+def build_local_control_application(
+    *, project_root: Path = PROJECT_ROOT, include_builtin_scripts: bool = True,
+) -> LocalControlApplication:
     """创建已接入本机桌面 adapter 的本地控制应用用例。"""
-    catalog_result = load_project_script_catalog_result(PROJECT_ROOT)
+    catalog_result = load_project_script_catalog_result(
+        project_root,
+        base_catalog=DEFAULT_SCRIPT_CATALOG if include_builtin_scripts else ScriptCatalog(()),
+    )
     return LocalControlApplication(
+        project_root=project_root,
         catalog=catalog_result.catalog,
         script_config_errors=catalog_result.script_config_errors,
         real_device_factory=build_real_input_device,
@@ -105,10 +116,10 @@ def build_real_screen_image_batch_locator() -> ScreenImageBatchLocator:
     return PyAutoGuiScreenImageLocator()
 
 
-def build_real_screen_state_reader() -> ScreenStateReader:
+def build_real_screen_state_reader(*, project_root: Path = PROJECT_ROOT) -> ScreenStateReader:
     """直接装配脚本状态读取能力，避免依赖 UI 会话或诊断用例。"""
     return ProjectScreenStateReader(
-        project_root=PROJECT_ROOT,
+        project_root=project_root,
         real_image_locator_factory=build_real_screen_image_locator,
         real_image_batch_locator_factory=build_real_screen_image_batch_locator,
     )

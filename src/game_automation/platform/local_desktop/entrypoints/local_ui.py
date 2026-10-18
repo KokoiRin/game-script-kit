@@ -11,17 +11,25 @@ from urllib.parse import parse_qs, urlparse
 import webbrowser
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from typing import Any
 
 from game_automation.platform.local_desktop.composition import build_local_control_application
 from game_automation.platform.local_desktop.entrypoints.local_ui_assets import read_ui_asset
 from game_automation.portable.application.local_control import LocalControlApplication
+from game_automation.portable.application.project_assets import PROJECT_ROOT
 from game_automation.portable.engine.run_events import script_run_event_to_payload
 
 
-def serve_local_control_ui(*, host: str, port: int, open_browser: bool) -> int:
+def serve_local_control_ui(
+    *, host: str, port: int, open_browser: bool,
+    project_root: Path = PROJECT_ROOT, include_builtin_scripts: bool = True,
+) -> int:
     """启动本地控制 UI，并阻塞直到用户中断。"""
-    server = create_local_control_server(host=host, port=port)
+    server = create_local_control_server(
+        host=host, port=port, project_root=project_root,
+        include_builtin_scripts=include_builtin_scripts,
+    )
     url = f"http://{server.server_address[0]}:{server.server_address[1]}/"
     print(f"Star control UI: {url}")
     if open_browser:
@@ -40,9 +48,13 @@ def create_local_control_server(
     host: str,
     port: int,
     app: LocalControlApplication | None = None,
+    project_root: Path = PROJECT_ROOT,
+    include_builtin_scripts: bool = True,
 ) -> ThreadingHTTPServer:
     """创建本地控制台 HTTP server，供 CLI 或测试控制生命周期。"""
-    control_app = app if app is not None else build_local_control_application()
+    control_app = app if app is not None else build_local_control_application(
+        project_root=project_root, include_builtin_scripts=include_builtin_scripts,
+    )
 
     class LocalControlHandler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
@@ -60,6 +72,8 @@ def create_local_control_server(
                         control_app.list_script_config_errors()
                     ),
                 })
+            elif path == "/api/workspace":
+                self._send_json({"path": str(control_app.workspace_path)})
             elif path == "/api/script-details":
                 name = parse_qs(parsed_url.query).get("name", [""])[0]
                 self._send_json(_script_details_to_payload(control_app.describe_script(name)))

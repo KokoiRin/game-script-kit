@@ -12,6 +12,7 @@
 | 确认开发规则、测试和提交方式 | [AGENTS](../AGENTS.md) |
 | 判断能力属于哪一层、怎样接平台 | [架构约束](architecture.md)、[ADR 0002](adr/0002-ports-and-adapters.md) |
 | 调整创作方式或用户流程 | [项目上下文](../CONTEXT.md)、[ADR 0001](adr/0001-agent-authored-tasks.md) |
+| 新建具体任务、选择数据根或调整资源隔离 | [README](../README.md)、[ADR 0006](adr/0006-local-task-workspaces.md)；任务上下文读取所选外部工作区 |
 | 修改结果、停止、验证或任务完成语义 | [ADR 0003](adr/0003-results-and-verification.md)、[当前状态](current-state.md) |
 | 增加控制台或诊断能力 | [ADR 0004](adr/0004-small-console.md) |
 | 设计循环恢复、重试或子任务组合 | [当前状态](current-state.md)、[恢复机制讨论稿](design/local-recovery.md) |
@@ -29,6 +30,8 @@
 | 尚待选择的方案 | `docs/design/` | 设计讨论推进；定案后链接对应 ADR |
 | 近期阶段与验收建议 | `docs/restart-plan.md` | 工作优先级调整 |
 | 命令和使用方法 | `README.md` | 用户可见入口或用法变化 |
+
+本目录只维护框架资料。具体任务的脚本、模板、玩法说明、运行记录和证据保存在外部任务工作区，主仓文档只解释通用接口与隔离约定。
 
 ## 状态与冲突处理
 

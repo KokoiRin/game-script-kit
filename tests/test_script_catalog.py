@@ -49,39 +49,18 @@ def test_script_catalog_rejects_duplicate_names() -> None:
         ScriptCatalog((build_script("same"), build_script("same")))
 
 
-def test_default_catalog_includes_conditional_color_demo() -> None:
-    """验证默认注册表包含颜色条件分支示例脚本。"""
-    assert "conditional-color-demo" in DEFAULT_SCRIPT_CATALOG.list_names()
-
-
-def test_default_catalog_includes_wait_until_color_demo() -> None:
-    """验证默认注册表包含条件等待示例脚本。"""
-    assert "wait-until-color-demo" in DEFAULT_SCRIPT_CATALOG.list_names()
-
-
-def test_default_catalog_includes_conditional_screen_state_demo() -> None:
-    """验证默认注册表包含界面状态条件分支示例脚本。"""
-    assert "conditional-screen-state-demo" in DEFAULT_SCRIPT_CATALOG.list_names()
-
-
-def test_default_catalog_includes_wait_until_image_demo() -> None:
-    """验证默认注册表包含图片条件等待示例脚本。"""
-    assert "wait-until-image-demo" in DEFAULT_SCRIPT_CATALOG.list_names()
-
-
-def test_default_catalog_includes_wait_until_screen_state_demo() -> None:
-    """验证默认注册表包含界面状态条件等待示例脚本。"""
-    assert "wait-until-screen-state-demo" in DEFAULT_SCRIPT_CATALOG.list_names()
-
-
-def test_default_catalog_includes_click_image_demo() -> None:
-    """验证默认注册表包含图片目标点击示例脚本。"""
-    assert "click-image-demo" in DEFAULT_SCRIPT_CATALOG.list_names()
-
-
-def test_default_catalog_includes_leave_retry_loop() -> None:
-    """验证默认注册表包含离开/重来轮询点击脚本。"""
-    assert "click-leave-or-retry-loop" in DEFAULT_SCRIPT_CATALOG.list_names()
+def test_default_catalog_contains_only_generic_examples() -> None:
+    """默认注册表只暴露八个通用示例，不自动加载个人录制或特定应用配方。"""
+    assert DEFAULT_SCRIPT_CATALOG.list_names() == (
+        "demo",
+        "repeat-demo",
+        "conditional-color-demo",
+        "conditional-screen-state-demo",
+        "wait-until-color-demo",
+        "wait-until-image-demo",
+        "wait-until-screen-state-demo",
+        "click-image-demo",
+    )
 
 
 def test_project_catalog_includes_file_scripts(tmp_path) -> None:
@@ -148,3 +127,90 @@ def test_project_catalog_reports_bad_file_without_hiding_good_scripts(tmp_path) 
     assert result.script_config_errors == (
         ScriptConfigError("bad.json", "bad.json: unsupported step type: drag"),
     )
+
+
+def test_project_catalog_binds_resource_images_without_mutating_base_catalog(tmp_path) -> None:
+    """图片与搜索资源按各自数据根装配，绝对路径与共享基础定义保持原值。"""
+    from game_automation.portable.domain import (
+        ImageRef, ImageSearchSpec, ImageTemplate, NamedImage, NamedImageSearch,
+        SearchRef, TargetCatalog,
+    )
+
+    absolute_template = ImageTemplate(str(tmp_path / "shared.png"))
+    script = Script(
+        name="arbitrary-resource-example", window=ScreenWindow(), steps=(Click(Point(1, 2)),),
+        resources=TargetCatalog(
+            images=(
+                NamedImage("relative", ImageTemplate("assets/image.png")),
+                NamedImage("absolute", absolute_template),
+            ),
+            searches=(
+                NamedImageSearch("direct", ImageSearchSpec(ImageTemplate("assets/search.png"))),
+                NamedImageSearch("alias", ImageSearchSpec(ImageRef("relative"))),
+                NamedImageSearch("absolute", ImageSearchSpec(absolute_template)),
+            ),
+        ),
+    )
+    base_catalog = ScriptCatalog((script,))
+
+    for root in (tmp_path / "first", tmp_path / "second"):
+        loaded = load_project_script_catalog(root, base_catalog=base_catalog).get(script.name)
+        assert loaded.resources.resolve_image(ImageRef("relative")).path == str(root / "assets/image.png")
+        assert loaded.resources.resolve_search(SearchRef("direct")).image.path == str(root / "assets/search.png")
+        assert loaded.resources.resolve_search(SearchRef("alias")).image.path == str(root / "assets/image.png")
+        assert loaded.resources.resolve_image(ImageRef("absolute")) == absolute_template
+        assert loaded.resources.resolve_search(SearchRef("absolute")).image == absolute_template
+
+    assert script.resources.resolve_image(ImageRef("relative")).path == "assets/image.png"
+    assert script.resources.resolve_search(SearchRef("direct")).image.path == "assets/search.png"
+
+
+@pytest.mark.parametrize("script_name", ["click-image-demo", "wait-until-image-demo"])
+def test_project_builtin_image_details_and_execution_share_root_outside_cwd(
+    tmp_path, monkeypatch, script_name,
+) -> None:
+    """仓库外启动时，内置图片示例的详情与真实定位端口仍使用相同数据根。"""
+    from pathlib import Path
+
+    from game_automation.portable.application.script_details import describe_script_details
+    from game_automation.portable.application.script_run import run_script
+    from game_automation.portable.domain import ImageMatch, Rect
+
+    root = tmp_path / "project"
+    assets = root / "assets"
+    assets.mkdir(parents=True)
+    image = assets / "start.png"
+    image.write_bytes(b"synthetic template")
+    other = tmp_path / "other"
+    other.mkdir()
+    monkeypatch.chdir(other)
+    script = load_project_script_catalog(root).get(script_name)
+    details = describe_script_details(
+        script, asset_root=assets, supported_image_suffixes=frozenset({".png"}), state_names=(),
+    )
+    located = []
+    clicks = []
+
+    class FakeDevice:
+        def click(self, point):
+            """记录动作，图片找到后应正常推进。"""
+            clicks.append(point)
+
+    class CheckingLocator:
+        def locate(self, template, **kwargs):
+            """像真实适配器一样按收到的路径读取模板，不借用当前目录。"""
+            located.append(template.path)
+            if not Path(template.path).is_file():
+                raise RuntimeError("template is not available at the runtime path")
+            return ImageMatch(Rect(10, 20, 4, 6), 1.0)
+
+    result = run_script(
+        script, dry_run=False, real_device_factory=FakeDevice,
+        real_image_locator_factory=CheckingLocator,
+    )
+
+    assert details.readiness[0][1] == "ok"
+    assert result.finish_reason == "completed"
+    assert details.image_dependencies == (str(image),)
+    assert located == [str(image)]
+    assert clicks
