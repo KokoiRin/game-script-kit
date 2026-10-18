@@ -1,7 +1,7 @@
-"""本地控制 UI 的 HTTP 入口 adapter。
+"""把本地控制台的 HTTP 请求映射到脚本运行用例。
 
-本 module 负责把浏览器页面和 JSON 请求转换为 application 调用；它不直接运行
-脚本、不导入平台自动化 adapter，也不提供通用命令执行能力。
+本 module 提供静态页面、脚本列表与详情、后台运行状态和运行/停止接口；
+它不解释脚本步骤、不创建平台 adapter，也不承载开发调试工具。
 """
 
 from __future__ import annotations
@@ -11,12 +11,10 @@ from urllib.parse import parse_qs, urlparse
 import webbrowser
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from pathlib import Path
 from typing import Any
 
 from game_automation.platform.local_desktop.composition import build_local_control_application
 from game_automation.platform.local_desktop.entrypoints.local_ui_assets import read_ui_asset
-from game_automation.portable.domain import Rect
 from game_automation.portable.application.local_control import LocalControlApplication
 from game_automation.portable.engine.run_events import script_run_event_to_payload
 
@@ -43,67 +41,43 @@ def create_local_control_server(
     port: int,
     app: LocalControlApplication | None = None,
 ) -> ThreadingHTTPServer:
-    """创建本地 UI HTTP server，供 CLI 或测试控制生命周期。"""
+    """创建本地控制台 HTTP server，供 CLI 或测试控制生命周期。"""
     control_app = app if app is not None else build_local_control_application()
-    latest_screenshot_path = ""
-    screenshot_version = 0
 
     class LocalControlHandler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
-            """处理控制页面、脚本列表和图片资源列表读取请求。"""
+            """读取控制页面、脚本信息和当前运行状态。"""
             parsed_url = urlparse(self.path)
             path = parsed_url.path
             if path == "/":
                 self._send_ui_asset("index.html")
-                return
-            if path.startswith("/static/"):
+            elif path.startswith("/static/"):
                 self._send_ui_asset(path.removeprefix("/static/"))
-                return
-            if path == "/api/scripts":
-                self._send_json(
-                    {
-                        "scripts": list(control_app.list_scripts()),
-                        "script_config_errors": _script_config_errors_to_payload(
-                            control_app.list_script_config_errors()
-                        ),
-                    }
-                )
-                return
-            if path == "/api/script-details":
-                query = parse_qs(parsed_url.query)
-                name = query.get("name", [""])[0]
+            elif path == "/api/scripts":
+                self._send_json({
+                    "scripts": list(control_app.list_scripts()),
+                    "script_config_errors": _script_config_errors_to_payload(
+                        control_app.list_script_config_errors()
+                    ),
+                })
+            elif path == "/api/script-details":
+                name = parse_qs(parsed_url.query).get("name", [""])[0]
                 self._send_json(_script_details_to_payload(control_app.describe_script(name)))
-                return
-            if path == "/api/image-assets":
-                self._send_json(
-                    {
-                        "asset_folder": control_app.image_asset_folder_label(),
-                        "assets": list(control_app.list_image_assets()),
-                    }
-                )
-                return
-            if path == "/api/screen-state-names":
+            elif path == "/api/screen-state-names":
                 self._send_json({"states": list(control_app.list_screen_state_names())})
-                return
-            if path == "/api/screen-state-config":
-                self._send_json(_screen_state_config_to_payload(control_app.describe_screen_state_config()))
-                return
-            if path == "/api/script-run":
+            elif path == "/api/script-run":
                 self._send_json(_status_to_payload(control_app.current_script_run()))
-                return
-            if path == "/api/screen-state-probe":
-                self._send_json(_probe_status_to_payload(control_app.current_screen_state_probe()))
-                return
-            if path == "/api/debug-screenshot":
-                self._send_png_file(Path(latest_screenshot_path))
-                return
-            self.send_error(HTTPStatus.NOT_FOUND)
+            else:
+                self.send_error(HTTPStatus.NOT_FOUND)
 
         def do_POST(self) -> None:
-            """处理脚本运行、图片点击和固定测试任务请求。"""
-            nonlocal latest_screenshot_path, screenshot_version
+            """请求后台运行或停止当前脚本。"""
             if self.path == "/api/run-script":
-                payload = self._read_json()
+                try:
+                    payload = self._read_json()
+                except (ValueError, UnicodeDecodeError):
+                    self._send_json({"error": "请求必须是 JSON 对象"}, HTTPStatus.BAD_REQUEST)
+                    return
                 status = control_app.start_named_script(
                     str(payload.get("name", "")),
                     dry_run=bool(payload.get("dry_run", True)),
@@ -112,245 +86,49 @@ def create_local_control_server(
                     dry_run_images=_parse_dry_run_images(payload),
                 )
                 self._send_json(_status_to_payload(status))
-                return
-            if self.path == "/api/stop-script":
-                status = control_app.stop_running_script()
-                self._send_json(_status_to_payload(status))
-                return
-            if self.path == "/api/start-screen-state-probe":
-                payload = self._read_json()
-                min_confidence = _parse_min_confidence(payload)
-                interval_seconds = _parse_interval_seconds(payload)
-                if min_confidence is None or interval_seconds is None:
-                    self._send_json(
-                        {
-                            "running": False,
-                            "current_state": "未知",
-                            "exit_code": 2,
-                            "stdout": "",
-                            "stderr": "invalid screen state probe request: min_confidence and interval_seconds must be numbers\n",
-                        }
-                    )
-                    return
-                status = control_app.start_screen_state_probe(
-                    min_confidence=min_confidence,
-                    interval_seconds=interval_seconds,
-                )
-                self._send_json(_probe_status_to_payload(status))
-                return
-            if self.path == "/api/stop-screen-state-probe":
-                status = control_app.stop_screen_state_probe()
-                self._send_json(_probe_status_to_payload(status))
-                return
-            if self.path == "/api/click-image":
-                payload = self._read_json()
-                min_confidence = _parse_min_confidence(payload)
-                if min_confidence is None:
-                    self._send_json(
-                        {
-                            "exit_code": 2,
-                            "stdout": "",
-                            "stderr": "invalid image click request: min_confidence must be a number\n",
-                        }
-                    )
-                    return
-                result = control_app.click_image_asset(
-                    str(payload.get("asset", "")),
-                    dry_run=bool(payload.get("dry_run", True)),
-                    min_confidence=min_confidence,
-                )
-                self._send_json(_result_to_payload(result))
-                return
-            if self.path == "/api/preview-image-match":
-                payload = self._read_json()
-                min_confidence = _parse_min_confidence(payload)
-                region = _parse_region(payload)
-                if min_confidence is None or region is None:
-                    self._send_json(
-                        {
-                            "exit_code": 2,
-                            "stdout": "",
-                            "stderr": (
-                                "invalid image match preview request: "
-                                "region must contain positive numeric left, top, width, and height\n"
-                            ),
-                            "found": False,
-                            "confidence": None,
-                            "rect": None,
-                            "center": None,
-                        }
-                    )
-                    return
-                result = control_app.preview_image_asset_match(
-                    str(payload.get("asset", "")),
-                    region=region,
-                    min_confidence=min_confidence,
-                )
-                self._send_json(_image_match_preview_to_payload(result))
-                return
-            if self.path == "/api/capture-screen":
-                result = control_app.capture_screen_screenshot()
-                payload = _result_to_payload(result)
-                if result.screenshot_path:
-                    screenshot_version += 1
-                    latest_screenshot_path = result.screenshot_path
-                    payload["screenshot_url"] = f"/api/debug-screenshot?version={screenshot_version}"
-                self._send_json(payload)
-                return
-            if self.path == "/api/diagnose-screen":
-                payload = self._read_json()
-                min_confidence = _parse_min_confidence(payload)
-                if min_confidence is None:
-                    self._send_json(
-                        {
-                            "exit_code": 2,
-                            "stdout": "",
-                            "stderr": "invalid screen diagnosis request: min_confidence must be a number\n",
-                        }
-                    )
-                    return
-                result = control_app.diagnose_screen_setup(min_confidence=min_confidence)
-                result_payload = _result_to_payload(result)
-                if result.screenshot_path:
-                    screenshot_version += 1
-                    latest_screenshot_path = result.screenshot_path
-                    result_payload["screenshot_url"] = f"/api/debug-screenshot?version={screenshot_version}"
-                self._send_json(result_payload)
-                return
-            if self.path == "/api/capture-region-diagnostics":
-                result = control_app.capture_screen_region_diagnostics()
-                payload = _result_to_payload(result)
-                if result.screenshot_path:
-                    screenshot_version += 1
-                    latest_screenshot_path = result.screenshot_path
-                    payload["screenshot_url"] = f"/api/debug-screenshot?version={screenshot_version}"
-                self._send_json(payload)
-                return
-            if self.path == "/api/capture-probe-diagnostics":
-                payload = self._read_json()
-                min_confidence = _parse_min_confidence(payload)
-                if min_confidence is None:
-                    self._send_json(
-                        {
-                            "exit_code": 2,
-                            "stdout": "",
-                            "stderr": "invalid probe diagnostics request: min_confidence must be a number\n",
-                        }
-                    )
-                    return
-                result = control_app.capture_screen_probe_diagnostics(min_confidence=min_confidence)
-                result_payload = _result_to_payload(result)
-                if result.screenshot_path:
-                    screenshot_version += 1
-                    latest_screenshot_path = result.screenshot_path
-                    result_payload["screenshot_url"] = f"/api/debug-screenshot?version={screenshot_version}"
-                self._send_json(result_payload)
-                return
-            if self.path == "/api/capture-region-crops":
-                result = control_app.capture_screen_region_crops()
-                self._send_json(_result_to_payload(result))
-                return
-            if self.path == "/api/capture-probe-crops":
-                payload = self._read_json()
-                min_confidence = _parse_min_confidence(payload)
-                if min_confidence is None:
-                    self._send_json(
-                        {
-                            "exit_code": 2,
-                            "stdout": "",
-                            "stderr": "invalid probe crops request: min_confidence must be a number\n",
-                        }
-                    )
-                    return
-                result = control_app.capture_screen_probe_crops(min_confidence=min_confidence)
-                self._send_json(_result_to_payload(result))
-                return
-            if self.path == "/api/run-tests":
-                payload = self._read_json()
-                result = control_app.run_tests(str(payload.get("task", "all")))
-                self._send_json(_result_to_payload(result))
-                return
-            self.send_error(HTTPStatus.NOT_FOUND)
+            elif self.path == "/api/stop-script":
+                self._send_json(_status_to_payload(control_app.stop_running_script()))
+            else:
+                self.send_error(HTTPStatus.NOT_FOUND)
 
         def log_message(self, format: str, *args: Any) -> None:
-            """禁止测试和 CLI 输出默认 HTTP 访问日志。"""
+            """禁止 CLI 和测试输出默认 HTTP 访问日志。"""
 
         def _read_json(self) -> dict[str, object]:
+            """读取 JSON 对象并拒绝无效请求，避免误启动默认脚本。"""
             length = int(self.headers.get("Content-Length", "0"))
             if length == 0:
                 return {}
-            body = self.rfile.read(length).decode("utf-8")
-            parsed = json.loads(body)
+            parsed = json.loads(self.rfile.read(length).decode("utf-8"))
             if not isinstance(parsed, dict):
-                return {}
+                raise ValueError("request body must be an object")
             return parsed
 
         def _send_json(self, payload: dict[str, object], status: HTTPStatus = HTTPStatus.OK) -> None:
-            body = json.dumps(payload).encode("utf-8")
+            """发送不缓存的 JSON 响应。"""
+            body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
             self.send_response(status)
             self.send_header("Content-Type", "application/json; charset=utf-8")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
-
-        def _send_png_file(self, path: Path) -> None:
-            """把最近保存的诊断截图作为 PNG 响应给浏览器。"""
-            if not path.is_file():
-                self.send_error(HTTPStatus.NOT_FOUND)
-                return
-            body = path.read_bytes()
-            self.send_response(HTTPStatus.OK)
-            self.send_header("Content-Type", "image/png")
             self.send_header("Cache-Control", "no-store")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
 
         def _send_ui_asset(self, asset_name: str) -> None:
-            """发送本地控制 UI 的白名单静态资源。"""
+            """发送本地控制台的白名单静态资源。"""
             try:
                 asset = read_ui_asset(asset_name)
             except FileNotFoundError:
                 self.send_error(HTTPStatus.NOT_FOUND)
                 return
-            body = asset.body
             self.send_response(HTTPStatus.OK)
             self.send_header("Content-Type", asset.content_type)
             self.send_header("Cache-Control", "no-store")
-            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Content-Length", str(len(asset.body)))
             self.end_headers()
-            self.wfile.write(body)
+            self.wfile.write(asset.body)
 
     return ThreadingHTTPServer((host, port), LocalControlHandler)
-
-
-def _result_to_payload(result) -> dict[str, object]:
-    """把 application 结果转换成 HTTP JSON payload。"""
-    payload = {
-        "exit_code": result.exit_code,
-        "stdout": result.stdout,
-        "stderr": result.stderr,
-    }
-    if result.screenshot_path:
-        payload["screenshot_path"] = result.screenshot_path
-    if result.image_size is not None:
-        payload["image_size"] = _point_to_payload(result.image_size)
-    if result.screen_size is not None:
-        payload["screen_size"] = _point_to_payload(result.screen_size)
-    return payload
-
-
-def _image_match_preview_to_payload(result) -> dict[str, object]:
-    """把区域图片匹配预览结果转换成 HTTP JSON payload。"""
-    return {
-        "exit_code": result.exit_code,
-        "stdout": result.stdout,
-        "stderr": result.stderr,
-        "found": result.found,
-        "confidence": result.confidence,
-        "rect": _rect_to_payload(result.rect),
-        "center": _point_to_payload(result.center),
-    }
 
 
 def _status_to_payload(status) -> dict[str, object]:
@@ -395,116 +173,6 @@ def _script_details_to_payload(details) -> dict[str, object]:
 def _script_config_errors_to_payload(errors) -> list[dict[str, str]]:
     """把文件脚本配置错误转换成 HTTP JSON payload。"""
     return [{"file": error.file, "message": error.message} for error in errors]
-
-
-def _probe_status_to_payload(status) -> dict[str, object]:
-    """把后台界面探测状态转换成 HTTP JSON payload。"""
-    return {
-        "running": status.running,
-        "current_state": status.current_state,
-        "exit_code": status.exit_code,
-        "stdout": status.stdout,
-        "stderr": status.stderr,
-        "hints": list(status.hints),
-        "stats": _probe_stats_to_payload(status.stats),
-        "candidates": _probe_candidates_to_payload(status.candidates),
-    }
-
-
-def _screen_state_config_to_payload(result) -> dict[str, object]:
-    """把界面状态配置摘要转换成 HTTP JSON payload。"""
-    return {
-        "exit_code": result.exit_code,
-        "states": [
-            {
-                "state": group.state,
-                "searches": [
-                    {
-                        "name": search.name,
-                        "image": search.image,
-                        "region": search.region,
-                        "min_confidence": search.min_confidence,
-                    }
-                    for search in group.searches
-                ],
-            }
-            for group in result.groups
-        ],
-        "stderr": result.stderr,
-    }
-
-
-def _probe_stats_to_payload(stats) -> dict[str, object]:
-    """把后台界面探测统计转换成 HTTP JSON payload。"""
-    return {
-        "rounds": stats.rounds,
-        "last_elapsed_ms": stats.last_elapsed_ms,
-        "matched_counts": dict(stats.matched_counts),
-        "skipped_counts": dict(stats.skipped_counts),
-    }
-
-
-def _probe_candidates_to_payload(candidates) -> list[dict[str, object]]:
-    """把后台界面探测候选摘要转换成 HTTP JSON payload。"""
-    return [
-        {
-            "name": candidate.name,
-            "search_name": candidate.search_name,
-            "status": candidate.status,
-            "elapsed_ms": candidate.elapsed_ms,
-            "confidence": candidate.confidence,
-            "best_confidence": candidate.best_confidence,
-            "best_rect": _rect_to_payload(candidate.best_rect),
-        }
-        for candidate in candidates
-    ]
-
-
-def _rect_to_payload(rect) -> dict[str, int] | None:
-    """把可空矩形转换成 HTTP JSON payload。"""
-    if rect is None:
-        return None
-    return {"left": rect.left, "top": rect.top, "width": rect.width, "height": rect.height}
-
-
-def _point_to_payload(point) -> dict[str, int] | None:
-    """把可空点位转换成 HTTP JSON payload。"""
-    if point is None:
-        return None
-    return {"x": point.x, "y": point.y}
-
-
-def _parse_min_confidence(payload: dict[str, object]) -> float | None:
-    """把 HTTP payload 中的图片匹配置信度解析为数字。"""
-    try:
-        return float(payload.get("min_confidence", 0.8))
-    except (TypeError, ValueError):
-        return None
-
-
-def _parse_region(payload: dict[str, object]):
-    """把 HTTP payload 中的选择区域解析为 Rect。"""
-    region = payload.get("region")
-    if not isinstance(region, dict):
-        return None
-    try:
-        left = int(region.get("left"))
-        top = int(region.get("top"))
-        width = int(region.get("width"))
-        height = int(region.get("height"))
-    except (TypeError, ValueError):
-        return None
-    if width <= 0 or height <= 0:
-        return None
-    return Rect(left, top, width, height)
-
-
-def _parse_interval_seconds(payload: dict[str, object]) -> float | None:
-    """把 HTTP payload 中的界面探测间隔解析为数字。"""
-    try:
-        return float(payload.get("interval_seconds", 1.0))
-    except (TypeError, ValueError):
-        return None
 
 
 def _parse_dry_run_images(payload: dict[str, object]) -> tuple[str, ...]:

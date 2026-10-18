@@ -1,410 +1,121 @@
-# game-script-kit
+# Star
 
-一个用于练习跨平台游戏脚本架构的 Python 项目。
+Star 用 JSON 脚本描述桌面操作，在 macOS 上执行点击、组合键、识图、条件等待和循环。当前重点是把一个实际任务稳定跑通。用户描述任务，Agent 负责生成和维护脚本；产品方向见 [项目上下文](CONTEXT.md)，能力与缺口见 [当前状态](docs/current-state.md)，近期推进见 [重启计划](docs/restart-plan.md)。
 
-目标是把游戏脚本的核心业务逻辑和平台相关输入设备实现分开：脚本只描述要执行的步骤，adapter 负责把原子动作步骤落到 macOS、Windows、模拟器或其他平台。
+## 安装和启动
 
-## 当前能力
-
-- 使用带名称的 `Script` 表达一组按顺序执行的步骤。
-- 支持原子动作步骤：`Click`、`Drag`、`Wait`、`Hotkey`。
-- 支持固定次数重复步骤：`Repeat(times, steps)`。
-- 支持颜色条件分支：`If(ColorIs(...), then_steps, else_steps)`。
-- 支持颜色条件等待：`WaitUntil(ColorIs(...), timeout_seconds, interval_seconds)`。
-- 支持图片存在条件等待：`WaitUntil(ImageExists(...), timeout_seconds, interval_seconds)`。
-- 脚本绑定单个窗口，脚本内点击和拖拽都在该窗口坐标系内执行。
-- 支持两类窗口：
-  - `ScreenWindow`：点坐标直接视为屏幕坐标。
-  - `AreaWindow(Rect(...))`：点坐标按区域左上角偏移解析为屏幕坐标。
-- 通过 `InputDevice` 端口隔离平台输入实现。
-- 通过 `ScreenImageLocator` 端口隔离屏幕图像匹配实现。
-- 提供 macOS `pyautogui` adapter 和 dry-run demo。
-- 提供独立坐标记录工具，用于采集屏幕绝对坐标。
-- 支持从 `scripts/*.json` 加载用户脚本，并通过名称查看详情和运行。
-- 支持 Run Plan，一次按顺序运行多个已有命名脚本并汇总结束原因。
-- 提供本地控制 UI，可在浏览器窗口中选择脚本、运行 dry-run 和触发固定测试任务。
-
-## 代码结构
-
-```text
-src/game_automation/
-├── portable/             # 跨平台可复用核心
-│   ├── domain/           # 纯领域数据模型：Click / Wait / If / WaitUntil / ColorIs / ImageMatch
-│   ├── engine/           # 脚本执行引擎和运行能力 ports
-│   ├── scripts_manager/  # 脚本定义与注册管理
-│   ├── application/      # 用例编排：脚本运行、本地 UI 控制
-│   ├── adapters/         # 不绑定具体平台的 adapter，例如 dry-run
-│   └── tools/            # 可复用工具核心，例如坐标记录循环
-├── platform/             # 平台相关实现，迁移平台时优先替换这里
-│   ├── desktop/          # 桌面通用 adapter：取色、鼠标位置、终端按键
-│   ├── macos/            # macOS 专用输入 adapter
-│   └── local_desktop/    # 本机 CLI/UI 入口和 adapter composition
-└── __init__.py           # 顶层包元信息
-```
-
-迁移到新平台时，优先保留 `portable/`，替换或重接 `platform/`。旧的 `game_automation.domain`、`game_automation.engine`、`game_automation.adapters` 等导入路径已经移除，新代码统一使用 `game_automation.portable.*` 或 `game_automation.platform.*`。
-
-开发规则见 [AGENTS.md](AGENTS.md)，稳定架构约束见 [docs/architecture.md](docs/architecture.md)。[OpenSpec 历史资料](openspec/README.md) 原地保留用于追溯，新开发不再要求 OpenSpec 流程或校验；自动化测试继续维护。
-
-## 安装
-
-项目当前要求 Python 3.14。
+要求 Python 3.14 或更新版本。已有 `.venv` 时可直接使用。
 
 ```bash
-cd /path/to/game-script-kit
-/opt/homebrew/bin/python3 -m venv .venv
+python3.14 -m venv .venv
 .venv/bin/python -m pip install -e ".[dev]"
+.venv/bin/star ui --host 127.0.0.1 --port 8766 --no-open
 ```
 
-## 列出和运行命名脚本
+浏览器打开 <http://127.0.0.1:8766/>，选择脚本，先用“模拟运行”检查步骤，再按需执行真实操作。控制台保留脚本详情、运行、停止和运行日志。`star ui` 不指定端口时仍默认使用 8765。
 
-推荐使用 `star` 统一管理脚本。内置脚本来自 `src/game_automation/portable/scripts_manager/`，用户脚本放在项目根目录 `scripts/*.json`。
+真实运行需要在 macOS 系统设置中给终端或 Python 运行时授予“辅助功能”权限；识图和取色还需要“屏幕录制”权限。模板应与当前游戏缩放、主题和分辨率一致。
 
-列出当前可用脚本：
+## 列出、检查和运行脚本
 
 ```bash
 .venv/bin/star list
-```
-
-按名称 dry-run，先检查顺序：
-
-```bash
+.venv/bin/star details 师门任务
 .venv/bin/star run demo --dry-run
-.venv/bin/star run recorded-clicks --dry-run
-```
-
-确认无误后直接运行。`run` 默认使用 macOS adapter，所以不需要输入 `--macos`：
-
-```bash
-.venv/bin/star run recorded-clicks
-```
-
-一次按顺序运行多个脚本：
-
-```bash
-.venv/bin/star run-plan file-script-demo repeat-demo --dry-run
-```
-
-Run Plan 默认在第一个未完整执行的脚本后停止；`--continue-on-error` 可继续收集后续脚本结果。条件等待超时或图片目标未找到仍保持成功退出码，但摘要会明确显示 `stopped_unmet_condition`，不会误报为 `completed`。
-
-运行前确认：
-
-- 已安装依赖。
-- 终端或 Python 运行时已在 macOS 系统设置中获得“辅助功能”权限。
-- 脚本坐标适合当前屏幕，避免点到危险位置。
-
-## 本地控制 UI
-
-启动本地 UI，默认打开浏览器窗口：
-
-```bash
-.venv/bin/star ui
-```
-
-测试或手动指定地址时，可以只启动服务不自动打开窗口：
-
-```bash
-.venv/bin/star ui --host 127.0.0.1 --port 8765 --no-open
-```
-
-打开 `http://127.0.0.1:8765/` 后，可以选择脚本、勾选或取消“模拟运行”、输入模拟颜色并查看输出。“运行测试”按钮只运行项目内置的固定测试任务，不接受任意 shell 命令。
-
-UI 也提供图片点击路径：把 `.png`、`.jpg`、`.jpeg` 或 `.webp` 模板图片放到项目根目录 `assets/` 下，点击“刷新图片”，选择目标图片和最低置信度后点击“查找并点击图片”。模拟运行会把所选图片视为已找到并打印计划点击；真实运行会使用 OpenCV 在当前屏幕中查找该图片并点击匹配区域中心点。
-
-端到端 smoke 方法：
-
-```bash
-.venv/bin/star ui --host 127.0.0.1 --port 8765 --no-open
-curl http://127.0.0.1:8765/api/scripts
-curl -X POST http://127.0.0.1:8765/api/run-script \
-  -H 'Content-Type: application/json' \
-  -d '{"name":"conditional-color-demo","dry_run":true,"dry_run_color":"#102030"}'
-curl http://127.0.0.1:8765/api/image-assets
-curl -X POST http://127.0.0.1:8765/api/click-image \
-  -H 'Content-Type: application/json' \
-  -d '{"asset":"start.png","dry_run":true,"min_confidence":0.8}'
-```
-
-自动化测试：
-
-```bash
-.venv/bin/python -m pytest tests/test_local_control.py tests/test_local_control_ui.py tests/test_script_cli.py
-```
-
-## 视觉自动化靶场
-
-`star-lab` 是独立于 Star 控制 UI 的本地目标应用，用来稳定验证截图、识图、点击、等待和任务编排行为。它不会调用 Star runner，也不会移动鼠标。
-
-启动正常任务场景：
-
-```bash
-.venv/bin/star-lab
-```
-
-只启动服务、不自动打开浏览器，或切换到故障模式：
-
-```bash
-.venv/bin/star-lab --no-open
-.venv/bin/star-lab --mode slow --loading-delay 4
-.venv/bin/star-lab --mode missing_target
-```
-
-默认地址是 `http://127.0.0.1:8770/`。测试程序可以使用独立真值接口验收结果：
-
-```bash
-curl http://127.0.0.1:8770/api/state
-curl http://127.0.0.1:8770/api/events
-curl -X POST http://127.0.0.1:8770/api/reset \
-  -H 'Content-Type: application/json' \
-  -d '{"mode":"normal","loading_delay_seconds":0.6}'
-```
-
-自动化脚本只能通过页面像素和鼠标操作靶场；`/api/state` 与 `/api/events` 只供验收程序读取，避免用 Star 自己报告的结果证明自己成功。
-
-在 Safari 已经打开靶场页面、屏幕录制和辅助功能权限已经授予的情况下，可以运行真实 Star smoke：
-
-```bash
-.venv/bin/python tools/visual_lab_star_smoke.py
-```
-
-该工具通过 API 重置场景，自动激活 Safari、Raise 标题为 `Star 视觉自动化靶场` 的顶层窗口，并把识图限制在该窗口范围，然后只用 Star 的真实截图、OpenCV 匹配和鼠标点击完成任务。最后再读取真值接口确认状态为 `completed`。
-
-普通脚本和 Run Plan 也可以在真实运行前激活目标应用：
-
-```bash
-.venv/bin/star run click-image-demo --target-app Safari
-.venv/bin/star run-plan first-script second-script --target-app Safari
-.venv/bin/star run click-image-demo \
-  --target-app Safari \
-  --target-window-title "Star 视觉自动化靶场"
-```
-
-指定窗口标题后，Star 会要求唯一匹配的可见顶层窗口，用它的左上角解析脚本点位，并把未声明 region 的图片搜索限制在窗口矩形内。Run Plan 会在每个脚本开始前重新读取窗口位置。浏览器标签页不是独立顶层窗口；如果需要在多个页面之间选窗，应把目标页面放进单独的浏览器窗口。
-
-`--target-window-title` 必须和 `--target-app` 一起使用；目标应用参数不能和无桌面副作用的 `--dry-run` 同时使用。
-
-## 新增或编辑脚本
-
-用户脚本优先使用 `scripts/*.json`。可以从 `scripts/file-script-demo.json` 复制一份开始，文件支持局部点位、图片、区域、搜索资源，以及 `wait`、`click`、`hotkey`、`repeat`、`if_state`、`wait_until_state` 和 `wait_until_image` 步骤。
-
-### 粘贴与组合键
-
-把这个步骤插入脚本，即可在当前获得焦点的输入框模拟 Command+V：
-
-```json
-{"hotkey": ["command", "v"]}
-```
-
-现成的 [粘贴脚本](scripts/paste.json) 会等待 3 秒，再执行一次 Command+V：
-
-```bash
 .venv/bin/star run 粘贴 --dry-run
 .venv/bin/star run 粘贴
 ```
 
-先复制要粘贴的内容，启动真实运行后在 3 秒内切换并点中目标输入框。也可以在自己的脚本里先用 `click` 点中输入框，再执行 `hotkey`。组合键使用剪贴板已有内容，不写入剪贴板；动作完成只表示按键已发送，不保证目标应用接受了粘贴。真实运行需要辅助功能权限。
+`粘贴` 脚本等待 3 秒后执行 Command+V；先复制内容，再在等待期间切到目标输入框。按键已发送不保证目标应用接受了内容。
 
-键名使用小写，当前支持 `a`–`z`、`0`–`9`、`command`、`ctrl`、`alt`、`shift`、`enter`、`tab`、`esc`、`space`。按列表顺序按下、逆序释放；单键可写成 `{"hotkey": ["enter"]}`。空列表、重复键和不支持的键名会作为配置错误报告。模拟运行只打印动作，不触发真实键盘。
-
-### 编辑流程
-
-新增脚本的最小流程：
-
-1. 在 `scripts/` 下新增一个 `.json` 文件，并填写唯一 `name` 和非空 `steps`。
-2. 运行 `.venv/bin/star list` 确认脚本名称可见。
-3. 运行 `.venv/bin/star details <script-name>` 检查资源和运行能力依赖。
-4. 运行 `.venv/bin/star run <script-name> --dry-run` 检查步骤顺序。
-
-坏脚本会被隔离并在 stderr 报告，其他有效脚本仍可列出和运行。只有需要复用 Python 领域对象的内置 demo 才需要放到 `scripts_manager`。
-
-## 运行 demo dry-run
-
-通过统一入口 dry-run 检查 demo 脚本步骤：
+模拟运行不操作真实桌面，可指定固定的颜色、图片和界面状态：
 
 ```bash
-.venv/bin/star run demo --dry-run
-```
-
-## 验证颜色条件分支和条件等待
-
-`conditional-color-demo` 使用 `If(ColorIs(...))`。默认 dry-run 颜色为 `#000000`，会走 else 分支；指定匹配颜色 `#102030` 会走 then 分支：
-
-```bash
-.venv/bin/star run conditional-color-demo --dry-run
 .venv/bin/star run conditional-color-demo --dry-run --dry-run-color '#102030'
-```
-
-`wait-until-color-demo` 使用 `WaitUntil(ColorIs(...), timeout_seconds=1, interval_seconds=0.5)`。指定匹配颜色会立即通过并点击；默认颜色不匹配，会打印两次等待并以非零退出码报告超时：
-
-```bash
-.venv/bin/star run wait-until-color-demo --dry-run --dry-run-color '#102030'
-.venv/bin/star run wait-until-color-demo --dry-run
-```
-
-## 图片存在条件、图片目标点击和屏幕图像匹配
-
-当前已经提供平台无关的屏幕图像匹配 seam，并接入 `ImageExists(...)` 条件和 `Click(ImageTarget(...))` 图片目标点击。第一版能力包括：
-
-- `ImageTemplate(path)` 表达待查找模板图片。
-- `ImageMatch(rect, confidence)` 表达匹配区域、中心点和置信度。
-- `ImageExists(template, region=None, min_confidence=1.0)` 表达图片存在条件。
-- `ImageTarget(template, region=None, min_confidence=1.0, offset=Point(0, 0))` 表达按图片匹配中心点点击的目标。
-- `ScreenImageLocator.locate(template, region=None, min_confidence=1.0)` 在当前屏幕或指定区域内查找模板。
-- `PyAutoGuiScreenImageLocator` 是本地桌面 adapter，延迟加载 `pyautogui`、OpenCV 和 numpy，并隐藏截图、模板读取和平台依赖错误；在 Retina 屏幕上会把截图物理像素坐标转换成鼠标可点击坐标。
-- `DryRunScreenImageLocator` 可在测试或 dry-run 路径中返回预设匹配结果。
-
-`wait-until-image-demo` 使用 `WaitUntil(ImageExists(ImageTemplate("assets/start.png")), timeout_seconds=1, interval_seconds=0.5)`。默认 dry-run 不配置图片，条件会超时；指定匹配模板路径会立即通过并点击：
-
-```bash
-.venv/bin/star run wait-until-image-demo --dry-run
-.venv/bin/star run wait-until-image-demo --dry-run --dry-run-image assets/start.png
-```
-
-`click-image-demo` 使用 `Click(ImageTarget(ImageTemplate("assets/start.png")))`。默认 dry-run 不配置图片，会报告目标未找到；指定匹配模板路径会点击匹配区域中心点：
-
-```bash
-.venv/bin/star run click-image-demo --dry-run
 .venv/bin/star run click-image-demo --dry-run --dry-run-image assets/start.png
+.venv/bin/star run file-script-demo --dry-run --dry-run-screen-state 主页
 ```
 
-示例：
+`--dry-run-script-images` 可将当前脚本依赖的图片全部模拟为找到，适合检查执行顺序；这些模拟结果不证明真实识图或任务完成。
 
-```python
-from game_automation.portable.domain import ImageExists, ImageTarget, ImageTemplate, Point, Rect
+按顺序执行多个脚本：
 
-condition = ImageExists(
-    ImageTemplate("assets/start-button.png"),
-    region=Rect(left=0, top=0, width=800, height=600),
-    min_confidence=1.0,
-)
-
-target = ImageTarget(
-    ImageTemplate("assets/start-button.png"),
-    region=Rect(left=0, top=0, width=800, height=600),
-    min_confidence=1.0,
-    offset=Point(0, 8),
-)
+```bash
+.venv/bin/star run-plan demo repeat-demo --dry-run
 ```
 
-macOS 真实运行前确认：
+Run Plan 默认在第一个未正常结束的脚本后停止；`--continue-on-error` 可继续收集后续结果。检查 `finish_reason`：`completed` 表示脚本按所选分支与循环规则正常结束，`stopped_unmet_condition` 表示条件未满足。退出码 0 本身不能证明游戏任务完成。
 
-- 终端或 Python 运行时已获得“屏幕录制”权限。
-- 真实点击还需要终端或 Python 运行时已获得“辅助功能”权限。
-- 模板图片路径存在且适合当前缩放、主题和分辨率。
-- 尽量提供 `region` 缩小搜索范围，避免全屏模板匹配过慢。
-- `min_confidence < 1.0` 走 OpenCV 置信度匹配；项目运行依赖已声明 `opencv-python-headless`。
+CLI 运行时按 Ctrl+C 取消；控制台运行时点击“停止”。无限循环和无限图片等待也支持取消。
 
-注意：当前只支持把首个匹配区域解析为点击坐标；拖拽图片目标、多匹配选择和截图录制仍未接入。
+## 绑定目标应用和窗口
 
-## 记录鼠标坐标和颜色
+真实运行可先激活应用，并限制到标题唯一匹配的可见顶层窗口：
 
-坐标记录工具是独立工具，不走 `ScriptRunner`，也不会创建脚本步骤。它读取的是屏幕绝对坐标，以及该坐标点当前的 RGB 颜色。
+```bash
+.venv/bin/star run click-image-demo \
+  --target-app Safari \
+  --target-window-title "Star 视觉自动化靶场"
+.venv/bin/star run-plan first-script second-script --target-app Safari
+```
+
+指定窗口后，点位按该窗口左上角偏移，未声明 region 的图片搜索限制在窗口内；Run Plan 在每个脚本开始前重新读取窗口位置。浏览器标签页不是独立窗口，必要时把目标页面移到单独窗口。
+
+`--target-window-title` 要求同时提供 `--target-app`；目标应用参数不能与 `--dry-run` 同用。控制台目前尚未接入目标应用和窗口选择，需使用 CLI 指定。
+
+界面状态配置中的区域目前仍使用屏幕绝对坐标，不会随目标窗口移动；使用状态判断的脚本仍需保持约定的窗口位置。
+
+## 编写脚本
+
+通常由用户描述任务、Agent 创建和维护下面的文件；用户无需手写 JSON。这里保留格式参考，便于检查或自行调整。
+
+用户脚本放在 `scripts/*.json`，模板图片放在 `assets/`。例如新建 `scripts/my-click.json`：
+
+```json
+{
+  "name": "我的点击",
+  "resources": {
+    "points": {"按钮": {"x": 100, "y": 200}}
+  },
+  "steps": [
+    {"wait": 1},
+    {"click": {"point": "按钮"}},
+    {"hotkey": ["command", "v"]}
+  ]
+}
+```
+
+用 `list` 确认名称可见，`details 我的点击` 检查依赖，再 `run 我的点击 --dry-run` 检查顺序。默认点位是屏幕坐标；绑定目标窗口后使用窗口内坐标。无效脚本单独报告，不阻塞其他有效脚本。
+
+可参考 [师门任务](scripts/master-task.json) 的区域识图和状态等待，以及 [匿名聊天循环](scripts/ssby-chat-loop.json) 的嵌套循环。这些脚本是现有素材，真实任务闭环状态见重启计划。
+
+- `repeat` 的 `times: null` 表示无限循环；`wait_until_image` 的 `timeout: null` 表示无限等待，省略字段不等于无限。
+- `break_if_image` 在步骤边界和图片等待轮询时检查，命中后退出当前层循环。
+- `click.then_hotkeys` 在点击后连续发送组合键；取消仍在每组按键前检查。
+- `if_state` 和 `wait_until_state` 使用 `assets/screen-states.json` 中的界面识别配置。
+
+记录鼠标所在位置和颜色：
 
 ```bash
 .venv/bin/star recorder
 ```
 
-交互方式：
+保持终端焦点，按 `1` 记录，按 `Q` 结束；记录结果是屏幕绝对坐标。
 
-- 每 1 秒打印一次当前鼠标坐标和该点颜色。
-- 每 50ms 检查一次按键状态。
-- 按 `1` 时立即重新读取当前鼠标坐标和该点颜色并记录。
-- 按 `Q` 或 `q` 结束。
-- 结束后打印本次记录的所有坐标和对应颜色。
+## 开发和验证
 
-输出示例：
-
-```text
-current: Point(x=242, y=92) #78828C
-recorded: Point(x=242, y=92) #78828C
-recorded points:
-1. Point(x=242, y=92) #78828C
-```
-
-运行前确认：
-
-- 已安装依赖。
-- 终端窗口保持焦点；默认按键 adapter 从当前终端读取 `1` 和 `Q/q`，不使用全局键盘监听。
-- 终端或 Python 运行时可能仍需要系统允许读取鼠标位置。
-- macOS 可能需要给终端或 Python 运行时授予“屏幕录制”权限，否则截图取色会失败。
-- `1` 和 `Q/q` 需要正常按下，极短瞬时敲击可能被 50ms 轮询错过。
-
-## 运行已记录点击脚本
-
-这个脚本会按顺序执行：等待 3 秒，点击 `(242, 92)`，等待 3 秒，点击 `(736, 323)`，等待 10 秒，点击 `(741, 400)` 后结束。
-
-```bash
-.venv/bin/star run recorded-clicks --dry-run
-.venv/bin/star run recorded-clicks
-```
-
-## 使用核心模型
-
-```python
-from game_automation.portable.domain import (
-    AreaWindow,
-    Click,
-    Color,
-    ColorIs,
-    Drag,
-    If,
-    Point,
-    Rect,
-    Repeat,
-    Script,
-    Wait,
-    WaitUntil,
-)
-from game_automation.portable.engine.runner import ScriptRunner
-
-script = Script(
-    name="sample-clicks",
-    window=AreaWindow(Rect(left=100, top=200, width=800, height=600)),
-    steps=(
-        Click(Point(10, 20)),
-        Repeat(
-            times=3,
-            steps=(
-                Drag(Point(30, 40), Point(50, 60), duration_seconds=0.4),
-                Wait(0.2),
-            ),
-        ),
-        WaitUntil(
-            condition=ColorIs(Point(60, 70), Color.from_hex("#102030")),
-            timeout_seconds=5,
-            interval_seconds=0.5,
-        ),
-        If(
-            condition=ColorIs(Point(60, 70), Color.from_hex("#102030")),
-            then_steps=(Click(Point(100, 120)),),
-            else_steps=(Wait(0.2),),
-        ),
-        Wait(0.2),
-    ),
-)
-
-ScriptRunner(device).run(script)
-```
-
-坐标解析规则：
-
-- `ScreenWindow.resolve(Point(x, y)) -> Point(x, y)`
-- `AreaWindow(Rect(left, top, width, height)).resolve(Point(x, y)) -> Point(left + x, top + y)`
-- 第一版不做边界夹取。
-
-## 测试
+核心规则位于 `src/game_automation/portable/`；桌面适配和 CLI/UI 入口位于 `src/game_automation/platform/`。开发前阅读 [AGENTS.md](AGENTS.md)，按 [文档入口](docs/README.md) 接续上下文、架构和相关决策。Windows adapter 尚未实现。
 
 ```bash
 .venv/bin/python -m pytest
-.venv/bin/python -m pytest --cov=game_automation --cov-report=term-missing
+git diff --check
 ```
 
-## 项目状态
+`star-lab` 仅用于开发验收，是独立目标应用，可验证真实截图、识图、点击和等待：
 
-这是一个早期实验项目，当前重点是领域模型和 port-and-adapter 边界。已支持 JSON 文件脚本、屏幕识别与图片点击、组合键输入（包括 Command+V）、Run Plan、运行前激活应用和按标题锁定单个目标窗口，并提供独立视觉靶场用于验证。OCR 和多窗口编排尚未实现。
+```bash
+.venv/bin/star-lab --no-open
+.venv/bin/python tools/visual_lab_star_smoke.py
+```
 
-`repeat` 可选 `"break_if_image": {"image": "离开聊天", "min_confidence": 0.9}`：在每个步骤边界和图片等待轮询时检查，命中则结束这一层 repeat，继续它后面的步骤。可用嵌套 repeat 让外层开始下一轮。
-
-显式 `"times": null` 表示无限 repeat；`wait_until_image` 的 `"timeout": null` 表示无限等待。两者都可通过控制台“停止”或 CLI Ctrl+C 取消，省略字段仍按配置错误处理。
-
-`click` 可附带 `"then_hotkeys": [["command", "v"], ["enter"]]`，点击后连续执行这些组合键，中间不进行图片中断检查或固定等待；用户取消仍在每组按键前检查。
+靶场默认地址 <http://127.0.0.1:8770/>。真实 smoke 要求 Safari 已打开靶场页面，并已授予屏幕录制和辅助功能权限；验收通过靶场真值接口确认结果。靶场通过不等于真实游戏任务已完成。

@@ -5,11 +5,10 @@
 """
 
 import json
-import time
 
 import pytest
 
-from game_automation.portable.application.local_control import LocalControlApplication
+from game_automation.portable.application.screen_state_reader import ProjectScreenStateReader
 from game_automation.portable.application.screen_state_config import load_screen_state_target_catalog
 from game_automation.portable.domain import (
     ImageMatch,
@@ -137,8 +136,8 @@ def test_screen_state_probe_result_chooses_highest_confidence_match() -> None:
     assert result.current_state == "装备"
 
 
-def test_local_control_probes_screen_state_from_image_assets(tmp_path) -> None:
-    """验证 UI application 可从 assets 生成候选并探测当前界面。"""
+def test_project_state_reader_reads_state_from_image_assets(tmp_path) -> None:
+    """未建立配置时，reader 从 assets 模板名称识别当前界面。"""
     assets = tmp_path / "assets"
     assets.mkdir()
     (assets / "人物.png").write_bytes(b"fake")
@@ -153,23 +152,22 @@ def test_local_control_probes_screen_state_from_image_assets(tmp_path) -> None:
                 return ImageMatch(Rect(10, 20, 30, 40), confidence=0.91)
             return None
 
-    app = LocalControlApplication(
+    reader = ProjectScreenStateReader(
         project_root=tmp_path,
         real_image_locator_factory=FakeImageLocator,
     )
 
-    result = app.probe_screen_state_once(min_confidence=0.8)
+    current_state = reader.read_current_state(min_confidence=0.8)
 
-    assert result.current_state == "装备"
-    assert [candidate.candidate.name for candidate in result.candidates] == ["人物", "装备"]
+    assert current_state == "装备"
     assert requested_templates == [
         (str(assets / "人物.png"), 0.8),
         (str(assets / "装备.webp"), 0.8),
     ]
 
 
-def test_local_control_screen_state_probe_uses_batch_locator_when_configured(tmp_path) -> None:
-    """验证 UI application 装配 batch locator 后一轮探测只走批量定位。"""
+def test_project_state_reader_uses_batch_locator_when_configured(tmp_path) -> None:
+    """装配 batch locator 后，reader 一轮读取只使用批量定位。"""
     assets = tmp_path / "assets"
     assets.mkdir()
     (assets / "人物.png").write_bytes(b"fake")
@@ -200,22 +198,22 @@ def test_local_control_screen_state_probe_uses_batch_locator_when_configured(tmp
                 ),
             )
 
-    app = LocalControlApplication(
+    reader = ProjectScreenStateReader(
         project_root=tmp_path,
         real_image_locator_factory=FailingSingleLocator,
         real_image_batch_locator_factory=FakeBatchLocator,
     )
 
-    result = app.probe_screen_state_once(min_confidence=0.8)
+    current_state = reader.read_current_state(min_confidence=0.8)
 
-    assert result.current_state == "装备"
+    assert current_state == "装备"
     assert len(batch_requests) == 1
     assert batch_requests[0][1] is True
     assert [request.min_confidence for request in batch_requests[0][0]] == [0.8, 0.8]
 
 
-def test_local_control_probes_screen_state_from_configured_groups(tmp_path) -> None:
-    """验证 application 可从状态组配置生成带区域的搜索请求。"""
+def test_project_state_reader_reads_state_from_configured_groups(tmp_path) -> None:
+    """reader 从状态组配置生成带区域的搜索请求，并正确映射命中状态。"""
     assets = tmp_path / "assets"
     assets.mkdir()
     (assets / "离开.png").write_bytes(b"fake")
@@ -279,25 +277,15 @@ def test_local_control_probes_screen_state_from_configured_groups(tmp_path) -> N
                 ImageBatchMatchResult.skipped_result(requests[2].template),
             )
 
-    app = LocalControlApplication(
+    reader = ProjectScreenStateReader(
         project_root=tmp_path,
         real_image_locator_factory=FailingSingleLocator,
         real_image_batch_locator_factory=FakeBatchLocator,
     )
 
-    result = app.probe_screen_state_once(min_confidence=0.8)
+    current_state = reader.read_current_state(min_confidence=0.8)
 
-    assert result.current_state == "战斗失败"
-    assert [candidate.candidate.name for candidate in result.candidates] == [
-        "战斗失败",
-        "战斗失败",
-        "主页",
-    ]
-    assert [candidate.candidate.search_name for candidate in result.candidates] == [
-        "离开按钮",
-        "重来按钮",
-        "主页标题",
-    ]
+    assert current_state == "战斗失败"
     requests, stop_on_first_match = captured_requests[0]
     assert stop_on_first_match is True
     assert [request.region for request in requests] == [
@@ -351,7 +339,7 @@ def test_screen_state_config_loads_shared_target_catalog(tmp_path) -> None:
     assert search.min_confidence == 0.75
 
 
-def test_local_control_rejects_invalid_screen_state_config(tmp_path) -> None:
+def test_project_state_reader_rejects_invalid_screen_state_config(tmp_path) -> None:
     """验证状态组配置中的非法图片路径会被拒绝。"""
     assets = tmp_path / "assets"
     assets.mkdir()
@@ -369,10 +357,10 @@ def test_local_control_rejects_invalid_screen_state_config(tmp_path) -> None:
         ),
         encoding="utf-8",
     )
-    app = LocalControlApplication(project_root=tmp_path)
+    reader = ProjectScreenStateReader(project_root=tmp_path)
 
-    with pytest.raises(ValueError, match="screen state search image must stay inside assets folder"):
-        app.probe_screen_state_once(min_confidence=0.8)
+    with pytest.raises(RuntimeError, match="screen state search image must stay inside assets folder"):
+        reader.read_current_state(min_confidence=0.8)
 
 
 @pytest.mark.parametrize(
@@ -400,7 +388,7 @@ def test_local_control_rejects_invalid_screen_state_config(tmp_path) -> None:
         ),
     ],
 )
-def test_local_control_rejects_malformed_screen_state_config(
+def test_project_state_reader_rejects_malformed_screen_state_config(
     tmp_path,
     config,
     error_type,
@@ -414,10 +402,11 @@ def test_local_control_rejects_malformed_screen_state_config(
         json.dumps(config, ensure_ascii=False),
         encoding="utf-8",
     )
-    app = LocalControlApplication(project_root=tmp_path)
+    reader = ProjectScreenStateReader(project_root=tmp_path)
 
-    with pytest.raises(error_type, match=message):
-        app.probe_screen_state_once(min_confidence=0.8)
+    with pytest.raises(RuntimeError, match=message) as exc:
+        reader.read_current_state(min_confidence=0.8)
+    assert isinstance(exc.value.__cause__, error_type)
 
 
 def test_probe_screen_state_prefers_batch_locator_and_preserves_candidate_order() -> None:
@@ -536,139 +525,3 @@ def test_probe_screen_state_preserves_batch_best_diagnostics_for_missed_candidat
     assert result.candidates[0].confidence is None
     assert result.candidates[0].best_confidence == 0.62
     assert result.candidates[0].best_rect == Rect(10, 20, 30, 40)
-
-
-def test_local_control_runs_background_screen_state_probe(tmp_path) -> None:
-    """验证 application 可后台循环探测界面状态并追加日志。"""
-    assets = tmp_path / "assets"
-    assets.mkdir()
-    (assets / "装备.png").write_bytes(b"fake")
-
-    class FakeImageLocator:
-        def locate(self, template, *, region=None, min_confidence=1.0, logger=None):
-            """总是返回装备界面命中。"""
-            return ImageMatch(Rect(10, 20, 30, 40), confidence=0.91)
-
-    app = LocalControlApplication(
-        project_root=tmp_path,
-        real_image_locator_factory=FakeImageLocator,
-    )
-
-    started = app.start_screen_state_probe(min_confidence=0.8, interval_seconds=0.01)
-    assert started.running is True
-
-    running = _wait_until_probe_output_contains(app, "current_state=装备")
-    assert running.current_state == "装备"
-    assert "screen state probe round" in running.stdout
-    assert "candidate=装备 found=True confidence=0.91" in running.stdout
-
-    app.stop_screen_state_probe()
-    final = _wait_until_probe_finished(app)
-    assert final.running is False
-    assert final.exit_code == 0
-
-
-def test_local_control_background_screen_state_probe_tracks_stats(tmp_path) -> None:
-    """验证后台界面探测会按已完成轮次累计结构化统计。"""
-    assets = tmp_path / "assets"
-    assets.mkdir()
-    (assets / "主页.png").write_bytes(b"fake")
-    (assets / "技能.png").write_bytes(b"fake")
-    call_count = 0
-
-    class FakeBatchLocator:
-        def locate_requests(self, requests, *, logger=None, stop_on_first_match=False):
-            """第一轮命中主页并跳过技能，后续轮次全部未知。"""
-            nonlocal call_count
-            call_count += 1
-            if call_count == 1:
-                return (
-                    ImageBatchMatchResult(
-                        requests[0].template,
-                        ImageMatch(Rect(10, 20, 30, 40), confidence=0.91),
-                        elapsed_ms=3.0,
-                    ),
-                    ImageBatchMatchResult.skipped_result(requests[1].template),
-                )
-            return (
-                ImageBatchMatchResult(requests[0].template, None, elapsed_ms=4.0),
-                ImageBatchMatchResult(requests[1].template, None, elapsed_ms=5.0),
-            )
-
-    app = LocalControlApplication(
-        project_root=tmp_path,
-        real_image_batch_locator_factory=FakeBatchLocator,
-    )
-
-    started = app.start_screen_state_probe(min_confidence=0.8, interval_seconds=0.01)
-    assert started.running is True
-
-    running = _wait_until_probe_stats_rounds(app, 2)
-    app.stop_screen_state_probe()
-    final = _wait_until_probe_finished(app)
-
-    assert running.stats.rounds >= 2
-    assert final.stats.rounds >= 2
-    assert final.stats.last_elapsed_ms is not None
-    assert final.stats.matched_counts == (("主页", 1),)
-    assert final.stats.skipped_counts == (("技能", 1),)
-
-
-def test_local_control_rejects_second_screen_state_probe_while_running(tmp_path) -> None:
-    """验证已有后台探测运行时不会启动第二个探测会话。"""
-    assets = tmp_path / "assets"
-    assets.mkdir()
-    (assets / "装备.png").write_bytes(b"fake")
-
-    class FakeImageLocator:
-        def locate(self, template, *, region=None, min_confidence=1.0, logger=None):
-            """短暂等待，让第二次启动能观察到运行中状态。"""
-            time.sleep(0.02)
-            return ImageMatch(Rect(10, 20, 30, 40), confidence=0.91)
-
-    app = LocalControlApplication(
-        project_root=tmp_path,
-        real_image_locator_factory=FakeImageLocator,
-    )
-
-    app.start_screen_state_probe(min_confidence=0.8, interval_seconds=0.01)
-    duplicate = app.start_screen_state_probe(min_confidence=0.8, interval_seconds=0.01)
-    app.stop_screen_state_probe()
-
-    final = _wait_until_probe_finished(app)
-    assert duplicate.running is True
-    assert "screen state probe is already running" in duplicate.stderr
-    assert final.exit_code == 0
-
-
-def _wait_until_probe_output_contains(app: LocalControlApplication, text: str):
-    """轮询等待后台界面探测产生指定输出。"""
-    deadline = time.monotonic() + 2
-    while time.monotonic() < deadline:
-        status = app.current_screen_state_probe()
-        if text in status.stdout:
-            return status
-        time.sleep(0.01)
-    raise AssertionError(f"screen state probe output did not contain {text!r}")
-
-
-def _wait_until_probe_finished(app: LocalControlApplication):
-    """轮询等待后台界面探测结束，避免测试绑定线程调度。"""
-    deadline = time.monotonic() + 2
-    while time.monotonic() < deadline:
-        status = app.current_screen_state_probe()
-        if not status.running:
-            return status
-        time.sleep(0.01)
-    raise AssertionError("screen state probe did not finish")
-
-
-def _wait_until_probe_stats_rounds(app: LocalControlApplication, rounds: int):
-    """轮询等待后台界面探测统计达到指定轮数。"""
-    deadline = time.monotonic() + 2
-    while time.monotonic() < deadline:
-        status = app.current_screen_state_probe()
-        if status.stats.rounds >= rounds:
-            return status
-        time.sleep(0.01)
-    raise AssertionError(f"screen state probe stats did not reach {rounds} rounds")

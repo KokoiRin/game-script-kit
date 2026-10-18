@@ -158,24 +158,26 @@ def test_run_script_on_local_desktop_passes_screen_state_reader_factory(monkeypa
     assert captured["kwargs"]["real_screen_state_reader_factory"] is composition.build_real_screen_state_reader
 
 
-def test_build_real_screen_state_reader_uses_local_control_application(monkeypatch) -> None:
-    """验证真实界面状态 reader 复用本地控制 application 的状态探测能力。"""
+def test_build_real_screen_state_reader_is_independent_of_local_control(monkeypatch) -> None:
+    """脚本状态 reader 直接接平台识图能力，不创建 UI 应用或加载脚本目录。"""
     created = {}
 
-    class FakeLocalControlApplication:
+    class FakeProjectScreenStateReader:
         def __init__(self, **kwargs) -> None:
             """记录 composition 传入的 application 依赖。"""
             created["kwargs"] = kwargs
 
-        def build_screen_state_reader(self):
-            """返回可识别的 fake reader。"""
-            return "reader"
+    def reject_ui_construction():
+        """阻止状态读取路径反向装配 UI。"""
+        raise AssertionError("state reader must not construct local control")
 
-    monkeypatch.setattr(composition, "LocalControlApplication", FakeLocalControlApplication)
+    monkeypatch.setattr(composition, "ProjectScreenStateReader", FakeProjectScreenStateReader)
+    monkeypatch.setattr(composition, "build_local_control_application", reject_ui_construction)
 
     reader = composition.build_real_screen_state_reader()
 
-    assert reader == "reader"
+    assert isinstance(reader, FakeProjectScreenStateReader)
+    assert created["kwargs"]["project_root"] == composition.PROJECT_ROOT
     assert created["kwargs"]["real_image_locator_factory"] is composition.build_real_screen_image_locator
     assert created["kwargs"]["real_image_batch_locator_factory"] is composition.build_real_screen_image_batch_locator
 
@@ -196,7 +198,6 @@ def test_build_local_control_application_passes_batch_image_locator_factory(monk
     assert isinstance(app, FakeLocalControlApplication)
     assert captured["kwargs"]["real_image_locator_factory"] is composition.build_real_screen_image_locator
     assert captured["kwargs"]["real_image_batch_locator_factory"] is composition.build_real_screen_image_batch_locator
-    assert captured["kwargs"]["screen_size_factory"] is composition.read_real_screen_size
 
 
 def test_build_local_control_application_passes_project_script_catalog(monkeypatch) -> None:

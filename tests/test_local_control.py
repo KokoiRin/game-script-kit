@@ -1,14 +1,13 @@
 """验证本地控制 UI 复用的应用层 interface。
 
 这些测试覆盖 UI 和 CLI 之外的 application seam：脚本查找、运行结果捕获、
-固定测试任务白名单。它不测试 HTTP 细节，也不直接绑定 engine 内部实现。
+界面状态读取、取消和未完成结果。它不测试 HTTP 细节，也不直接绑定 engine 内部实现。
 """
 
 import json
-import subprocess
 import time
 
-from PIL import Image
+import pytest
 
 from game_automation.portable.domain import (
     Click,
@@ -37,27 +36,22 @@ from game_automation.portable.domain import (
 from game_automation.portable.engine.ports import InputDevice
 from game_automation.portable.application.local_control import (
     LocalControlApplication,
-    PROJECT_ROOT,
-    ScreenStateProbeCandidateSummary,
 )
 from game_automation.portable.scripts_manager.catalog import ScriptCatalog
 
 
-def test_local_control_project_root_points_to_repository_root() -> None:
-    """验证 UI 测试按钮在项目根目录运行 pytest。"""
-    assert (PROJECT_ROOT / "pyproject.toml").is_file()
-    assert (PROJECT_ROOT / "tests").is_dir()
-
-
+from game_automation.portable.application.config_script_loader import ScriptConfigError
+from game_automation.portable.application.screen_state_reader import ProjectScreenStateReader
 def test_local_control_runs_named_script_and_captures_dry_run_output() -> None:
     """验证 UI 用例可以按名称 dry-run 脚本并返回可展示输出。"""
-    app = LocalControlApplication()
-
-    result = app.run_named_script(
-        "conditional-color-demo",
-        dry_run=True,
-        dry_run_color="#102030",
+    script = Script(
+        name="sample",
+        window=ScreenWindow(),
+        steps=(Click(Point(100, 200)), Wait(0.25)),
     )
+    app = LocalControlApplication(catalog=ScriptCatalog((script,)))
+
+    result = app.run_named_script("sample", dry_run=True)
 
     assert result.exit_code == 0
     assert result.stderr == ""
@@ -877,188 +871,6 @@ def test_local_control_runs_script_with_screen_state_condition(tmp_path) -> None
     assert "screen state probe round current_state=主页" in result.stdout
 
 
-def test_local_control_reuses_running_background_screen_state_for_real_script(tmp_path) -> None:
-    """验证真实脚本优先复用运行中的后台界面状态。"""
-    _write_home_state_config(tmp_path)
-    clicks = []
-    batch_requests = []
-    script = _build_state_branch_script()
-
-    class FakeDevice(InputDevice):
-        def click(self, target: Point) -> None:
-            """记录真实点击坐标。"""
-            clicks.append(target)
-
-        def drag_to(self, start: Point, end: Point, duration_seconds: float = 0.0) -> None:
-            """状态分支脚本不会拖拽。"""
-
-        def wait(self, duration_seconds: float) -> None:
-            """状态命中后不会等待。"""
-
-    class FakeBatchLocator:
-        def locate_requests(self, requests, *, logger=None, stop_on_first_match=False):
-            """记录状态探测请求并返回主页命中。"""
-            batch_requests.append(tuple(requests))
-            return (
-                ImageBatchMatchResult(
-                    requests[0].template,
-                    ImageMatch(Rect(10, 20, 30, 40), confidence=0.91),
-                    elapsed_ms=4.0,
-                ),
-            )
-
-    app = LocalControlApplication(
-        catalog=ScriptCatalog((script,)),
-        project_root=tmp_path,
-        real_device_factory=FakeDevice,
-        real_image_batch_locator_factory=FakeBatchLocator,
-    )
-
-    app.start_screen_state_probe(interval_seconds=30)
-    running = _wait_until_probe_state(app, "主页")
-    requests_after_probe = len(batch_requests)
-    result = app.run_named_script("state-aware", dry_run=False)
-    app.stop_screen_state_probe()
-
-    assert running.current_state == "主页"
-    assert result.exit_code == 0
-    assert result.stderr == ""
-    assert clicks == [Point(100, 200)]
-    assert len(batch_requests) == requests_after_probe
-    assert "screen state reader reused background probe current_state=主页" in result.stdout
-
-
-def test_local_control_background_probe_status_includes_latest_candidates(tmp_path) -> None:
-    """验证后台界面探测状态包含最近一轮候选结果。"""
-    assets = tmp_path / "assets"
-    assets.mkdir()
-    (assets / "主页.png").write_bytes(b"fake")
-    (assets / "人物.png").write_bytes(b"fake")
-    (assets / "screen-states.json").write_text(
-        json.dumps(
-            {
-                "groups": [
-                    {"state": "主页", "searches": [{"name": "主页标题", "image": "主页.png"}]},
-                    {"state": "人物", "searches": [{"name": "人物标题", "image": "人物.png"}]},
-                ],
-            },
-            ensure_ascii=False,
-        ),
-        encoding="utf-8",
-    )
-
-    class FakeBatchLocator:
-        def locate_requests(self, requests, *, logger=None, stop_on_first_match=False):
-            """返回主页命中，并模拟早停后人物候选被跳过。"""
-            return (
-                ImageBatchMatchResult(
-                    requests[0].template,
-                    ImageMatch(Rect(10, 20, 30, 40), confidence=0.91),
-                    elapsed_ms=4.0,
-                ),
-                ImageBatchMatchResult(
-                    requests[1].template,
-                    None,
-                    elapsed_ms=0.0,
-                    skipped=True,
-                ),
-            )
-
-    app = LocalControlApplication(
-        project_root=tmp_path,
-        real_image_batch_locator_factory=FakeBatchLocator,
-    )
-
-    app.start_screen_state_probe(interval_seconds=30)
-    status = _wait_until_probe_state(app, "主页")
-    app.stop_screen_state_probe()
-
-    assert status.candidates == (
-        ScreenStateProbeCandidateSummary(
-            "主页",
-            "matched",
-            4.0,
-            0.91,
-            search_name="主页标题",
-            best_confidence=0.91,
-            best_rect=Rect(10, 20, 30, 40),
-        ),
-        ScreenStateProbeCandidateSummary("人物", "skipped", 0.0, None, search_name="人物标题"),
-    )
-
-
-def test_local_control_falls_back_to_probe_when_background_state_is_unknown(tmp_path) -> None:
-    """验证后台状态不可用时真实脚本仍执行即时探测。"""
-    _write_home_state_config(tmp_path)
-    clicks = []
-    batch_requests = []
-    script = _build_state_branch_script()
-
-    class FakeDevice(InputDevice):
-        def click(self, target: Point) -> None:
-            """记录真实点击坐标。"""
-            clicks.append(target)
-
-        def drag_to(self, start: Point, end: Point, duration_seconds: float = 0.0) -> None:
-            """状态分支脚本不会拖拽。"""
-
-        def wait(self, duration_seconds: float) -> None:
-            """状态命中后不会等待。"""
-
-    class FakeBatchLocator:
-        def locate_requests(self, requests, *, logger=None, stop_on_first_match=False):
-            """第一次返回未知，第二次返回主页命中。"""
-            batch_requests.append(tuple(requests))
-            if len(batch_requests) == 1:
-                return (
-                    ImageBatchMatchResult(
-                        requests[0].template,
-                        None,
-                        elapsed_ms=4.0,
-                    ),
-                )
-            return (
-                ImageBatchMatchResult(
-                    requests[0].template,
-                    ImageMatch(Rect(10, 20, 30, 40), confidence=0.91),
-                    elapsed_ms=4.0,
-                ),
-            )
-
-    app = LocalControlApplication(
-        catalog=ScriptCatalog((script,)),
-        project_root=tmp_path,
-        real_device_factory=FakeDevice,
-        real_image_batch_locator_factory=FakeBatchLocator,
-    )
-
-    app.start_screen_state_probe(interval_seconds=30)
-    running = _wait_until_probe_output_contains(app, "current_state=未知")
-    result = app.run_named_script("state-aware", dry_run=False)
-    app.stop_screen_state_probe()
-
-    assert running.current_state == "未知"
-    assert result.exit_code == 0
-    assert result.stderr == ""
-    assert clicks == [Point(100, 200)]
-    assert len(batch_requests) == 2
-    assert "screen state probe round current_state=主页" in result.stdout
-
-
-def test_local_control_lists_image_assets_from_project_assets_folder(tmp_path) -> None:
-    """验证 UI 用例只列出图片资源目录里的支持图片文件。"""
-    assets = tmp_path / "assets"
-    assets.mkdir()
-    (assets / "start.png").write_bytes(b"fake")
-    (assets / "button.jpg").write_bytes(b"fake")
-    (assets / "notes.txt").write_text("skip")
-
-    app = LocalControlApplication(project_root=tmp_path)
-
-    assert app.image_asset_folder_label() == "assets"
-    assert app.list_image_assets() == ("button.jpg", "start.png")
-
-
 def test_local_control_lists_screen_state_names_from_config(tmp_path) -> None:
     """验证 UI 用例按配置顺序列出界面状态并去重。"""
     assets = tmp_path / "assets"
@@ -1097,871 +909,6 @@ def test_local_control_lists_no_screen_state_names_for_invalid_config(tmp_path) 
     app = LocalControlApplication(project_root=tmp_path)
 
     assert app.list_screen_state_names() == ()
-
-
-def test_local_control_describes_screen_state_config_summary(tmp_path) -> None:
-    """验证 UI 用例可生成用户可读的状态配置摘要。"""
-    assets = tmp_path / "assets"
-    assets.mkdir()
-    Image.new("RGB", (4, 4), "black").save(assets / "home.png")
-    (assets / "screen-states.json").write_text(
-        """
-        {
-          "regions": {
-            "主页标题": {"left": 10, "top": 5, "width": 20, "height": 10}
-          },
-          "groups": [
-            {
-              "state": "主页",
-              "searches": [
-                {
-                  "name": "主页标识",
-                  "image": "home.png",
-                  "region": "主页标题",
-                  "min_confidence": 0.75
-                }
-              ]
-            }
-          ]
-        }
-        """,
-        encoding="utf-8",
-    )
-    app = LocalControlApplication(project_root=tmp_path)
-
-    result = app.describe_screen_state_config()
-
-    assert result.exit_code == 0
-    assert result.stderr == ""
-    assert result.groups[0].state == "主页"
-    assert result.groups[0].searches[0].name == "主页标识"
-    assert result.groups[0].searches[0].image == "home.png"
-    assert result.groups[0].searches[0].region == "主页标题"
-    assert result.groups[0].searches[0].min_confidence == 0.75
-
-
-def test_local_control_describes_empty_screen_state_config_when_missing(tmp_path) -> None:
-    """验证缺少状态配置时摘要为空但不报错。"""
-    (tmp_path / "assets").mkdir()
-    app = LocalControlApplication(project_root=tmp_path)
-
-    result = app.describe_screen_state_config()
-
-    assert result.exit_code == 0
-    assert result.groups == ()
-    assert result.stderr == ""
-
-
-def test_local_control_reports_invalid_screen_state_config_summary(tmp_path) -> None:
-    """验证状态配置摘要会报告非法配置。"""
-    assets = tmp_path / "assets"
-    assets.mkdir()
-    (assets / "screen-states.json").write_text(
-        """
-        {
-          "groups": [
-            {
-              "state": "主页",
-              "searches": [
-                {"name": "主页标识", "image": "missing.png"}
-              ]
-            }
-          ]
-        }
-        """,
-        encoding="utf-8",
-    )
-    app = LocalControlApplication(project_root=tmp_path)
-
-    result = app.describe_screen_state_config()
-
-    assert result.exit_code == 2
-    assert result.groups == ()
-    assert "screen state search image does not exist" in result.stderr
-
-
-def test_local_control_clicks_selected_image_asset_in_dry_run(tmp_path) -> None:
-    """验证 UI 用例可把 assets 里的图片作为目标执行查找并点击脚本。"""
-    assets = tmp_path / "assets"
-    assets.mkdir()
-    (assets / "start.png").write_bytes(b"fake")
-    app = LocalControlApplication(project_root=tmp_path)
-
-    result = app.click_image_asset("start.png", dry_run=True)
-
-    assert result.exit_code == 0
-    assert result.stderr == ""
-    assert "image match template=" in result.stdout
-    assert "assets/start.png" in result.stdout
-    assert "found=True" in result.stdout
-    assert result.stdout.endswith("click Point(x=0, y=0)\n")
-
-
-def test_local_control_passes_min_confidence_to_image_click(tmp_path) -> None:
-    """验证 UI 用例会把最低匹配置信度传给图片目标。"""
-    assets = tmp_path / "assets"
-    assets.mkdir()
-    (assets / "start.png").write_bytes(b"fake")
-    clicks = []
-    confidences = []
-
-    class FakeDevice(InputDevice):
-        def click(self, target) -> None:
-            """记录真实点击坐标。"""
-            clicks.append(target)
-
-        def drag_to(self, start, end, duration_seconds: float = 0.0) -> None:
-            """图片点击用例不会拖拽。"""
-
-        def wait(self, duration_seconds: float) -> None:
-            """图片点击用例不会等待。"""
-
-    class FakeImageLocator:
-        def locate(self, template, *, region=None, min_confidence=1.0, logger=None):
-            """记录最低置信度并返回固定匹配。"""
-            confidences.append(min_confidence)
-            return ImageMatch(Rect(10, 20, 8, 6), confidence=0.91)
-
-    app = LocalControlApplication(
-        project_root=tmp_path,
-        real_device_factory=FakeDevice,
-        real_image_locator_factory=FakeImageLocator,
-    )
-
-    result = app.click_image_asset("start.png", dry_run=False, min_confidence=0.7)
-
-    assert result.exit_code == 0
-    assert result.stderr == ""
-    assert "image match template=" in result.stdout
-    assert "confidence=0.91" in result.stdout
-    assert confidences == [0.7]
-    assert clicks == [Point(14, 23)]
-
-
-def test_local_control_captures_screen_debug_screenshot(tmp_path) -> None:
-    """验证 UI 用例可把真实截图保存到项目内诊断文件。"""
-    captured_paths = []
-
-    def screen_capture(path):
-        """保存一张非黑测试截图。"""
-        captured_paths.append(path)
-        Image.new("RGB", (20, 10), "white").save(path)
-
-    app = LocalControlApplication(
-        project_root=tmp_path,
-        screen_capture_factory=lambda: screen_capture,
-        screen_size_factory=lambda: Point(10, 5),
-    )
-
-    result = app.capture_screen_screenshot()
-
-    screenshot_path = tmp_path / ".star" / "debug" / "screenshots" / "latest-screen.png"
-    assert result.exit_code == 0
-    assert result.stderr == ""
-    assert result.stdout == f"saved screenshot: {screenshot_path}\n"
-    assert result.screenshot_path == str(screenshot_path)
-    assert result.image_size == Point(20, 10)
-    assert result.screen_size == Point(10, 5)
-    with Image.open(screenshot_path) as screenshot:
-        assert screenshot.size == (20, 10)
-    assert captured_paths == [screenshot_path]
-
-
-def test_local_control_previews_image_match_in_selected_region(tmp_path) -> None:
-    """验证 UI 用例可在选中区域内只读预览图片匹配。"""
-    assets = tmp_path / "assets"
-    assets.mkdir()
-    (assets / "start.png").write_bytes(b"fake")
-    calls = []
-
-    class FakeImageLocator:
-        def locate(self, template, *, region=None, min_confidence=1.0, logger=None):
-            """记录区域和置信度并返回固定匹配。"""
-            calls.append((template, region, min_confidence))
-            return ImageMatch(Rect(12, 24, 10, 8), confidence=0.93)
-
-    app = LocalControlApplication(
-        project_root=tmp_path,
-        real_image_locator_factory=FakeImageLocator,
-    )
-
-    result = app.preview_image_asset_match(
-        "start.png",
-        region=Rect(10, 20, 100, 50),
-        min_confidence=0.7,
-    )
-
-    assert result.exit_code == 0
-    assert result.stderr == ""
-    assert result.found is True
-    assert result.confidence == 0.93
-    assert result.rect == Rect(12, 24, 10, 8)
-    assert result.center == Point(17, 28)
-    assert "image match template=" in result.stdout
-    assert calls == [
-        (ImageTemplate(str(assets / "start.png")), Rect(10, 20, 100, 50), 0.7)
-    ]
-
-
-def test_local_control_preview_image_match_reports_miss(tmp_path) -> None:
-    """验证区域预览未命中时返回正常结果而不是点击或失败。"""
-    assets = tmp_path / "assets"
-    assets.mkdir()
-    (assets / "start.png").write_bytes(b"fake")
-
-    class FakeImageLocator:
-        def locate(self, template, *, region=None, min_confidence=1.0, logger=None):
-            """模拟区域内未找到图片。"""
-            return None
-
-    app = LocalControlApplication(
-        project_root=tmp_path,
-        real_image_locator_factory=FakeImageLocator,
-    )
-
-    result = app.preview_image_asset_match(
-        "start.png",
-        region=Rect(10, 20, 100, 50),
-        min_confidence=0.7,
-    )
-
-    assert result.exit_code == 0
-    assert result.found is False
-    assert result.confidence is None
-    assert result.rect is None
-    assert result.center is None
-
-
-def test_local_control_warns_when_screen_debug_screenshot_is_black(tmp_path) -> None:
-    """验证普通截图疑似全黑时返回用户可见警告。"""
-
-    def screen_capture(path):
-        """保存一张纯黑测试截图。"""
-        Image.new("RGB", (20, 10), "black").save(path)
-
-    app = LocalControlApplication(project_root=tmp_path, screen_capture_factory=lambda: screen_capture)
-
-    result = app.capture_screen_screenshot()
-
-    screenshot_path = tmp_path / ".star" / "debug" / "screenshots" / "latest-screen.png"
-    assert result.exit_code == 0
-    assert result.stdout == f"saved screenshot: {screenshot_path}\n"
-    assert result.screenshot_path == str(screenshot_path)
-    assert "captured screenshot appears all black" in result.stderr
-
-
-def test_local_control_diagnoses_screen_setup_with_probe_summary(tmp_path) -> None:
-    """验证屏幕诊断用例会先截图再执行一轮状态探测。"""
-    assets = tmp_path / "assets"
-    assets.mkdir()
-    (assets / "screen-states.json").write_text(
-        """
-        {
-          "groups": [
-            {
-              "state": "主页",
-              "searches": [
-                {"name": "主页标题", "image": "home.png"}
-              ]
-            }
-          ]
-        }
-        """,
-        encoding="utf-8",
-    )
-    Image.new("RGB", (4, 4), "black").save(assets / "home.png")
-    captured_paths = []
-    batch_requests = []
-
-    def screen_capture(path):
-        """保存一张非黑测试截图。"""
-        captured_paths.append(path)
-        Image.new("RGB", (20, 10), "white").save(path)
-
-    class FakeBatchLocator:
-        def locate_requests(self, requests, *, logger=None, stop_on_first_match=False):
-            """记录探测请求并返回主页命中。"""
-            batch_requests.append((tuple(requests), stop_on_first_match))
-            return (
-                ImageBatchMatchResult(
-                    requests[0].template,
-                    ImageMatch(Rect(10, 20, 30, 40), confidence=0.91),
-                    elapsed_ms=4.0,
-                ),
-            )
-
-    app = LocalControlApplication(
-        project_root=tmp_path,
-        screen_capture_factory=lambda: screen_capture,
-        real_image_batch_locator_factory=FakeBatchLocator,
-    )
-
-    result = app.diagnose_screen_setup(min_confidence=0.75)
-
-    screenshot_path = tmp_path / ".star" / "debug" / "screenshots" / "latest-screen.png"
-    assert result.exit_code == 0
-    assert result.stderr == ""
-    assert result.screenshot_path == str(screenshot_path)
-    assert captured_paths == [screenshot_path]
-    assert batch_requests[0][0][0].min_confidence == 0.75
-    assert batch_requests[0][1] is True
-    lines = result.stdout.splitlines()
-    assert lines[0:2] == [
-        f"saved screenshot: {screenshot_path}",
-        "current_state=主页",
-    ]
-    assert lines[2].startswith("elapsed_ms=")
-    assert lines[3] == (
-        "candidate=主页/主页标题 status=matched elapsed_ms=4.00 "
-        "confidence=0.910 best_confidence=0.910 best_rect=x=10,y=20,w=30,h=40"
-    )
-
-
-def test_local_control_diagnose_screen_setup_stops_when_capture_fails(tmp_path) -> None:
-    """验证屏幕诊断截图失败时不会继续执行状态探测。"""
-    probe_calls = []
-
-    class FakeBatchLocator:
-        def locate_requests(self, requests, *, logger=None, stop_on_first_match=False):
-            """记录不应发生的状态探测调用。"""
-            probe_calls.append(requests)
-            return ()
-
-    app = LocalControlApplication(
-        project_root=tmp_path,
-        real_image_batch_locator_factory=FakeBatchLocator,
-    )
-
-    result = app.diagnose_screen_setup()
-
-    assert result.exit_code == 1
-    assert result.stdout == ""
-    assert "screen capture is not configured" in result.stderr
-    assert probe_calls == []
-
-
-def test_local_control_captures_screen_region_diagnostics(tmp_path) -> None:
-    """验证 UI 用例可生成带状态区域框的诊断截图。"""
-    assets = tmp_path / "assets"
-    assets.mkdir()
-    (assets / "screen-states.json").write_text(
-        """
-        {
-          "regions": {
-            "主页标题": {"left": 10, "top": 5, "width": 20, "height": 10}
-          },
-          "groups": [
-            {
-              "state": "主页",
-              "searches": [
-                {"name": "主页标题", "image": "home.png", "region": "主页标题"}
-              ]
-            }
-          ]
-        }
-        """,
-        encoding="utf-8",
-    )
-    Image.new("RGB", (4, 4), "black").save(assets / "home.png")
-
-    def screen_capture(path):
-        """保存测试用截图。"""
-        Image.new("RGB", (200, 100), "white").save(path)
-
-    app = LocalControlApplication(
-        project_root=tmp_path,
-        screen_capture_factory=lambda: screen_capture,
-        screen_size_factory=lambda: Point(100, 50),
-    )
-
-    result = app.capture_screen_region_diagnostics()
-
-    diagnostic_path = tmp_path / ".star" / "debug" / "screenshots" / "latest-screen-regions.png"
-    assert result.exit_code == 0
-    assert result.stderr == ""
-    assert result.stdout == f"saved region diagnostics screenshot: {diagnostic_path}\n"
-    assert result.screenshot_path == str(diagnostic_path)
-    with Image.open(diagnostic_path) as diagnostic:
-        assert diagnostic.size == (200, 100)
-        assert diagnostic.getpixel((20, 10)) != (255, 255, 255)
-
-
-def test_local_control_captures_screen_probe_diagnostics(tmp_path) -> None:
-    """验证 UI 用例可生成带候选最佳匹配框的探测诊断截图。"""
-    assets = tmp_path / "assets"
-    assets.mkdir()
-    (assets / "screen-states.json").write_text(
-        """
-        {
-          "groups": [
-            {
-              "state": "主页",
-              "searches": [
-                {"name": "主页标题", "image": "home.png"}
-              ]
-            }
-          ]
-        }
-        """,
-        encoding="utf-8",
-    )
-    Image.new("RGB", (4, 4), "black").save(assets / "home.png")
-    batch_requests = []
-
-    class FakeBatchLocator:
-        def locate_requests(self, requests, *, logger=None, stop_on_first_match=False):
-            """记录探测请求并返回未命中候选的最佳位置。"""
-            batch_requests.append(tuple(requests))
-            return (
-                ImageBatchMatchResult(
-                    requests[0].template,
-                    None,
-                    elapsed_ms=4.0,
-                    best_confidence=0.7,
-                    best_rect=Rect(10, 5, 20, 10),
-                ),
-            )
-
-    def screen_capture(path):
-        """保存一张 2x 缩放的测试截图。"""
-        Image.new("RGB", (200, 100), "white").save(path)
-
-    app = LocalControlApplication(
-        project_root=tmp_path,
-        screen_capture_factory=lambda: screen_capture,
-        screen_size_factory=lambda: Point(100, 50),
-        real_image_batch_locator_factory=FakeBatchLocator,
-    )
-
-    result = app.capture_screen_probe_diagnostics(min_confidence=0.75)
-
-    diagnostic_path = tmp_path / ".star" / "debug" / "screenshots" / "latest-screen-probe.png"
-    assert result.exit_code == 0
-    assert result.stderr == ""
-    assert result.stdout == (
-        f"saved probe diagnostics screenshot: {diagnostic_path}\n"
-        "current_state=未知\n"
-    )
-    assert result.screenshot_path == str(diagnostic_path)
-    assert batch_requests[0][0].min_confidence == 0.75
-    with Image.open(diagnostic_path) as diagnostic:
-        assert diagnostic.size == (200, 100)
-        assert diagnostic.getpixel((20, 10)) != (255, 255, 255)
-
-
-def test_local_control_probe_diagnostics_warns_when_raw_screenshot_is_black(tmp_path) -> None:
-    """验证探测诊断复用原始截图全黑警告。"""
-    assets = tmp_path / "assets"
-    assets.mkdir()
-    (assets / "screen-states.json").write_text(
-        """
-        {
-          "groups": [
-            {
-              "state": "主页",
-              "searches": [
-                {"name": "主页标题", "image": "home.png"}
-              ]
-            }
-          ]
-        }
-        """,
-        encoding="utf-8",
-    )
-    Image.new("RGB", (4, 4), "black").save(assets / "home.png")
-
-    class FakeBatchLocator:
-        def locate_requests(self, requests, *, logger=None, stop_on_first_match=False):
-            """返回未命中候选的最佳位置。"""
-            return (
-                ImageBatchMatchResult(
-                    requests[0].template,
-                    None,
-                    elapsed_ms=4.0,
-                    best_confidence=0.7,
-                    best_rect=Rect(10, 5, 20, 10),
-                ),
-            )
-
-    def screen_capture(path):
-        """保存一张纯黑测试截图。"""
-        Image.new("RGB", (200, 100), "black").save(path)
-
-    app = LocalControlApplication(
-        project_root=tmp_path,
-        screen_capture_factory=lambda: screen_capture,
-        screen_size_factory=lambda: Point(100, 50),
-        real_image_batch_locator_factory=FakeBatchLocator,
-    )
-
-    result = app.capture_screen_probe_diagnostics()
-
-    assert result.exit_code == 0
-    assert "saved probe diagnostics screenshot:" in result.stdout
-    assert "captured screenshot appears all black" in result.stderr
-
-
-def test_local_control_probe_diagnostics_requires_screen_capture(tmp_path) -> None:
-    """验证探测诊断缺少截图能力时返回清晰错误。"""
-    (tmp_path / "assets").mkdir()
-    app = LocalControlApplication(project_root=tmp_path)
-
-    result = app.capture_screen_probe_diagnostics()
-
-    assert result.exit_code == 1
-    assert result.stdout == ""
-    assert "screen capture is not configured" in result.stderr
-
-
-def test_local_control_captures_screen_probe_crops(tmp_path) -> None:
-    """验证 UI 用例可导出候选最佳匹配位置裁剪图。"""
-    assets = tmp_path / "assets"
-    assets.mkdir()
-    (assets / "screen-states.json").write_text(
-        """
-        {
-          "groups": [
-            {
-              "state": "主页",
-              "searches": [
-                {"name": "主页标题", "image": "home.png"}
-              ]
-            }
-          ]
-        }
-        """,
-        encoding="utf-8",
-    )
-    Image.new("RGB", (4, 4), "black").save(assets / "home.png")
-    crop_root = tmp_path / ".star" / "debug" / "screenshots" / "probe-crops"
-    crop_root.mkdir(parents=True)
-    stale_crop = crop_root / "stale.png"
-    stale_crop.write_bytes(b"old")
-    keep_note = crop_root / "keep.txt"
-    keep_note.write_text("manual note", encoding="utf-8")
-    batch_requests = []
-
-    class FakeBatchLocator:
-        def locate_requests(self, requests, *, logger=None, stop_on_first_match=False):
-            """记录探测请求并返回未命中候选的最佳位置。"""
-            batch_requests.append(tuple(requests))
-            return (
-                ImageBatchMatchResult(
-                    requests[0].template,
-                    None,
-                    elapsed_ms=4.0,
-                    best_confidence=0.7,
-                    best_rect=Rect(10, 5, 20, 10),
-                ),
-            )
-
-    def screen_capture(path):
-        """保存一张 2x 缩放的测试截图。"""
-        Image.new("RGB", (200, 100), "white").save(path)
-
-    app = LocalControlApplication(
-        project_root=tmp_path,
-        screen_capture_factory=lambda: screen_capture,
-        screen_size_factory=lambda: Point(100, 50),
-        real_image_batch_locator_factory=FakeBatchLocator,
-    )
-
-    result = app.capture_screen_probe_crops(min_confidence=0.75)
-
-    crop_path = crop_root / "01_主页_主页标题.png"
-    assert result.exit_code == 0
-    assert result.stderr == ""
-    assert result.stdout == f"saved probe crop: {crop_path}\n"
-    assert result.screenshot_path == str(crop_root)
-    assert batch_requests[0][0].min_confidence == 0.75
-    assert not stale_crop.exists()
-    assert keep_note.read_text(encoding="utf-8") == "manual note"
-    assert sorted(path.name for path in crop_root.glob("*.png")) == ["01_主页_主页标题.png"]
-    with Image.open(crop_path) as crop:
-        assert crop.size == (40, 20)
-
-
-def test_local_control_probe_crops_warns_when_raw_screenshot_is_black(tmp_path) -> None:
-    """验证候选裁剪导出复用原始截图全黑警告。"""
-    assets = tmp_path / "assets"
-    assets.mkdir()
-    (assets / "screen-states.json").write_text(
-        """
-        {
-          "groups": [
-            {
-              "state": "主页",
-              "searches": [
-                {"name": "主页标题", "image": "home.png"}
-              ]
-            }
-          ]
-        }
-        """,
-        encoding="utf-8",
-    )
-    Image.new("RGB", (4, 4), "black").save(assets / "home.png")
-
-    class FakeBatchLocator:
-        def locate_requests(self, requests, *, logger=None, stop_on_first_match=False):
-            """返回候选最佳位置。"""
-            return (
-                ImageBatchMatchResult(
-                    requests[0].template,
-                    None,
-                    elapsed_ms=4.0,
-                    best_confidence=0.7,
-                    best_rect=Rect(10, 5, 20, 10),
-                ),
-            )
-
-    def screen_capture(path):
-        """保存一张纯黑测试截图。"""
-        Image.new("RGB", (200, 100), "black").save(path)
-
-    app = LocalControlApplication(
-        project_root=tmp_path,
-        screen_capture_factory=lambda: screen_capture,
-        screen_size_factory=lambda: Point(100, 50),
-        real_image_batch_locator_factory=FakeBatchLocator,
-    )
-
-    result = app.capture_screen_probe_crops()
-
-    assert result.exit_code == 0
-    assert "saved probe crop:" in result.stdout
-    assert "captured screenshot appears all black" in result.stderr
-
-
-def test_local_control_probe_crops_reports_no_saved_candidates(tmp_path) -> None:
-    """验证没有候选最佳位置时裁剪命令仍清晰返回成功。"""
-    assets = tmp_path / "assets"
-    assets.mkdir()
-    (assets / "screen-states.json").write_text(
-        """
-        {
-          "groups": [
-            {
-              "state": "主页",
-              "searches": [
-                {"name": "主页标题", "image": "home.png"}
-              ]
-            }
-          ]
-        }
-        """,
-        encoding="utf-8",
-    )
-    Image.new("RGB", (4, 4), "black").save(assets / "home.png")
-    crop_root = tmp_path / ".star" / "debug" / "screenshots" / "probe-crops"
-    crop_root.mkdir(parents=True)
-    stale_crop = crop_root / "stale.png"
-    stale_crop.write_bytes(b"old")
-
-    class FakeBatchLocator:
-        def locate_requests(self, requests, *, logger=None, stop_on_first_match=False):
-            """返回没有最佳位置的未命中候选。"""
-            return (ImageBatchMatchResult(requests[0].template, None, elapsed_ms=4.0),)
-
-    def screen_capture(path):
-        """保存测试截图。"""
-        Image.new("RGB", (200, 100), "white").save(path)
-
-    app = LocalControlApplication(
-        project_root=tmp_path,
-        screen_capture_factory=lambda: screen_capture,
-        screen_size_factory=lambda: Point(100, 50),
-        real_image_batch_locator_factory=FakeBatchLocator,
-    )
-
-    result = app.capture_screen_probe_crops()
-
-    assert result.exit_code == 0
-    assert result.stderr == ""
-    assert result.stdout == "no probe candidate crops saved\n"
-    assert result.screenshot_path == str(crop_root)
-    assert not stale_crop.exists()
-    assert list(crop_root.glob("*.png")) == []
-
-
-def test_local_control_probe_crops_requires_screen_capture(tmp_path) -> None:
-    """验证候选裁剪导出缺少截图能力时返回清晰错误。"""
-    app = LocalControlApplication(project_root=tmp_path)
-
-    result = app.capture_screen_probe_crops()
-
-    assert result.exit_code == 1
-    assert "screen capture is not configured" in result.stderr
-
-
-def test_local_control_captures_screen_region_crops(tmp_path) -> None:
-    """验证 UI 用例可把命名状态区域裁剪为独立图片。"""
-    assets = tmp_path / "assets"
-    assets.mkdir()
-    (assets / "screen-states.json").write_text(
-        """
-        {
-          "regions": {
-            "主页标题": {"left": 10, "top": 5, "width": 30, "height": 20},
-            "普通标题": {"left": 60, "top": 10, "width": 20, "height": 15}
-          },
-          "groups": [
-            {
-              "state": "主页",
-              "searches": [
-                {"name": "主页标题", "image": "home.png", "region": "主页标题"}
-              ]
-            }
-          ]
-        }
-        """,
-        encoding="utf-8",
-    )
-    Image.new("RGB", (4, 4), "black").save(assets / "home.png")
-    crop_root = tmp_path / ".star" / "debug" / "screenshots" / "regions"
-    crop_root.mkdir(parents=True)
-    stale_crop = crop_root / "stale.png"
-    stale_crop.write_bytes(b"old")
-    keep_note = crop_root / "keep.txt"
-    keep_note.write_text("manual note", encoding="utf-8")
-
-    def screen_capture(path):
-        """保存一张 2x 缩放的测试截图。"""
-        Image.new("RGB", (200, 100), "white").save(path)
-
-    app = LocalControlApplication(
-        project_root=tmp_path,
-        screen_capture_factory=lambda: screen_capture,
-        screen_size_factory=lambda: Point(100, 50),
-    )
-
-    result = app.capture_screen_region_crops()
-
-    home_crop = crop_root / "主页标题.png"
-    normal_crop = crop_root / "普通标题.png"
-    assert result.exit_code == 0
-    assert result.stderr == ""
-    assert result.stdout.splitlines() == [
-        f"saved region crop: {home_crop}",
-        f"saved region crop: {normal_crop}",
-    ]
-    assert result.screenshot_path == str(crop_root)
-    assert not stale_crop.exists()
-    assert keep_note.read_text(encoding="utf-8") == "manual note"
-    assert sorted(path.name for path in crop_root.glob("*.png")) == ["主页标题.png", "普通标题.png"]
-    with Image.open(home_crop) as crop:
-        assert crop.size == (60, 40)
-    with Image.open(normal_crop) as crop:
-        assert crop.size == (40, 30)
-
-
-def test_local_control_region_diagnostics_requires_screen_state_config(tmp_path) -> None:
-    """验证区域诊断缺少状态配置时返回清晰错误。"""
-    (tmp_path / "assets").mkdir()
-    app = LocalControlApplication(project_root=tmp_path)
-
-    result = app.capture_screen_region_diagnostics()
-
-    assert result.exit_code == 2
-    assert result.stdout == ""
-    assert "screen state config is required for region diagnostics" in result.stderr
-
-
-def test_local_control_region_diagnostics_requires_named_regions(tmp_path) -> None:
-    """验证区域诊断要求配置中存在命名区域。"""
-    assets = tmp_path / "assets"
-    assets.mkdir()
-    (assets / "screen-states.json").write_text(
-        """
-        {
-          "regions": {},
-          "groups": [
-            {
-              "state": "主页",
-              "searches": [
-                {"name": "主页标题", "image": "home.png"}
-              ]
-            }
-          ]
-        }
-        """,
-        encoding="utf-8",
-    )
-    Image.new("RGB", (4, 4), "black").save(assets / "home.png")
-    app = LocalControlApplication(project_root=tmp_path)
-
-    result = app.capture_screen_region_diagnostics()
-
-    assert result.exit_code == 2
-    assert result.stdout == ""
-    assert "screen state config has no named regions" in result.stderr
-
-
-def test_local_control_rejects_image_asset_outside_assets_folder(tmp_path) -> None:
-    """验证 UI 用例拒绝通过相对路径逃逸图片资源目录。"""
-    app = LocalControlApplication(project_root=tmp_path)
-
-    result = app.click_image_asset("../secret.png", dry_run=True)
-
-    assert result.exit_code == 2
-    assert result.stdout == ""
-    assert "invalid image click request:" in result.stderr
-
-
-def test_local_control_rejects_invalid_image_confidence(tmp_path) -> None:
-    """验证 UI 用例拒绝非法图片最低匹配置信度。"""
-    assets = tmp_path / "assets"
-    assets.mkdir()
-    (assets / "start.png").write_bytes(b"fake")
-    app = LocalControlApplication(project_root=tmp_path)
-
-    result = app.click_image_asset("start.png", dry_run=True, min_confidence=1.1)
-
-    assert result.exit_code == 2
-    assert result.stdout == ""
-    assert "image target min_confidence" in result.stderr
-
-
-def test_local_control_rejects_unknown_test_task_without_running_command() -> None:
-    """验证 UI 只能触发白名单测试任务。"""
-    commands = []
-
-    def command_runner(command, cwd):
-        commands.append((command, cwd))
-        raise AssertionError("unknown test task must not execute a command")
-
-    app = LocalControlApplication(command_runner=command_runner)
-
-    result = app.run_tests("shell")
-
-    assert result.exit_code == 2
-    assert result.stdout == ""
-    assert result.stderr == "unknown test task: shell\n"
-    assert commands == []
-
-
-def test_local_control_runs_whitelisted_test_task() -> None:
-    """验证 UI 测试按钮只通过固定任务执行命令。"""
-    commands = []
-
-    def command_runner(command, cwd):
-        commands.append((tuple(command), cwd))
-        return subprocess.CompletedProcess(
-            args=command,
-            returncode=0,
-            stdout="2 passed\n",
-            stderr="",
-        )
-
-    app = LocalControlApplication(command_runner=command_runner)
-
-    result = app.run_tests("all")
-
-    assert result.exit_code == 0
-    assert result.stdout == "2 passed\n"
-    assert result.stderr == ""
-    assert len(commands) == 1
-    assert commands[0][0][-2:] == ("-m", "pytest")
 
 
 def _wait_until_finished(app: LocalControlApplication):
@@ -2011,23 +958,168 @@ def _build_state_branch_script() -> Script:
     )
 
 
-def _wait_until_probe_state(app: LocalControlApplication, expected_state: str):
-    """轮询等待后台界面探测进入指定状态。"""
-    deadline = time.monotonic() + 2
-    while time.monotonic() < deadline:
-        status = app.current_screen_state_probe()
-        if status.running and status.current_state == expected_state:
-            return status
-        time.sleep(0.01)
-    raise AssertionError(f"screen state probe did not reach {expected_state}")
+
+def test_local_control_lists_scripts_and_isolated_config_errors() -> None:
+    """脚本列表与坏配置报告保留供入口展示，坏文件不阻断好脚本。"""
+    script = Script("sample", ScreenWindow(), (Wait(0),))
+    error = ScriptConfigError("bad.json", "steps must not be empty")
+    app = LocalControlApplication(
+        catalog=ScriptCatalog((script,)), script_config_errors=(error,),
+    )
+
+    assert app.list_scripts() == ("sample",)
+    assert app.list_script_config_errors() == (error,)
+    assert app.run_named_script("sample", dry_run=True).finish_reason == "completed"
 
 
-def _wait_until_probe_output_contains(app: LocalControlApplication, expected_text: str):
-    """轮询等待后台界面探测日志包含指定文本。"""
-    deadline = time.monotonic() + 2
-    while time.monotonic() < deadline:
-        status = app.current_screen_state_probe()
-        if status.running and expected_text in status.stdout:
-            return status
-        time.sleep(0.01)
-    raise AssertionError(f"screen state probe output did not contain {expected_text}")
+def test_local_control_unknown_script_has_explicit_finish_reason() -> None:
+    """同步和后台入口均把未知脚本作为未启动的错误结果返回。"""
+    app = LocalControlApplication(catalog=ScriptCatalog(()))
+
+    result = app.run_named_script("missing", dry_run=True)
+    status = app.start_named_script("missing", dry_run=True)
+
+    assert result.exit_code == status.exit_code == 1
+    assert result.finish_reason == status.finish_reason == "script_not_found"
+    assert "unknown script: missing" in result.stderr
+    assert not status.running
+
+
+def test_local_control_unmet_condition_is_not_reported_as_completed() -> None:
+    """等待目标未满足时，同步和后台均保留正常停止原因并跳过后续点击。"""
+    script = Script(
+        "wait-for-image", ScreenWindow(),
+        (WaitUntil(ImageExists(ImageTemplate("missing.png")), 0.1, 0.1), Click(Point(10, 20))),
+    )
+    app = LocalControlApplication(catalog=ScriptCatalog((script,)))
+
+    result = app.run_named_script(script.name, dry_run=True)
+    app.start_named_script(script.name, dry_run=True)
+    status = _wait_until_finished(app)
+
+    assert result.exit_code == status.exit_code == 0
+    assert result.finish_reason == status.finish_reason == "stopped_unmet_condition"
+    assert "click Point" not in result.stdout
+    assert "click Point" not in status.stdout
+
+
+def test_local_control_runtime_failure_is_exposed_in_both_entry_modes() -> None:
+    """真实设备动作失败时，同步与后台结果都明确失败并包含原始原因。"""
+    script = Script("failing", ScreenWindow(), (Click(Point(10, 20)),))
+
+    class FailingDevice:
+        def click(self, target):
+            """模拟真实输入设备不可用。"""
+            raise RuntimeError("input permission denied")
+
+    app = LocalControlApplication(
+        catalog=ScriptCatalog((script,)), real_device_factory=FailingDevice,
+    )
+
+    result = app.run_named_script(script.name, dry_run=False)
+    app.start_named_script(script.name, dry_run=False)
+    status = _wait_until_finished(app)
+
+    assert result.exit_code == status.exit_code == 1
+    assert result.finish_reason == status.finish_reason == "failed"
+    assert "input permission denied" in result.stderr
+    assert "input permission denied" in status.stderr
+
+
+def test_project_state_reader_reads_current_frame_each_time(tmp_path) -> None:
+    """状态读取每次识别当前画面，上一轮主页命中不会掩盖随后的消失。"""
+    _write_home_state_config(tmp_path)
+    matches = iter((ImageMatch(Rect(0, 0, 20, 20), 0.9), None))
+
+    class ChangingLocator:
+        def locate(self, template, *, region=None, min_confidence=1.0, logger=None):
+            """依次返回主页出现与消失的画面。"""
+            return next(matches)
+
+    locator = ChangingLocator()
+    reader = ProjectScreenStateReader(
+        project_root=tmp_path, real_image_locator_factory=lambda: locator,
+    )
+
+    assert reader.read_current_state() == "主页"
+    assert reader.read_current_state() == "未知"
+
+
+def test_project_state_reader_reloads_configuration_each_time(tmp_path) -> None:
+    """运行中的状态配置更名后，下一次读取立即采用新状态名称。"""
+    _write_home_state_config(tmp_path)
+
+    class MatchingLocator:
+        def locate(self, template, *, region=None, min_confidence=1.0, logger=None):
+            """始终命中相同模板，使状态名称只来自当前配置。"""
+            return ImageMatch(Rect(0, 0, 20, 20), 0.9)
+
+    reader = ProjectScreenStateReader(
+        project_root=tmp_path, real_image_locator_factory=MatchingLocator,
+    )
+    assert reader.read_current_state() == "主页"
+    config_path = tmp_path / "assets" / "screen-states.json"
+    config = json.loads(config_path.read_text())
+    config["groups"][0]["state"] = "新主页"
+    config_path.write_text(json.dumps(config))
+
+    assert reader.read_current_state() == "新主页"
+
+
+def test_project_state_reader_without_config_preserves_template_name_fallback(tmp_path) -> None:
+    """未建立状态配置的旧项目仍可按 assets 模板文件名识别状态。"""
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    (assets / "主页.png").write_bytes(b"fake")
+
+    class MatchingLocator:
+        def locate(self, template, *, region=None, min_confidence=1.0, logger=None):
+            """命中模板文件名对应的状态。"""
+            return ImageMatch(Rect(0, 0, 20, 20), 0.9)
+
+    reader = ProjectScreenStateReader(
+        project_root=tmp_path, real_image_locator_factory=MatchingLocator,
+    )
+
+    assert reader.read_current_state() == "主页"
+
+
+def test_local_control_live_invalid_state_config_finishes_with_failure(tmp_path) -> None:
+    """等待期间状态配置损坏时返回失败结果，不让后台会话永远停在运行中。"""
+    _write_home_state_config(tmp_path)
+    config_path = tmp_path / "assets" / "screen-states.json"
+    original_config = config_path.read_text()
+    script = Script("state-wait", ScreenWindow(), (WaitUntil(ScreenStateIs("主页"), 1, 0.1),))
+
+    class MutatingDevice:
+        def wait(self, duration_seconds):
+            """模拟用户在等待两次识别之间保存了非法配置。"""
+            config_path.write_text("{")
+
+    class MissingLocator:
+        def locate(self, template, *, region=None, min_confidence=1.0, logger=None):
+            """初次读取不命中，进入等待后再读取配置。"""
+            return None
+
+    app = LocalControlApplication(
+        catalog=ScriptCatalog((script,)), project_root=tmp_path,
+        real_device_factory=MutatingDevice, real_image_locator_factory=MissingLocator,
+    )
+
+    result = app.run_named_script(script.name, dry_run=False)
+    assert result.exit_code == 1
+    assert result.finish_reason == "failed"
+    assert "screen state configuration failed" in result.stderr
+
+    config_path.write_text(original_config)
+    app.start_named_script(script.name, dry_run=False)
+    status = _wait_until_finished(app)
+    assert status.exit_code == 1
+    assert status.finish_reason == "failed"
+    assert "screen state configuration failed" in status.stderr
+
+
+def test_project_state_reader_reports_missing_locator() -> None:
+    """未装配识图能力时，状态读取明确报告配置缺失而非伪造未知。"""
+    with pytest.raises(RuntimeError, match="image locator is required"):
+        ProjectScreenStateReader().read_current_state()

@@ -6,12 +6,13 @@
 
 from __future__ import annotations
 
-from game_automation.portable.application.local_control import LocalControlApplication, ScreenCapture
+from game_automation.portable.application.local_control import LocalControlApplication
 from game_automation.portable.application.ports import ApplicationActivator, ApplicationWindowController
 from game_automation.portable.application.project_assets import PROJECT_ROOT
 from game_automation.portable.application.project_scripts import load_project_script_catalog_result
 from game_automation.portable.application.script_run import ScriptRunResult, run_script
-from game_automation.portable.domain import Point, Script
+from game_automation.portable.application.screen_state_reader import ProjectScreenStateReader
+from game_automation.portable.domain import Script
 from game_automation.portable.engine.ports import (
     InputDevice,
     PixelColorReader,
@@ -73,8 +74,6 @@ def build_local_control_application() -> LocalControlApplication:
         real_color_reader_factory=build_real_color_reader,
         real_image_locator_factory=build_real_screen_image_locator,
         real_image_batch_locator_factory=build_real_screen_image_batch_locator,
-        screen_capture_factory=build_real_screen_capture,
-        screen_size_factory=read_real_screen_size,
     )
 
 
@@ -107,25 +106,9 @@ def build_real_screen_image_batch_locator() -> ScreenImageBatchLocator:
 
 
 def build_real_screen_state_reader() -> ScreenStateReader:
-    """创建复用本地控制状态探测能力的真实界面状态 reader。"""
-    return build_local_control_application().build_screen_state_reader()
-
-
-def build_real_screen_capture() -> ScreenCapture:
-    """延迟创建真实截屏 adapter，避免打开 UI 时触发截图权限。"""
-    from game_automation.platform.desktop.adapters import PyAutoGuiScreenCapture
-
-    return PyAutoGuiScreenCapture().capture
-
-
-def read_real_screen_size() -> Point:
-    """读取当前桌面点坐标尺寸，用于诊断图坐标换算。"""
-    try:
-        import pyautogui
-    except ModuleNotFoundError as exc:
-        raise RuntimeError(
-            "pyautogui is required for screen size. "
-            "Install dependencies with: pip install -e \".[dev]\""
-        ) from exc
-    size = pyautogui.size()
-    return Point(int(size.width), int(size.height))
+    """直接装配脚本状态读取能力，避免依赖 UI 会话或诊断用例。"""
+    return ProjectScreenStateReader(
+        project_root=PROJECT_ROOT,
+        real_image_locator_factory=build_real_screen_image_locator,
+        real_image_batch_locator_factory=build_real_screen_image_batch_locator,
+    )

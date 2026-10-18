@@ -8,12 +8,10 @@ from __future__ import annotations
 
 import argparse
 import io
-import json
 import sys
 from contextlib import redirect_stderr, redirect_stdout
 
 from game_automation.platform.local_desktop.composition import (
-    build_local_control_application,
     run_script_on_local_desktop,
 )
 from game_automation.portable.application.project_assets import (
@@ -60,9 +58,6 @@ def _run_script(args: argparse.Namespace) -> int:
     if args.dry_run_script_images and not args.dry_run:
         print("--dry-run-script-images requires --dry-run", file=sys.stderr)
         return 2
-    dry_run_screen_state_error = _validate_dry_run_screen_state_args(args)
-    if dry_run_screen_state_error != 0:
-        return dry_run_screen_state_error
     try:
         script = _load_cli_script_catalog_result().catalog.get(args.name)
     except ScriptNotFoundError as exc:
@@ -88,10 +83,7 @@ def _run_script(args: argparse.Namespace) -> int:
             print(f"script details configuration failed: {exc}", file=sys.stderr)
             return 2
 
-    dry_run_screen_state_result = _resolve_dry_run_screen_state(args)
-    if dry_run_screen_state_result[0] != 0:
-        return dry_run_screen_state_result[0]
-    dry_run_screen_state = dry_run_screen_state_result[1]
+    dry_run_screen_state = args.dry_run_screen_state
 
     result = run_script_on_local_desktop(
         script,
@@ -115,17 +107,11 @@ def _run_plan(args: argparse.Namespace) -> int:
     if args.dry_run_script_images and not args.dry_run:
         print("--dry-run-script-images requires --dry-run", file=sys.stderr)
         return 2
-    dry_run_screen_state_error = _validate_dry_run_screen_state_args(args)
-    if dry_run_screen_state_error != 0:
-        return dry_run_screen_state_error
 
     plan_items_result = _resolve_plan_items(args)
     if isinstance(plan_items_result, int):
         return plan_items_result
-    dry_run_screen_state_result = _resolve_dry_run_screen_state(args)
-    if dry_run_screen_state_result[0] != 0:
-        return dry_run_screen_state_result[0]
-    dry_run_screen_state = dry_run_screen_state_result[1]
+    dry_run_screen_state = args.dry_run_screen_state
 
     result = run_script_plan(
         plan_items_result,
@@ -236,17 +222,6 @@ def _print_run_plan_item_result(item: ScriptPlanItemResult) -> None:
         print(item.stderr, file=sys.stderr, end="")
 
 
-def _validate_dry_run_screen_state_args(args: argparse.Namespace) -> int:
-    """校验 CLI dry-run 状态来源参数是否自洽。"""
-    if args.dry_run_probed_screen_state and not args.dry_run:
-        print("--dry-run-probed-screen-state requires --dry-run", file=sys.stderr)
-        return 2
-    if args.dry_run_probed_screen_state and args.dry_run_screen_state is not None:
-        print("--dry-run-probed-screen-state conflicts with --dry-run-screen-state", file=sys.stderr)
-        return 2
-    return 0
-
-
 def _validate_target_application_args(args: argparse.Namespace) -> int:
     """拒绝要求无副作用的 dry-run 同时激活真实应用。"""
     if args.target_window_title is not None and args.target_app is None:
@@ -256,21 +231,6 @@ def _validate_target_application_args(args: argparse.Namespace) -> int:
         print("--target-app cannot be used with --dry-run", file=sys.stderr)
         return 2
     return 0
-
-
-def _resolve_dry_run_screen_state(args: argparse.Namespace) -> tuple[int, str]:
-    """解析 CLI dry-run 状态来源。"""
-    if not args.dry_run_probed_screen_state:
-        return (0, "未知" if args.dry_run_screen_state is None else args.dry_run_screen_state)
-    try:
-        result = build_local_control_application().probe_screen_state_once()
-    except ValueError as exc:
-        print(f"screen state probe configuration failed: {exc}", file=sys.stderr)
-        return (2, "未知")
-    except RuntimeError as exc:
-        print(f"screen state probe failed: {exc}", file=sys.stderr)
-        return (1, "未知")
-    return (0, result.current_state)
 
 
 def _run_details(args: argparse.Namespace) -> int:
@@ -291,76 +251,6 @@ def _run_details(args: argparse.Namespace) -> int:
         return 2
     _print_script_details(details)
     return details.exit_code
-
-
-def _run_probe_state(args: argparse.Namespace) -> int:
-    """执行一轮本机界面状态探测。"""
-    try:
-        result = build_local_control_application().probe_screen_state_once(
-            min_confidence=args.min_confidence,
-        )
-    except ValueError as exc:
-        print(f"screen state probe configuration failed: {exc}", file=sys.stderr)
-        return 2
-    except RuntimeError as exc:
-        print(f"screen state probe failed: {exc}", file=sys.stderr)
-        return 1
-    if args.json:
-        _print_screen_state_probe_json(result)
-    else:
-        _print_screen_state_probe_result(result)
-    return 0
-
-
-def _run_capture_screen() -> int:
-    """保存一张当前屏幕诊断截图。"""
-    return _print_control_result(build_local_control_application().capture_screen_screenshot())
-
-
-def _run_diagnose_screen(args: argparse.Namespace) -> int:
-    """执行一次屏幕截图和界面状态组合诊断。"""
-    return _print_control_result(
-        build_local_control_application().diagnose_screen_setup(
-            min_confidence=args.min_confidence,
-        )
-    )
-
-
-def _run_capture_region_diagnostics() -> int:
-    """保存一张带状态识别区域框的诊断截图。"""
-    return _print_control_result(build_local_control_application().capture_screen_region_diagnostics())
-
-
-def _run_capture_probe_diagnostics(args: argparse.Namespace) -> int:
-    """保存一张带状态探测候选框的诊断截图。"""
-    return _print_control_result(
-        build_local_control_application().capture_screen_probe_diagnostics(
-            min_confidence=args.min_confidence,
-        )
-    )
-
-
-def _run_capture_probe_crops(args: argparse.Namespace) -> int:
-    """保存一轮状态探测候选最佳位置裁剪图。"""
-    return _print_control_result(
-        build_local_control_application().capture_screen_probe_crops(
-            min_confidence=args.min_confidence,
-        )
-    )
-
-
-def _run_capture_region_crops() -> int:
-    """保存当前屏幕中每个状态识别命名区域的裁剪图。"""
-    return _print_control_result(build_local_control_application().capture_screen_region_crops())
-
-
-def _print_control_result(result) -> int:
-    """把 application 控制结果映射为 CLI stdout、stderr 和退出码。"""
-    if result.stdout:
-        print(result.stdout, end="")
-    if result.stderr:
-        print(result.stderr, file=sys.stderr, end="")
-    return result.exit_code
 
 
 def _load_cli_script_catalog_result() -> ProjectScriptCatalogResult:
@@ -442,101 +332,6 @@ def _readiness_status_label(status: str) -> str:
     return "[未知]"
 
 
-def _print_screen_state_probe_result(result) -> None:
-    """把单次界面状态探测结果打印成 CLI 文本。"""
-    print(f"当前状态：{result.current_state}")
-    print(f"总耗时：{result.elapsed_ms:.2f}ms")
-    print("候选：")
-    if not result.candidates:
-        print("- 无")
-        return
-    for candidate in result.candidates:
-        print(f"- {_screen_state_candidate_line(candidate)}")
-    if result.hints:
-        _print_section("提示", result.hints)
-
-
-def _print_screen_state_probe_json(result) -> None:
-    """把单次界面状态探测结果打印成 JSON。"""
-    print(json.dumps(_screen_state_probe_payload(result), ensure_ascii=False))
-
-
-def _screen_state_probe_payload(result) -> dict[str, object]:
-    """把状态探测结果转换成机器可读 payload。"""
-    return {
-        "current_state": result.current_state,
-        "known": result.known,
-        "elapsed_ms": result.elapsed_ms,
-        "hints": list(result.hints),
-        "candidates": [_screen_state_candidate_payload(candidate) for candidate in result.candidates],
-    }
-
-
-def _screen_state_candidate_payload(candidate) -> dict[str, object]:
-    """把单个状态候选转换成机器可读 payload。"""
-    return {
-        "name": candidate.candidate.name,
-        "search_name": candidate.candidate.search_name,
-        "status": _candidate_status_value(candidate),
-        "elapsed_ms": candidate.elapsed_ms,
-        "confidence": candidate.confidence,
-        "best_confidence": candidate.best_confidence,
-        "best_rect": _rect_payload(candidate.best_rect),
-    }
-
-
-def _screen_state_candidate_line(candidate) -> str:
-    """把单个状态候选结果转换成一行 CLI 文本。"""
-    name = candidate.candidate.name
-    if candidate.candidate.search_name:
-        name = f"{name} / {candidate.candidate.search_name}"
-    confidence = _format_optional_confidence(candidate.confidence)
-    best_confidence = _format_optional_confidence(candidate.best_confidence)
-    best_rect = _format_optional_rect(candidate.best_rect)
-    return (
-        f"{name}：{_candidate_status_label(candidate)}；"
-        f"耗时 {candidate.elapsed_ms:.2f}ms；置信度 {confidence}；"
-        f"最佳置信度 {best_confidence}；最佳位置 {best_rect}"
-    )
-
-
-def _rect_payload(rect) -> dict[str, int] | None:
-    """把可空矩形转换成 JSON payload。"""
-    if rect is None:
-        return None
-    return {"left": rect.left, "top": rect.top, "width": rect.width, "height": rect.height}
-
-
-def _format_optional_rect(rect) -> str:
-    """把可空矩形格式化为 CLI 文本。"""
-    if rect is None:
-        return "无"
-    return f"x={rect.left},y={rect.top},w={rect.width},h={rect.height}"
-
-
-def _format_optional_confidence(confidence: float | None) -> str:
-    """把可空置信度格式化为 CLI 文本。"""
-    return "无" if confidence is None else f"{confidence:.3f}"
-
-
-def _candidate_status_label(candidate) -> str:
-    """把候选命中状态转换成 CLI 展示文本。"""
-    if candidate.skipped:
-        return "跳过"
-    if candidate.found:
-        return "命中"
-    return "未命中"
-
-
-def _candidate_status_value(candidate) -> str:
-    """把候选命中状态转换成稳定枚举值。"""
-    if candidate.skipped:
-        return "skipped"
-    if candidate.found:
-        return "matched"
-    return "missed"
-
-
 def _run_recorder(args: argparse.Namespace) -> int:
     """启动坐标记录工具。"""
     from game_automation.platform.desktop.adapters import (
@@ -589,55 +384,6 @@ def main(argv: list[str] | None = None) -> int:
     details_parser = subparsers.add_parser("details", help="Show a named script's steps and dependencies.")
     details_parser.add_argument("name", help="Script name to inspect.")
 
-    probe_parser = subparsers.add_parser("probe-state", help="Probe the current screen state once.")
-    probe_parser.add_argument(
-        "--min-confidence",
-        type=float,
-        default=0.8,
-        help="Minimum image match confidence for this probe.",
-    )
-    probe_parser.add_argument("--json", action="store_true", help="Print machine-readable JSON.")
-
-    subparsers.add_parser("capture-screen", help="Capture the current screen for diagnostics.")
-    diagnose_parser = subparsers.add_parser(
-        "diagnose-screen",
-        help="Capture the screen and probe screen state for setup diagnostics.",
-    )
-    diagnose_parser.add_argument(
-        "--min-confidence",
-        type=float,
-        default=0.8,
-        help="Minimum image match confidence for the screen-state probe.",
-    )
-    subparsers.add_parser(
-        "capture-region-diagnostics",
-        help="Capture the current screen with configured screen-state regions drawn.",
-    )
-    probe_diagnostics_parser = subparsers.add_parser(
-        "capture-probe-diagnostics",
-        help="Capture the current screen with screen-state probe best matches drawn.",
-    )
-    probe_diagnostics_parser.add_argument(
-        "--min-confidence",
-        type=float,
-        default=0.8,
-        help="Minimum image match confidence for this probe.",
-    )
-    subparsers.add_parser(
-        "capture-region-crops",
-        help="Capture each configured screen-state region as a separate image.",
-    )
-    probe_crops_parser = subparsers.add_parser(
-        "capture-probe-crops",
-        help="Capture screen-state probe best-match crops.",
-    )
-    probe_crops_parser.add_argument(
-        "--min-confidence",
-        type=float,
-        default=0.8,
-        help="Minimum image match confidence for this probe.",
-    )
-
     run_parser = subparsers.add_parser("run", help="Run a named script.")
     run_parser.add_argument("name", help="Script name to run.")
     mode = run_parser.add_mutually_exclusive_group()
@@ -661,13 +407,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     run_parser.add_argument(
         "--dry-run-screen-state",
-        default=None,
+        default="未知",
         help="Fixed screen state used when dry-running screen-state conditions.",
-    )
-    run_parser.add_argument(
-        "--dry-run-probed-screen-state",
-        action="store_true",
-        help="Probe current screen state once and use it for dry-run screen-state conditions.",
     )
     run_parser.add_argument(
         "--target-app",
@@ -703,13 +444,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     run_plan_parser.add_argument(
         "--dry-run-screen-state",
-        default=None,
+        default="未知",
         help="Fixed screen state used when dry-running screen-state conditions.",
-    )
-    run_plan_parser.add_argument(
-        "--dry-run-probed-screen-state",
-        action="store_true",
-        help="Probe current screen state once and use it for dry-run screen-state conditions.",
     )
     run_plan_parser.add_argument(
         "--continue-on-error",
@@ -742,20 +478,6 @@ def main(argv: list[str] | None = None) -> int:
         return _run_list()
     elif args.command == "details":
         return _run_details(args)
-    elif args.command == "probe-state":
-        return _run_probe_state(args)
-    elif args.command == "capture-screen":
-        return _run_capture_screen()
-    elif args.command == "diagnose-screen":
-        return _run_diagnose_screen(args)
-    elif args.command == "capture-region-diagnostics":
-        return _run_capture_region_diagnostics()
-    elif args.command == "capture-probe-diagnostics":
-        return _run_capture_probe_diagnostics(args)
-    elif args.command == "capture-region-crops":
-        return _run_capture_region_crops()
-    elif args.command == "capture-probe-crops":
-        return _run_capture_probe_crops(args)
     elif args.command == "run":
         return _run_script(args)
     elif args.command == "run-plan":

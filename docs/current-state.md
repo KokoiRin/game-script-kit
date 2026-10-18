@@ -1,0 +1,171 @@
+# Star 当前实现快照
+
+快照日期：2026-10-18。本文供接手项目、讨论下一步或修改相关行为时快速定位。
+它描述当前代码与已获得的证据；架构约束见 [architecture.md](architecture.md)，运行方法见 [README](../README.md)。
+实现变化后更新对应条目；缺口解决后删除旧问题，保留必要的验证证据。
+
+## 使用方向与作者方式
+
+- 用户已明确：由用户描述任务和结果要求，Agent 负责观察目标画面、补齐流程、生成并维护脚本。
+- 当前产品目标是完成一款游戏的实际日常任务；已有脚本主要完成任务入口操作。
+- 手写 JSON 是现有存储和加载方式，并不意味着用户需要亲自学习全部 JSON 语法。
+- 当前控制台负责选脚本、看详情、模拟或真实运行、停止和查看结果。
+- 创建、编辑、保存脚本仍通过文件完成；没有控制台编辑器、项目选择器或脚本热加载。
+- 方向与阶段讨论见 [重启计划](restart-plan.md)；恢复能力尚在 [设计草案](design/local-recovery.md) 中讨论。
+- 本文记录的实现限制和债务不构成未来架构要求；已决定事项另见 [ADR 索引](adr/README.md)。
+
+## 从任务描述到执行
+
+以下是 Agent 接到任务后需要完成的工作；用户提供目标和必要业务选择，Agent 负责可以自行观察、采集与验证的部分。
+
+1. 明确起始画面、前置条件、动作、可观察的完成标志和停止条件。
+2. 准备 `assets/` 模板图片；固定点位可由坐标记录器辅助获取。
+3. Agent 创建 `scripts/*.json`，声明局部资源和步骤；使用状态条件时配置 `assets/screen-states.json`。
+4. `list` 列出可用脚本并报告坏文件；`details` 展示步骤与依赖摘要。
+5. 模拟运行检查一组固定假条件下的执行路径；随后在真实目标中核对操作和任务结果。
+6. 根据真实失败点修改脚本或资源，再分别报告自动化验证与真实任务验证。
+
+[项目脚本装配](../src/game_automation/portable/application/project_scripts.py) 合并内置 Python 脚本与顶层 `scripts/*.json`。
+JSON 文件按文件名排序加载，不递归读取子目录；脚本名来自 JSON 的 `name`，与文件名可以不同。
+单个文件格式错误、动作不支持或名称重复会被隔离，其他有效脚本继续可用。
+项目路径由 [project_assets.py](../src/game_automation/portable/application/project_assets.py) 定义，尚无任意项目目录入口。
+
+| 入口 | 可用控制 | 生命周期与边界 |
+| --- | --- | --- |
+| CLI `list/details/run` | 查列表、查依赖、单脚本运行；CLI 默认真实运行，需显式选择模拟 | 每次调用重新读取脚本 JSON |
+| CLI `run-plan` | 按顺序运行多个已有脚本，选择停止或继续策略 | 每项开始前重新激活并绑定所选窗口 |
+| CLI `recorder` | 打印鼠标屏幕坐标和颜色；终端保持焦点，按 `1` 记录、`Q` 结束 | 只打印结果，不创建 JSON 或模板 |
+| 本地 UI | 默认模拟；选择、运行、停止、日志、折叠详情与模拟设置 | 服务启动时保存 catalog；改脚本后需重启服务，刷新网页不足以更新 |
+
+UI 只允许一个后台脚本会话；运行中禁止切换和重复启动，服务端也拒绝第二次启动。
+断网时 UI 自动重试状态查询；启动 POST 没收到结果时不会自动重发，避免重复执行。
+现有 UI 没有接入 CLI 的目标应用/窗口参数，也没有暂停、单步执行或从中断点恢复。
+入口代码见 [CLI](../src/game_automation/platform/local_desktop/entrypoints/cli.py)、[HTTP](../src/game_automation/platform/local_desktop/entrypoints/local_ui.py) 和 [页面交互](../src/game_automation/platform/local_desktop/entrypoints/ui_static/control.js)。
+
+## JSON 与 Python 的能力边界
+
+[JSON loader](../src/game_automation/portable/application/config_script_loader.py) 只接受以下 7 类步骤；每个步骤对象只能有一个步骤类型。
+脚本要求非空 `name` 与非空 `steps`；`resources` 可省略。嵌套步骤仍使用同一语法。
+
+| 步骤 | 当前 JSON 能表达的内容 | 主要参数边界 |
+| --- | --- | --- |
+| `wait` | 固定等待秒数 | 数字且不小于 0 |
+| `click` | 点位别名、图片别名或搜索别名；点击后连续组合键 | `offset` 可选；图片点击中心；`then_hotkeys` 为键列表的列表 |
+| `hotkey` | 依次按下并逆序释放一组按键 | 非空、无重复；字母、数字及有限功能键集合 |
+| `repeat` | 有限或无限重复；按图片条件中断当前层 | `times` 为正整数或显式 `null`；可选 `break_if_image` |
+| `if_state` | 按界面状态选择分支 | 非空 `then`；可选非空 `else`；可指定置信度 |
+| `wait_until_state` | 等待指定状态 | `timeout` 与 `interval` 必填且大于 0；此语法不接受无限超时 |
+| `wait_until_image` | 等图片或命名搜索目标出现 | `timeout` 为正数或显式 `null`；`interval` 必填且大于 0 |
+
+`null` 必须显式填写；省略 `times` 或 `timeout` 会产生配置错误。
+`hotkey` 支持字母、数字及 `command/ctrl/alt/shift/enter/tab/esc/space`，不读取或设置剪贴板。
+`click.point` 是资源名称，当前 JSON 不接受内联 `{x,y}` 点击目标。
+`click.image` 可带内联 region；复用命名区域时通过 `resources.searches` 组合。
+单纯图片搜索未声明置信度时默认 1.0；命名搜索可继承资源阈值，步骤显式阈值优先。
+
+Python 领域模型还有 `Drag`、`ColorIs`、一般的 `If(ImageExists(...))`、图片 anchor 和 `AreaWindow`，JSON 没有对应全部语法。
+Python 内置脚本需要在 [catalog.py](../src/game_automation/portable/scripts_manager/catalog.py) 导入并注册，尚无用户 Python 文件自动发现。
+JSON 也没有变量、通用函数/脚本调用、文本输入、剪贴板赋值、通用重试或复合条件语法。
+看到 Python 示例或领域类型时，先确认 loader 分支，避免把它们当作 JSON 已支持能力。
+
+## 资源、状态与坐标
+
+| 概念 | 当前表达 | 生命周期或限制 |
+| --- | --- | --- |
+| 点位 | `resources.points` 的命名 `{x,y}` | JSON 加载时保存；点击时解析别名 |
+| 图片 | `resources.images` 的名称到文件路径 | 路径相对项目 `assets/`，允许子目录；loader 本身不检查文件存在 |
+| 区域 | `resources.regions` 的命名矩形 | 必须有正宽高；用于搜索范围 |
+| 搜索 | `resources.searches` 组合图片、区域、置信度 | 可在步骤中引用搜索名称 |
+| 状态 | `assets/screen-states.json` 的 groups/searches | 顺序代表优先级，首次命中停止；每次状态读取重新加载配置并识别当前画面 |
+| 共享资源 | 状态配置提供的 regions/searches | 每次描述或启动脚本时合并；脚本局部同名资源覆盖共享资源 |
+
+共享资源装配见 [script_resources.py](../src/game_automation/portable/application/script_resources.py)，实时状态读取见 [screen_state_reader.py](../src/game_automation/portable/application/screen_state_reader.py)。
+没有状态配置时，reader 保留按 `assets/` 顶层图片文件名推断状态名称的兼容路径。
+候选配置自己的阈值优先于状态读取参数；状态读取默认阈值为 0.8。
+
+- JSON 初始使用 `ScreenWindow`，默认点位和搜索区域是屏幕绝对坐标。
+- CLI 指定目标窗口后，脚本点位和显式搜索 region 按窗口左上角偏移；默认图片搜索限制在该窗口内。
+- 目标窗口在每个脚本开始时读取一次；单脚本中途移动窗口不会自动重新绑定。
+- 全局状态 reader 尚不接收窗口，状态区域仍使用屏幕绝对坐标，不随目标窗口移动。
+- UI 真实运行尚未选择目标窗口，使用默认屏幕坐标；模板、窗口位置和当前焦点仍由使用者准备。
+- adapter 处理截图像素与鼠标坐标的比例换算；模板没有自动缩放匹配，界面缩放/主题变化仍可能影响识别。
+
+坐标规则见 [windows.py](../src/game_automation/portable/domain/windows.py)，窗口准备见 [script_run.py](../src/game_automation/portable/application/script_run.py)，匹配实现见 [image_matching.py](../src/game_automation/platform/desktop/adapters/image_matching.py)。
+
+## 模拟运行能证明什么
+
+模拟设备只打印点击、组合键、拖拽和等待；不会读取真实桌面，也不会按等待秒数实际休眠。
+模拟颜色和状态分别是固定值；模拟图片集合里的模板始终返回固定假匹配，其余模板始终不命中。
+UI 自动把所选脚本解析出的图片依赖全部视为找到；CLI 通过显式图片或 `--dry-run-script-images` 选择。
+
+因此模拟运行只执行“固定假画面下的一条路径”，不能演练状态迁移：
+
+- `师门任务` 依次要求“主页 → 活动”，任一固定模拟状态都无法走完整条成功路径。
+- 图片全部模拟命中时，`break_if_image` 可能立即退出循环；这不代表真实流程分支正确。
+- 无限循环配合模拟等待仍会持续快速运行和产生日志，模拟不保证自动结束。
+- 模拟匹配位置来自假矩形，不能验证真实点击点、模板质量、目标应用响应或业务完成。
+
+实现见 [dry_run.py](../src/game_automation/portable/adapters/dry_run.py) 与 `script_run.py` 的 `_build_dry_run_*`。
+这组限制是当前替身的能力边界，未来可调整；流程预览和可迁移的模拟场景尚未实现。
+
+## 停止与完成语义
+
+| 情况 | 当前结果 | 后续行为 |
+| --- | --- | --- |
+| 按所选分支与循环规则正常结束 | `exit_code=0, completed` | 分支或循环中断可跳过静态步骤，业务结果需独立证据 |
+| 点击图片未找到 | `exit_code=0, stopped_unmet_condition` | 整个脚本停止，跳过后续步骤 |
+| `WaitUntil` 有限等待到期仍未满足 | `exit_code=0, stopped_unmet_condition` | 同样停止整个脚本；不是自动重试或继续 |
+| `break_if_image` 命中 | 退出对应层 Repeat，无独立脚本结束原因 | 循环后的步骤继续；外层中断仍能穿透嵌套循环 |
+| UI 用户停止被执行器观察到 | `exit_code=130, cancelled` | 当前脚本取消；已发生的输入不会回滚 |
+| 运行配置/初始化/动作失败 | 通常分别为 `configuration_failed/setup_failed/failed` | 返回错误原因；异常覆盖缺口见下节 |
+| Run Plan 默认遇到未完整执行项 | 保留首个未完成原因和首个非零退出码 | 停止后续脚本，即使该项退出码为 0 |
+| Run Plan 开启 `continue_on_error` | 当前实现对所有未完成项继续 | 取消也继续是已复现缺口，见下节 |
+
+取消是协作式检查：步骤边界、真正点击前、图片等待轮询、每组连续按键前会检查。
+当前设备 `wait` 使用阻塞休眠；正在进行的等待/平台调用结束前，停止请求不保证立即生效。
+`click.then_hotkeys` 之间检查用户取消，但不再次检查循环图片 guard。
+实现见 [runner.py](../src/game_automation/portable/engine/runner.py) 与 [run_plan.py](../src/game_automation/portable/application/run_plan.py)。
+相关行为测试见 [test_runner.py](../tests/test_runner.py)、[test_repeat_break_image.py](../tests/test_repeat_break_image.py)、[test_run_plan.py](../tests/test_run_plan.py) 和 [test_local_control.py](../tests/test_local_control.py)。
+
+## 现有任务素材做到哪里
+
+| 脚本 | 文件所表达的终点 | 尚未覆盖的业务结果 |
+| --- | --- | --- |
+| [师门任务](../scripts/master-task.json) | 主页 → 活动面板 → 定位并点击任务入口 | 接取后的任务过程、完成确认、领取结果 |
+| [秘境降妖](../scripts/secret-realm-task.json) | 同样推进到定位并点击任务入口 | 战斗/挑战过程及完成确认 |
+| [宝图任务](../scripts/treasure-map-task.json) | 点击任务入口后，等对话并点击确认 | 后续任务过程、交付与完成结果 |
+| [匿名聊天无限循环](../scripts/ssby-chat-loop.json) | 离开 → 重匹配 → 偏移点击输入区 → 粘贴与 Enter | 消息是否被接收、会话结果及稳定重复使用 |
+| [粘贴](../scripts/paste.json) | 等待后发送 Command+V | 目标输入框是否接收内容 |
+
+[视觉靶场](../src/star_visual_lab/server.py) 是独立开发验收目标，通过真值接口核对结果；它不证明真实游戏任务已完成。
+现有素材可作为后续任务起点；本快照没有新增真实游戏完成证据。
+
+## 已知缺口与证据等级
+
+下面是待处理现状，解决后更新或删除；不能把这些问题固化为预期行为。
+
+**已在 2026-10-18 前轮通过纯 fake 复现，未写成本轮新增回归测试：**
+
+- 未定义 `PointRef`：后台线程因 `UnknownPointNameError` 退出，但会话仍为 `running=True`，无法正确反映结束。
+  路径是 `TargetCatalog.resolve_point` → runner → `run_script` 的异常覆盖之外 → `_run_script_session` 未执行 `session.finish`。
+  定位：[point_aliases.py](../src/game_automation/portable/domain/point_aliases.py)、`script_run.py`、[local_control.py](../src/game_automation/portable/application/local_control.py)。
+- Run Plan 开启 `continue_on_error`：第一项返回 `cancelled` 后仍调用下一项。
+  `run_script_plan` 当前仅按 `incomplete and not continue_on_error` 决定是否结束，没有独立的取消边界。
+  该复现验证用例层结果编排，不是 CLI 真实 Ctrl+C 或桌面停止验证。
+
+**静态代码核查所得，尚未独立复现：**
+
+- 所有脚本在描述/运行前都加载全局状态共享资源；无关状态模板损坏或缺失可能阻断纯按键脚本。
+- `details` 的 readiness 主要检查图片和状态名称，未覆盖点位别名；缺失依赖也不改变详情的 `exit_code=0`。
+- JSON 局部图片路径仅拼接 assets；状态配置却严格限制路径位于 assets，路径约束不一致。
+- loader 对多余字段通常不报错，部分可选字段拼写错误可能被忽略；缺少统一严格校验入口。
+
+校验实现见 [script_dependencies.py](../src/game_automation/portable/application/script_dependencies.py)；当前测试覆盖并不消除上述遗漏。
+恢复/重试方向仍是讨论稿，见 [local-recovery.md](design/local-recovery.md)，本文不把草案能力写成已实现。
+
+## 验证记录
+
+- **2026-10-18 主分支整理前验证**：完整测试重新执行，`471 passed`；`git diff --check`、JavaScript 语法检查和 177 个本地文档链接/锚点检查通过。
+- **同日前轮浏览器证据**：确认控制台脚本选择、详情、图片/组合键模拟，以及条件未满足结果展示。
+- 浏览器和前轮纯 fake 复现没有在本次提交前重复执行；近期推进建议见 [重启计划](restart-plan.md)。
+- **真实游戏验证**：尚无本轮完整任务验收；模拟、测试和靶场结果均不替代真实游戏的完成证据。

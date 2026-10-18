@@ -1,1132 +1,265 @@
-    const tabButtons = document.querySelectorAll(".tab-button");
-    const tabPanels = document.querySelectorAll(".tab-panel");
-    const scriptSelect = document.querySelector("#script-select");
-    const scriptConfigErrors = document.querySelector("#script-config-errors");
-    const scriptDetails = document.querySelector("#script-details");
-    const dryRunCheckbox = document.querySelector("#dry-run-enabled");
-    const colorInput = document.querySelector("#dry-run-color");
-    const dryRunScreenStateInput = document.querySelector("#dry-run-screen-state");
-    const screenStateSuggestions = document.querySelector("#screen-state-suggestions");
-    const useProbedScreenStateButton = document.querySelector("#use-probed-screen-state");
-    const useScriptScreenStateButton = document.querySelector("#use-script-screen-state");
-    const statusEl = document.querySelector("#status");
-    const outputEl = document.querySelector("#output");
-    const runScriptButton = document.querySelector("#run-script");
-    const stopScriptButton = document.querySelector("#stop-script");
-    const runTestsButton = document.querySelector("#run-tests");
-    const imageAssetSelect = document.querySelector("#image-asset-select");
-    const imageAssetFolder = document.querySelector("#image-asset-folder");
-    const refreshImagesButton = document.querySelector("#refresh-images");
-    const clickImageButton = document.querySelector("#click-image");
-    const captureScreenButton = document.querySelector("#capture-screen");
-    const diagnoseScreenButton = document.querySelector("#diagnose-screen");
-    const captureRegionDiagnosticsButton = document.querySelector("#capture-region-diagnostics");
-    const captureProbeDiagnosticsButton = document.querySelector("#capture-probe-diagnostics");
-    const captureRegionCropsButton = document.querySelector("#capture-region-crops");
-    const captureProbeCropsButton = document.querySelector("#capture-probe-crops");
-    const imageConfidenceInput = document.querySelector("#image-confidence");
-    const debugPreview = document.querySelector("#debug-preview");
-    const screenshotRegionStage = document.querySelector("#screenshot-region-stage");
-    const debugScreenshot = document.querySelector("#debug-screenshot");
-    const regionSelectionBox = document.querySelector("#region-selection-box");
-    const selectedRegionOutput = document.querySelector("#selected-region-output");
-    const selectedRegionJson = document.querySelector("#selected-region-json");
-    const copySelectedRegionButton = document.querySelector("#copy-selected-region");
-    const previewRegionMatchButton = document.querySelector("#preview-region-match");
-    const regionMatchResult = document.querySelector("#region-match-result");
-    const screenStateConfidenceInput = document.querySelector("#screen-state-confidence");
-    const screenStateIntervalInput = document.querySelector("#screen-state-interval");
-    const screenStateConfigSummary = document.querySelector("#screen-state-config-summary");
-    const screenStateCurrent = document.querySelector("#screen-state-current");
-    const screenStateStats = document.querySelector("#screen-state-stats");
-    const screenStateHints = document.querySelector("#screen-state-hints");
-    const screenStateCandidates = document.querySelector("#screen-state-candidates");
-    const screenStateLog = document.querySelector("#screen-state-log");
-    const startScreenStateProbeButton = document.querySelector("#start-screen-state-probe");
-    const stopScreenStateProbeButton = document.querySelector("#stop-screen-state-probe");
-    let scriptRunPollTimer = null;
-    let activeScriptRun = false;
-    let screenStateProbePollTimer = null;
-    let activeScreenStateProbe = false;
-    let latestScreenState = "未知";
-    let currentScriptDetailsPayload = null;
-    let currentScreenStateConfigPayload = null;
-    let latestScreenStateCandidates = [];
-    let scriptStateDependencies = [];
-    let scriptImageDependencies = [];
-    let screenshotMetrics = null;
-    let selectedRegion = null;
-    let selectionDragStart = null;
+(() => {
+  "use strict";
+  const scriptSelect = document.querySelector("#script-select");
+  const runButton = document.querySelector("#run-script");
+  const stopButton = document.querySelector("#stop-script");
+  const dryRun = document.querySelector("#dry-run-enabled");
+  const colorInput = document.querySelector("#dry-run-color");
+  const stateInput = document.querySelector("#dry-run-screen-state");
+  const settings = document.querySelector("#simulation-settings");
+  const modeBadge = document.querySelector("#run-mode");
+  const modeDescription = document.querySelector("#mode-description");
+  const statusEl = document.querySelector("#status");
+  const outputEl = document.querySelector("#output");
+  const detailsEl = document.querySelector("#script-details");
+  const configErrors = document.querySelector("#script-config-errors");
+  const connectionEl = document.querySelector("#connection-status");
+  const connectionError = document.querySelector("#connection-error");
+  let activeRun = false;
+  let requestPending = false;
+  let connectionLost = true;
+  let scriptsLoaded = false;
+  let loadingDetails = false;
+  let currentDetails = null;
+  let detailsVersion = 0;
+  let activeMode = null;
+  let pollTimer = null;
+  let statusVersion = 0;
 
-    function setBusy(isBusy) {
-      runScriptButton.disabled = isBusy;
-      runTestsButton.disabled = isBusy;
-      refreshImagesButton.disabled = isBusy;
-      captureScreenButton.disabled = isBusy;
-      diagnoseScreenButton.disabled = isBusy;
-      captureRegionDiagnosticsButton.disabled = isBusy;
-      captureProbeDiagnosticsButton.disabled = isBusy;
-      captureRegionCropsButton.disabled = isBusy;
-      captureProbeCropsButton.disabled = isBusy;
-      clickImageButton.disabled = isBusy || !imageAssetSelect.value;
-      copySelectedRegionButton.disabled = selectedRegion === null;
-      previewRegionMatchButton.disabled = isBusy || selectedRegion === null || !imageAssetSelect.value;
-      useProbedScreenStateButton.disabled = isBusy;
-      useScriptScreenStateButton.disabled = isBusy;
-      stopScriptButton.disabled = !activeScriptRun;
+  async function request(path, body) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10000);
+    try {
+      const response = await fetch(path, {
+        method: body === undefined ? "GET" : "POST",
+        headers: body === undefined ? {} : {"Content-Type": "application/json"},
+        body: body === undefined ? undefined : JSON.stringify(body),
+        cache: "no-store",
+        signal: controller.signal,
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      return await response.json();
+    } finally {
+      clearTimeout(timeout);
     }
+  }
 
-    function setScreenStateBusy(isBusy) {
-      startScreenStateProbeButton.disabled = isBusy;
-      stopScreenStateProbeButton.disabled = !isBusy;
+  function syncControls() {
+    const locked = activeRun || requestPending || connectionLost;
+    scriptSelect.disabled = locked || !scriptsLoaded;
+    dryRun.disabled = locked;
+    colorInput.disabled = locked || !dryRun.checked;
+    stateInput.disabled = locked || !dryRun.checked;
+    runButton.disabled = locked || loadingDetails || !currentDetails || !scriptSelect.value;
+    stopButton.disabled = !activeRun || requestPending;
+    settings.hidden = !dryRun.checked;
+    const simulated = activeRun ? activeMode : dryRun.checked;
+    modeBadge.textContent = simulated === null ? "运行中" : simulated ? "模拟模式" : "真实模式";
+    modeBadge.dataset.real = String(simulated === false);
+    modeDescription.textContent = simulated === null
+      ? "已有脚本正在运行，可停止或等待任务结束。"
+      : simulated === false
+      ? "真实运行会控制当前桌面的鼠标和键盘，可随时停止。"
+      : "只输出计划动作；图片依赖在模拟中视为已找到。";
+  }
+
+  function showConnectionError(message) {
+    connectionLost = true;
+    connectionEl.textContent = "连接中断 · 自动重试";
+    connectionEl.dataset.connected = "false";
+    connectionError.textContent = message;
+    connectionError.hidden = false;
+    syncControls();
+  }
+
+  function renderStatus(result) {
+    activeRun = Boolean(result.running);
+    const started = (result.events || []).find(event => event.type === "run_started");
+    if (started && started.details && started.details.dry_run !== undefined) {
+      activeMode = started.details.dry_run === true || started.details.dry_run === "True";
     }
-
-    function setupTabs() {
-      for (const button of tabButtons) {
-        button.addEventListener("click", () => {
-          const targetId = button.dataset.tabTarget;
-          for (const candidate of tabButtons) {
-            candidate.classList.toggle("active", candidate === button);
-          }
-          for (const panel of tabPanels) {
-            panel.hidden = panel.id !== targetId;
-          }
-        });
-      }
+    const reasons = {
+      completed: "脚本执行完成",
+      stopped_unmet_condition: "条件未满足，已停止后续步骤",
+      cancelled: "已取消",
+      timed_out: "等待超时",
+      failed: "运行失败",
+      setup_failed: "运行环境不可用",
+      configuration_failed: "配置错误",
+      script_not_found: "脚本不存在",
+      idle: "脚本未运行",
+    };
+    if (activeRun) {
+      statusEl.textContent = activeMode === null ? "脚本运行中…" : activeMode ? "模拟运行中…" : "真实运行中…";
+    } else {
+      const reason = reasons[result.finish_reason] || result.finish_reason || "脚本未运行";
+      statusEl.textContent = result.exit_code == null ? reason : `${reason} · 退出码 ${result.exit_code}`;
     }
+    statusEl.dataset.result = activeRun ? "running" : result.finish_reason || "idle";
+    // 结构化步骤事件已由状态展示，日志区只保留动作和识别结果。
+    const logs = [(result.stdout || "").split("\n")
+      .filter(line => !line.startsWith("script event ")).join("\n")];
+    if (result.stderr) logs.push(`提示与错误：\n${result.stderr}`);
+    const output = logs.filter(Boolean).join("\n");
+    const nearBottom = outputEl.scrollHeight - outputEl.scrollTop - outputEl.clientHeight < 60;
+    outputEl.textContent = output || "还没有运行记录。";
+    if (nearBottom) outputEl.scrollTop = outputEl.scrollHeight;
+    syncControls();
+  }
 
-    function renderResult(prefix, result) {
-      statusEl.textContent = `${prefix}退出码：${result.exit_code}`;
-      outputEl.textContent = `${result.stdout || ""}${result.stderr || ""}`;
-      if (result.screenshot_url) {
-        renderDebugScreenshot(result);
-      }
+  function schedulePoll(delay = 1000) {
+    clearTimeout(pollTimer);
+    pollTimer = setTimeout(pollStatus, delay);
+  }
+
+  async function pollStatus() {
+    if (requestPending) {
+      schedulePoll();
+      return;
     }
-
-    function renderDebugScreenshot(result) {
-      screenshotMetrics = {
-        imageSize: result.image_size || null,
-        screenSize: result.screen_size || null,
-      };
-      resetRegionSelection();
-      debugScreenshot.src = result.screenshot_url;
-      debugPreview.style.display = "block";
+    const version = statusVersion;
+    try {
+      const result = await request("/api/script-run");
+      if (requestPending || version !== statusVersion) return;
+      connectionLost = false;
+      connectionEl.textContent = "本地服务已连接";
+      connectionEl.dataset.connected = "true";
+      connectionError.hidden = true;
+      renderStatus(result);
+      if (!scriptsLoaded) await loadScripts();
+      else if (!currentDetails && !loadingDetails && scriptSelect.value) await loadScriptDetails();
+    } catch (error) {
+      showConnectionError(`无法读取运行状态（${error.message}），正在自动重试。连接恢复前不会启动新脚本。`);
+    } finally {
+      schedulePoll(connectionLost ? 2000 : 1000);
     }
+  }
 
-    function resetRegionSelection() {
-      selectedRegion = null;
-      selectionDragStart = null;
-      regionSelectionBox.style.display = "none";
-      selectedRegionOutput.textContent = "截图坐标：未选择";
-      selectedRegionJson.textContent = "";
-      regionMatchResult.textContent = "匹配预览：未运行";
-      setBusy(activeScriptRun);
+  async function loadScripts() {
+    const result = await request("/api/scripts");
+    scriptSelect.replaceChildren();
+    for (const name of result.scripts || []) {
+      const option = document.createElement("option");
+      option.value = name;
+      option.textContent = name;
+      scriptSelect.append(option);
     }
-
-    function imagePixelSize() {
-      const naturalWidth = debugScreenshot.naturalWidth || 0;
-      const naturalHeight = debugScreenshot.naturalHeight || 0;
-      if (screenshotMetrics && screenshotMetrics.imageSize) {
-        return screenshotMetrics.imageSize;
-      }
-      return {x: naturalWidth, y: naturalHeight};
-    }
-
-    function screenCoordinateSize() {
-      const imageSize = imagePixelSize();
-      if (screenshotMetrics && screenshotMetrics.screenSize) {
-        return screenshotMetrics.screenSize;
-      }
-      return imageSize;
-    }
-
-    function clientPointToScreenPoint(event) {
-      const bounds = debugScreenshot.getBoundingClientRect();
-      const imageSize = imagePixelSize();
-      const screenSize = screenCoordinateSize();
-      if (bounds.width <= 0 || bounds.height <= 0 || imageSize.x <= 0 || imageSize.y <= 0) {
-        return null;
-      }
-      const displayX = Math.min(Math.max(event.clientX - bounds.left, 0), bounds.width);
-      const displayY = Math.min(Math.max(event.clientY - bounds.top, 0), bounds.height);
-      const pixelX = displayX / bounds.width * imageSize.x;
-      const pixelY = displayY / bounds.height * imageSize.y;
-      return {
-        x: Math.round(pixelX / imageSize.x * screenSize.x),
-        y: Math.round(pixelY / imageSize.y * screenSize.y),
-      };
-    }
-
-    function regionFromPoints(start, end) {
-      const left = Math.min(start.x, end.x);
-      const top = Math.min(start.y, end.y);
-      const right = Math.max(start.x, end.x);
-      const bottom = Math.max(start.y, end.y);
-      const width = Math.max(1, right - left);
-      const height = Math.max(1, bottom - top);
-      return {left, top, width, height};
-    }
-
-    function regionToDisplayBox(region) {
-      const bounds = debugScreenshot.getBoundingClientRect();
-      const screenSize = screenCoordinateSize();
-      if (screenSize.x <= 0 || screenSize.y <= 0 || bounds.width <= 0 || bounds.height <= 0) {
-        return null;
-      }
-      return {
-        left: region.left / screenSize.x * bounds.width,
-        top: region.top / screenSize.y * bounds.height,
-        width: region.width / screenSize.x * bounds.width,
-        height: region.height / screenSize.y * bounds.height,
-      };
-    }
-
-    function renderSelectedRegion(region) {
-      selectedRegion = region;
-      const coordinateLabel = screenshotMetrics && screenshotMetrics.screenSize ? "屏幕坐标" : "截图坐标";
-      selectedRegionOutput.textContent = (
-        `${coordinateLabel}：left=${region.left}, top=${region.top}, ` +
-        `width=${region.width}, height=${region.height}`
-      );
-      selectedRegionJson.textContent = JSON.stringify({region}, null, 2);
-      renderSelectionBox(region);
-      setBusy(activeScriptRun);
-    }
-
-    function renderSelectionBox(region) {
-      const box = regionToDisplayBox(region);
-      if (!box) {
-        regionSelectionBox.style.display = "none";
-        return;
-      }
-      regionSelectionBox.style.display = "block";
-      regionSelectionBox.style.left = `${box.left}px`;
-      regionSelectionBox.style.top = `${box.top}px`;
-      regionSelectionBox.style.width = `${box.width}px`;
-      regionSelectionBox.style.height = `${box.height}px`;
-    }
-
-    function updateSelectionFromPointer(event) {
-      if (!selectionDragStart) {
-        return;
-      }
-      const current = clientPointToScreenPoint(event);
-      if (!current) {
-        return;
-      }
-      renderSelectedRegion(regionFromPoints(selectionDragStart, current));
-    }
-
-    async function copySelectedRegion() {
-      if (!selectedRegion) {
-        return;
-      }
-      const text = selectedRegionJson.textContent;
-      if (navigator.clipboard) {
-        await navigator.clipboard.writeText(text);
-        regionMatchResult.textContent = "区域 JSON 已复制";
-      }
-    }
-
-    async function previewRegionMatch() {
-      if (!selectedRegion) {
-        regionMatchResult.textContent = "匹配预览：请先在截图上拖拽选择区域";
-        return;
-      }
-      setBusy(true);
-      regionMatchResult.textContent = "匹配预览：正在匹配...";
-      try {
-        const response = await fetch("/api/preview-image-match", {
-          method: "POST",
-          headers: {"Content-Type": "application/json"},
-          body: JSON.stringify({
-            asset: imageAssetSelect.value,
-            min_confidence: Number.parseFloat(imageConfidenceInput.value),
-            region: selectedRegion,
-          })
-        });
-        const result = await response.json();
-        renderRegionMatchResult(result);
-      } finally {
-        setBusy(activeScriptRun);
-      }
-    }
-
-    function renderRegionMatchResult(result) {
-      if (result.exit_code !== 0) {
-        regionMatchResult.textContent = `匹配预览：失败\n${result.stderr || "未知错误"}`;
-        return;
-      }
-      const status = result.found ? "命中" : "未命中";
-      const confidence = formatConfidence(result.confidence);
-      const rect = formatRect(result.rect);
-      const center = result.center ? `x=${result.center.x},y=${result.center.y}` : "无";
-      regionMatchResult.textContent = (
-        `匹配预览：${status}；置信度 ${confidence}；位置 ${rect}；中心 ${center}` +
-        (result.stdout ? `\n${result.stdout.trim()}` : "")
-      );
-    }
-
-    function renderScriptStatus(result) {
-      if (result.running) {
-        statusEl.textContent = "脚本运行中...";
-      } else if (result.exit_code === null || result.exit_code === undefined) {
-        statusEl.textContent = "脚本未运行";
-      } else {
-        const finishReason = scriptFinishReasonLabel(result.finish_reason);
-        statusEl.textContent = `脚本退出码：${result.exit_code}（${finishReason}）`;
-      }
-      outputEl.textContent = renderScriptRunLog(result);
-      outputEl.scrollTop = outputEl.scrollHeight;
-    }
-
-    function renderScriptRunLog(result) {
-      const lines = [];
-      const events = result.events || [];
-      for (const event of events) {
-        lines.push(renderScriptRunEvent(event));
-      }
-      if (events.length === 0) {
-        lines.push(...renderScriptTextLog(result.stdout || "", false));
-      }
-      lines.push(...renderScriptTextLog(result.stderr || "", true));
-      return lines.filter(Boolean).join("\n");
-    }
-
-    function renderScriptRunEvent(event) {
-      const details = event.details || {};
-      const path = event.path ? `步骤 ${event.path}` : "脚本";
-      const step = scriptStepLabel(event.step);
-      if (event.type === "run_started") {
-        const mode = details.dry_run === "True" ? "模拟运行" : "真实运行";
-        return `【运行】脚本开始：${details.script || "未知脚本"}，模式：${mode}`;
-      }
-      if (event.type === "run_finished") {
-        const reason = scriptFinishReasonLabel(event.status || details.finish_reason);
-        const exitCode = details.exit_code === undefined ? "未知" : details.exit_code;
-        return `【结束】脚本结束：${reason}，退出码：${exitCode}`;
-      }
-      if (event.type === "step_started") {
-        return "";
-      }
-      if (event.type === "step_succeeded") {
-        return "";
-      }
-      if (event.type === "step_failed") {
-        return `【错误】${path} ${step}失败：${details.error || "未知错误"}`;
-      }
-      if (event.type === "step_stopped") {
-        return "";
-      }
-      if (event.type === "repeat_interrupted") {
-        return `【跳过】${path} ${details.reason}`;
-      }
-      if (event.type === "repeat_iteration_started") {
-        return `【循环】${path} 第 ${details.iteration || "?"}/${details.total || "?"} 轮开始`;
-      }
-      if (event.type === "condition_evaluated") {
-        if (event.step === "WaitUntil") {
-          return "";
-        }
-        const result = details.result === "True" ? "命中" : "未命中";
-        const branch = details.branch ? `，分支：${details.branch === "then" ? "满足时" : "不满足时"}` : "";
-        return `【判断】${path} ${result}${branch}`;
-      }
-      if (event.type === "wait_until_satisfied") {
-        return `【等待】${path} 条件已满足，第 ${details.attempt || "?"} 次检查，用时 ${details.elapsed_seconds || "0"} 秒`;
-      }
-      if (event.type === "wait_until_timed_out") {
-        return `【等待】${path} 条件未满足，已停止后续步骤，用时 ${details.elapsed_seconds || "0"} 秒`;
-      }
-      if (event.type === "image_target_resolved") {
-        return `【图片】${path} 图片目标已定位：${details.template || "未知图片"}，点击点 ${details.point || "未知"}`;
-      }
-      if (event.type === "image_target_missing") {
-        return `【图片】${path} 未找到图片目标：${details.template || "未知图片"}，已停止后续步骤`;
-      }
-      if (event.type === "click_resolved") {
-        return "";
-      }
-      if (event.type === "click_performed") {
-        return `【点击】${path} 已点击：${details.point || "未知"}`;
-      }
-      if (event.type === "hotkey_performed") {
-        return `【组合键】${path} 已按下并释放：${details.keys || "未知"}`;
-      }
-      if (event.type === "drag_resolved") {
-        return `【拖拽】${path} 从 ${details.start || "未知"} 到 ${details.end || "未知"}，持续 ${details.duration || "0"} 秒`;
-      }
-      if (event.type === "wait_started") {
-        return `【等待】${path} 开始等待 ${details.duration || "0"} 秒`;
-      }
-      if (event.type === "wait_finished") {
-        return "";
-      }
-      return `【事件】${path} ${event.type || "未知事件"}`;
-    }
-
-    function scriptStepLabel(step) {
-      const labels = {
-        Click: "点击",
-        Drag: "拖拽",
-        Hotkey: "组合键",
-        Wait: "等待",
-        Repeat: "循环",
-        If: "条件分支",
-        WaitUntil: "等待条件",
-      };
-      return labels[step] || step || "脚本动作";
-    }
-
-    function renderScriptTextLog(text, isError) {
-      return text
-        .split("\n")
-        .map((line) => line.trim())
-        .filter((line) => line && !line.startsWith("script event "))
-        .map((line) => renderScriptTextLogLine(line, isError));
-    }
-
-    function renderScriptTextLogLine(line, isError) {
-      const imageMatch = parseKeyValueLogLine(line, "image match ");
-      if (imageMatch) {
-        const found = imageMatch.found === "True" ? "命中" : "未命中";
-        const confidence = imageMatch.confidence === "None" ? "无" : imageMatch.confidence;
-        return (
-          `【图片】匹配 ${imageMatch.template || "未知图片"}：${found}` +
-          `，置信度 ${confidence}` +
-          `，最低置信度 ${imageMatch.min_confidence || "未知"}` +
-          `，用时 ${imageMatch.elapsed_ms || "未知"}ms` +
-          `，区域 ${imageMatch.region || "全屏"}`
-        );
-      }
-
-      const screenStateCondition = parseKeyValueLogLine(line, "screen state condition ");
-      if (screenStateCondition) {
-        const matched = screenStateCondition.matched === "True" ? "命中" : "未命中";
-        return (
-          `【状态】判断界面状态：期望 ${screenStateCondition.expected || "未知"}` +
-          `，实际 ${screenStateCondition.actual || "未知"}` +
-          `，最低置信度 ${screenStateCondition.min_confidence || "未知"}` +
-          `，结果：${matched}`
-        );
-      }
-
-      if (line.startsWith("click ")) {
-        return `【点击】${line.slice("click ".length)}`;
-      }
-      if (line.startsWith("hotkey ")) {
-        return `【组合键】${line.slice("hotkey ".length)}`;
-      }
-      if (line.startsWith("wait ") && line.endsWith("s")) {
-        return `【等待】${line.slice("wait ".length)}`;
-      }
-      if (line === "script run cancelled") {
-        return "【结束】脚本已取消";
-      }
-      if (line.startsWith("script run timed out:")) {
-        return `【错误】脚本等待超时：${line.slice("script run timed out:".length).trim()}`;
-      }
-      if (line.startsWith("script run failed:")) {
-        return `【错误】脚本运行失败：${line.slice("script run failed:".length).trim()}`;
-      }
-      if (line.startsWith("script run setup failed:")) {
-        return `【错误】运行环境不可用：${line.slice("script run setup failed:".length).trim()}`;
-      }
-      if (line.startsWith("script run configuration failed:")) {
-        return `【错误】运行配置错误：${line.slice("script run configuration failed:".length).trim()}`;
-      }
-      return isError ? `【错误】${line}` : `【日志】${line}`;
-    }
-
-    function parseKeyValueLogLine(line, prefix) {
-      if (!line.startsWith(prefix)) {
-        return null;
-      }
-      const fields = {};
-      for (const part of line.slice(prefix.length).split(" ")) {
-        const separator = part.indexOf("=");
-        if (separator <= 0) {
-          continue;
-        }
-        fields[part.slice(0, separator)] = part.slice(separator + 1);
-      }
-      return fields;
-    }
-
-    function scriptFinishReasonLabel(reason) {
-      const labels = {
-        completed: "正常完成",
-        stopped_unmet_condition: "条件未满足，正常停止",
-        cancelled: "已取消",
-        timed_out: "等待超时",
-        failed: "运行失败",
-        setup_failed: "运行环境不可用",
-        configuration_failed: "配置错误",
-        script_not_found: "脚本不存在",
-        running: "运行中",
-        idle: "未运行",
-      };
-      return labels[reason] || reason || "未知";
-    }
-
-    function renderScreenStateStatus(result) {
-      const state = result.current_state || "未知";
-      latestScreenState = state;
-      if (result.running) {
-        screenStateCurrent.textContent = `当前状态：${state}（探测中）`;
-      } else if (result.exit_code === null || result.exit_code === undefined) {
-        screenStateCurrent.textContent = `当前状态：${state}`;
-      } else {
-        screenStateCurrent.textContent = `当前状态：${state}，退出码：${result.exit_code}`;
-      }
-      screenStateStats.textContent = renderScreenStateStats(result.stats);
-      screenStateHints.textContent = renderScreenStateHints(result.hints);
-      latestScreenStateCandidates = result.candidates || [];
-      screenStateCandidates.textContent = renderScreenStateCandidates(latestScreenStateCandidates);
-      screenStateLog.textContent = `${result.stdout || ""}${result.stderr || ""}`;
-      if (currentScreenStateConfigPayload) {
-        renderScreenStateConfigSummary(currentScreenStateConfigPayload);
-      }
-      if (currentScriptDetailsPayload) {
-        renderScriptDetails(currentScriptDetailsPayload);
-      }
-    }
-
-    function renderScreenStateStats(stats) {
-      const probeStats = stats || {};
-      const rounds = probeStats.rounds || 0;
-      const elapsed = probeStats.last_elapsed_ms === null || probeStats.last_elapsed_ms === undefined
-        ? "无"
-        : `${Number(probeStats.last_elapsed_ms).toFixed(2)}ms`;
-      const matched = renderCountMap(probeStats.matched_counts);
-      const skipped = renderCountMap(probeStats.skipped_counts);
-      return `轮数：${rounds}；最近耗时：${elapsed}；命中次数：${matched}；跳过次数：${skipped}`;
-    }
-
-    function renderScreenStateHints(hints) {
-      const items = hints || [];
-      if (items.length === 0) {
-        return "暂无诊断提示";
-      }
-      return `诊断提示：\n${items.map((hint) => `- ${hint}`).join("\n")}`;
-    }
-
-    function renderCountMap(counts) {
-      if (!counts || Object.keys(counts).length === 0) {
-        return "无";
-      }
-      return Object.entries(counts)
-        .map(([name, count]) => `${name} ${count}`)
-        .join("，");
-    }
-
-    function renderScreenStateCandidates(candidates) {
-      const items = candidates || [];
-      if (items.length === 0) {
-        return "暂无候选结果";
-      }
-      return items.map((candidate) => {
-        const elapsed = candidate.elapsed_ms === null || candidate.elapsed_ms === undefined
-          ? "无"
-          : `${Number(candidate.elapsed_ms).toFixed(2)}ms`;
-        const confidence = formatConfidence(candidate.confidence);
-        const bestConfidence = formatConfidence(candidate.best_confidence);
-        const bestRect = formatRect(candidate.best_rect);
-        return `${renderCandidateName(candidate)}：${renderCandidateStatus(candidate.status)}；耗时 ${elapsed}；置信度 ${confidence}；最佳置信度 ${bestConfidence}；最佳位置 ${bestRect}`;
-      }).join("\n");
-    }
-
-    function formatRect(rect) {
-      if (!rect) {
-        return "无";
-      }
-      return `x=${rect.left},y=${rect.top},w=${rect.width},h=${rect.height}`;
-    }
-
-    function formatConfidence(confidence) {
-      if (confidence === null || confidence === undefined) {
-        return "无";
-      }
-      return Number(confidence).toFixed(3);
-    }
-
-    function renderCandidateName(candidate) {
-      if (candidate.search_name) {
-        return `${candidate.name} / ${candidate.search_name}`;
-      }
-      return candidate.name;
-    }
-
-    function renderCandidateStatus(status) {
-      if (status === "matched") {
-        return "命中";
-      }
-      if (status === "skipped") {
-        return "跳过";
-      }
-      if (status === "missed") {
-        return "未命中";
-      }
-      return "未知";
-    }
-
-    function useProbedScreenState() {
-      if (!latestScreenState || latestScreenState === "未知") {
-        statusEl.textContent = "没有可用探测状态";
-        return;
-      }
-      dryRunScreenStateInput.value = latestScreenState;
-      statusEl.textContent = `已使用探测状态：${latestScreenState}`;
-    }
-
-    function useScriptScreenState() {
-      if (scriptStateDependencies.length === 0) {
-        statusEl.textContent = "当前脚本没有状态依赖";
-        return;
-      }
-      dryRunScreenStateInput.value = scriptStateDependencies[0];
-      statusEl.textContent = `已使用脚本状态：${scriptStateDependencies[0]}`;
-    }
-
-    function scheduleScriptRunPoll() {
-      if (scriptRunPollTimer) {
-        window.clearTimeout(scriptRunPollTimer);
-      }
-      scriptRunPollTimer = window.setTimeout(pollScriptRun, 500);
-    }
-
-    async function pollScriptRun() {
-      const response = await fetch("/api/script-run");
-      const result = await response.json();
-      renderScriptStatus(result);
-      activeScriptRun = Boolean(result.running);
-      setBusy(activeScriptRun);
-      if (activeScriptRun) {
-        scheduleScriptRunPoll();
-      }
-    }
-
-    function scheduleScreenStateProbePoll() {
-      if (screenStateProbePollTimer) {
-        window.clearTimeout(screenStateProbePollTimer);
-      }
-      screenStateProbePollTimer = window.setTimeout(pollScreenStateProbe, 500);
-    }
-
-    async function pollScreenStateProbe() {
-      const response = await fetch("/api/screen-state-probe");
-      const result = await response.json();
-      renderScreenStateStatus(result);
-      activeScreenStateProbe = Boolean(result.running);
-      setScreenStateBusy(activeScreenStateProbe);
-      if (activeScreenStateProbe) {
-        scheduleScreenStateProbePoll();
-      }
-    }
-
-    async function loadScripts() {
-      const response = await fetch("/api/scripts");
-      const payload = await response.json();
-      scriptSelect.innerHTML = "";
-      for (const name of payload.scripts) {
-        const option = document.createElement("option");
-        option.value = name;
-        option.textContent = name;
-        scriptSelect.appendChild(option);
-      }
-      renderScriptConfigErrors(payload.script_config_errors);
+    scriptsLoaded = true;
+    const errors = result.script_config_errors || [];
+    configErrors.textContent = errors.map(error => `${error.file}：${error.message}`).join("\n");
+    configErrors.hidden = errors.length === 0;
+    if (!scriptSelect.value) {
+      const option = document.createElement("option");
+      option.value = "";
+      option.textContent = "暂无可运行脚本";
+      scriptSelect.append(option);
+      detailsEl.textContent = "在项目 scripts/ 目录添加脚本后重启控制台。";
+    } else {
       await loadScriptDetails();
     }
+    syncControls();
+  }
 
-    function renderScriptConfigErrors(errors) {
-      const items = errors || [];
-      if (items.length === 0) {
-        scriptConfigErrors.textContent = "";
+  async function loadScriptDetails() {
+    const version = ++detailsVersion;
+    currentDetails = null;
+    loadingDetails = true;
+    syncControls();
+    try {
+      const result = await request(`/api/script-details?name=${encodeURIComponent(scriptSelect.value)}`);
+      if (version !== detailsVersion) return;
+      if (result.exit_code !== 0) {
+        detailsEl.textContent = result.stderr || "脚本详情不可用";
         return;
       }
-      const lines = ["脚本配置错误："];
-      for (const item of items) {
-        lines.push(`- ${item.message || item.file}`);
+      currentDetails = result;
+      const lines = [`脚本：${result.name}`, "", "步骤：", ...(result.steps || []).map(step => `  ${step}`)];
+      if ((result.readiness || []).length) {
+        lines.push("", "依赖检查：", ...result.readiness.map(item => `${item.status === "ok" ? "✓" : "!"} ${item.label}：${item.message}`));
       }
-      scriptConfigErrors.textContent = lines.join("\n");
+      detailsEl.textContent = lines.join("\n");
+    } catch (error) {
+      if (version === detailsVersion) detailsEl.textContent = `详情读取失败（${error.message}），正在自动重试。`;
+    } finally {
+      if (version === detailsVersion) {
+        loadingDetails = false;
+        syncControls();
+      }
     }
+  }
 
-    async function loadScriptDetails() {
-      if (!scriptSelect.value) {
-        scriptDetails.textContent = "";
-        currentScriptDetailsPayload = null;
-        scriptStateDependencies = [];
-        scriptImageDependencies = [];
-        return;
-      }
-      const response = await fetch(`/api/script-details?name=${encodeURIComponent(scriptSelect.value)}`);
-      const payload = await response.json();
-      renderScriptDetails(payload);
+  async function runScript() {
+    if (runButton.disabled || requestPending || activeRun) return;
+    if (dryRun.checked && !/^#[0-9A-Fa-f]{6}$/.test(colorInput.value)) {
+      settings.open = true;
+      colorInput.reportValidity();
+      colorInput.focus();
+      return;
     }
-
-    function renderScriptDetails(payload) {
-      currentScriptDetailsPayload = payload;
-      scriptStateDependencies = [];
-      scriptImageDependencies = [];
-      if (payload.exit_code !== 0) {
-        scriptDetails.textContent = payload.stderr || "脚本详情读取失败";
-        return;
-      }
-      scriptStateDependencies = payload.state_dependencies || [];
-      scriptImageDependencies = payload.image_dependencies || [];
-      const lines = [`脚本：${payload.name}`, "步骤："];
-      for (const step of payload.steps || []) {
-        lines.push(`- ${step}`);
-      }
-      lines.push("状态决策：");
-      if ((payload.state_decisions || []).length === 0) {
-        lines.push("- 没有状态决策");
-      } else {
-        for (const decision of payload.state_decisions || []) {
-          lines.push(`- 当状态为 ${decision.state}`);
-          lines.push(`  ${renderStateDecisionPreview(decision)}`);
-          lines.push(`  命中：${renderDecisionSteps(decision.matched_steps)}`);
-          lines.push(`  未命中：${renderDecisionSteps(decision.unmatched_steps)}`);
-        }
-      }
-      lines.push("状态等待：");
-      if ((payload.state_waits || []).length === 0) {
-        lines.push("- 没有状态等待");
-      } else {
-        for (const state of payload.state_waits || []) {
-          lines.push(`- 等待状态: ${state}`);
-          lines.push(`  ${renderStateWaitPreview(state)}`);
-        }
-      }
-      lines.push("点位依赖：");
-      if ((payload.point_dependencies || []).length === 0) {
-        lines.push("- 没有点位依赖");
-      } else {
-        for (const point of payload.point_dependencies || []) {
-          lines.push(`- ${point}`);
-        }
-      }
-      lines.push("依赖：");
-      if ((payload.dependencies || []).length === 0) {
-        lines.push("- 无");
-      } else {
-        for (const dependency of payload.dependencies || []) {
-          lines.push(`- ${dependency}`);
-        }
-      }
-      lines.push("依赖检查：");
-      if ((payload.readiness || []).length === 0) {
-        lines.push("- 无可检查依赖");
-      } else {
-        for (const item of payload.readiness || []) {
-          lines.push(`- ${renderReadinessStatus(item.status)} ${item.label}：${item.message}`);
-        }
-      }
-      scriptDetails.textContent = lines.join("\n");
+    requestPending = true;
+    statusVersion += 1;
+    activeMode = dryRun.checked;
+    clearTimeout(pollTimer);
+    syncControls();
+    statusEl.textContent = activeMode ? "正在启动模拟运行…" : "正在启动真实运行…";
+    try {
+      renderStatus(await request("/api/run-script", {
+        name: scriptSelect.value,
+        dry_run: dryRun.checked,
+        dry_run_color: colorInput.value,
+        dry_run_screen_state: stateInput.value || "未知",
+        dry_run_images: currentDetails.image_dependencies || [],
+      }));
+    } catch (error) {
+      // POST 可能已到达服务；只查询结果，避免重试造成重复执行。
+      activeRun = true;
+      showConnectionError(`运行请求未收到结果（${error.message}），正在重新确认状态。`);
+    } finally {
+      requestPending = false;
+      syncControls();
+      schedulePoll(100);
     }
+  }
 
-    function renderStateDecisionPreview(decision) {
-      if (!latestScreenState || latestScreenState === "未知") {
-        return "当前：未知";
-      }
-      if (latestScreenState === decision.state) {
-        return "当前：命中";
-      }
-      return "当前：未命中";
+  async function stopScript() {
+    if (stopButton.disabled || requestPending) return;
+    requestPending = true;
+    statusVersion += 1;
+    clearTimeout(pollTimer);
+    syncControls();
+    statusEl.textContent = "正在请求停止…";
+    try {
+      const result = await request("/api/stop-script", {});
+      renderStatus(result);
+      if (result.running) statusEl.textContent = "已请求停止，等待当前动作结束…";
+    } catch (error) {
+      showConnectionError(`停止请求未收到结果（${error.message}），正在重新确认状态。`);
+    } finally {
+      requestPending = false;
+      syncControls();
+      schedulePoll(100);
     }
+  }
 
-    function renderStateWaitPreview(state) {
-      if (!latestScreenState || latestScreenState === "未知") {
-        return "当前：未知";
-      }
-      if (latestScreenState === state) {
-        return "当前：已满足";
-      }
-      return "当前：未满足";
-    }
-
-    function renderDecisionSteps(steps) {
-      if (!steps || steps.length === 0) {
-        return "无";
-      }
-      return steps.join("；");
-    }
-
-    function renderReadinessStatus(status) {
-      if (status === "ok") {
-        return "[OK]";
-      }
-      if (status === "missing") {
-        return "[缺失]";
-      }
-      return "[未知]";
-    }
-
-    async function loadImageAssets() {
-      const response = await fetch("/api/image-assets");
-      const payload = await response.json();
-      imageAssetFolder.textContent = payload.asset_folder || "assets";
-      imageAssetSelect.innerHTML = "";
-      for (const name of payload.assets || []) {
-        const option = document.createElement("option");
-        option.value = name;
-        option.textContent = name;
-        imageAssetSelect.appendChild(option);
-      }
-      setBusy(false);
-    }
-
-    async function loadScreenStateNames() {
-      const response = await fetch("/api/screen-state-names");
-      const payload = await response.json();
-      screenStateSuggestions.innerHTML = "";
-      for (const state of payload.states || []) {
+  async function loadStateNames() {
+    try {
+      const result = await request("/api/screen-state-names");
+      const suggestions = document.querySelector("#screen-state-suggestions");
+      for (const state of result.states || []) {
         const option = document.createElement("option");
         option.value = state;
-        screenStateSuggestions.appendChild(option);
+        suggestions.append(option);
       }
+    } catch {
+      // 状态建议仅辅助填写，失败时仍可手动输入模拟状态。
     }
+  }
 
-    async function loadScreenStateConfigSummary() {
-      const response = await fetch("/api/screen-state-config");
-      const payload = await response.json();
-      currentScreenStateConfigPayload = payload;
-      renderScreenStateConfigSummary(payload);
-    }
-
-    function renderScreenStateConfigSummary(payload) {
-      if (payload.exit_code !== 0) {
-        screenStateConfigSummary.textContent = payload.stderr || "状态识别配置读取失败";
-        return;
-      }
-      const states = payload.states || [];
-      if (states.length === 0) {
-        screenStateConfigSummary.textContent = "未配置状态识别";
-        return;
-      }
-      const lines = ["状态识别配置："];
-      const candidateResults = buildCandidateResultIndex(latestScreenStateCandidates);
-      for (const state of states) {
-        lines.push(`- ${state.state}`);
-        for (const search of state.searches || []) {
-          const confidence = search.min_confidence === null || search.min_confidence === undefined
-            ? "默认"
-            : search.min_confidence;
-          lines.push(`  - ${search.name} / ${search.image} / ${search.region} / ${confidence}`);
-          lines.push(`    ${renderSearchProbeSummary(candidateResults, state.state, search.name)}`);
-        }
-      }
-      screenStateConfigSummary.textContent = lines.join("\n");
-    }
-
-    function buildCandidateResultIndex(candidates) {
-      const resultIndex = new Map();
-      for (const candidate of candidates || []) {
-        resultIndex.set(candidateResultKey(candidate.name, candidate.search_name), candidate);
-      }
-      return resultIndex;
-    }
-
-    function candidateResultKey(state, searchName) {
-      return `${state}\u0000${searchName || ""}`;
-    }
-
-    function renderSearchProbeSummary(candidateResults, state, searchName) {
-      const candidate = candidateResults.get(candidateResultKey(state, searchName));
-      if (!candidate) {
-        return "最近：暂无";
-      }
-      return (
-        `最近：${renderCandidateStatus(candidate.status)}；` +
-        `置信度 ${formatConfidence(candidate.confidence)}；` +
-        `最佳置信度 ${formatConfidence(candidate.best_confidence)}；` +
-        `最佳位置 ${formatRect(candidate.best_rect)}`
-      );
-    }
-
-    async function runScript() {
-      activeScriptRun = true;
-      setBusy(true);
-      statusEl.textContent = "正在运行脚本...";
-      outputEl.textContent = "";
-      try {
-        const response = await fetch("/api/run-script", {
-          method: "POST",
-          headers: {"Content-Type": "application/json"},
-          body: JSON.stringify({
-            name: scriptSelect.value,
-            dry_run: dryRunCheckbox.checked,
-            dry_run_color: colorInput.value,
-            dry_run_screen_state: dryRunScreenStateInput.value,
-            dry_run_images: scriptImageDependencies
-          })
-        });
-        const result = await response.json();
-        renderScriptStatus(result);
-        activeScriptRun = Boolean(result.running);
-        setBusy(activeScriptRun);
-        if (activeScriptRun) {
-          scheduleScriptRunPoll();
-        }
-      } finally {
-        setBusy(activeScriptRun);
-      }
-    }
-
-    async function stopScript() {
-      statusEl.textContent = "正在停止脚本...";
-      try {
-        const response = await fetch("/api/stop-script", {
-          method: "POST",
-          headers: {"Content-Type": "application/json"},
-          body: JSON.stringify({})
-        });
-        const result = await response.json();
-        renderScriptStatus(result);
-        activeScriptRun = Boolean(result.running);
-        setBusy(activeScriptRun);
-        if (activeScriptRun) {
-          scheduleScriptRunPoll();
-        }
-      } finally {
-        stopScriptButton.disabled = !activeScriptRun;
-      }
-    }
-
-    async function runTests() {
-      setBusy(true);
-      statusEl.textContent = "正在运行测试...";
-      outputEl.textContent = "";
-      try {
-        const response = await fetch("/api/run-tests", {
-          method: "POST",
-          headers: {"Content-Type": "application/json"},
-          body: JSON.stringify({task: "all"})
-        });
-        renderResult("测试", await response.json());
-      } finally {
-        setBusy(false);
-      }
-    }
-
-    async function clickImage() {
-      setBusy(true);
-      statusEl.textContent = "正在查找图片...";
-      outputEl.textContent = "";
-      try {
-        const response = await fetch("/api/click-image", {
-          method: "POST",
-          headers: {"Content-Type": "application/json"},
-          body: JSON.stringify({
-            asset: imageAssetSelect.value,
-            dry_run: dryRunCheckbox.checked,
-            min_confidence: Number.parseFloat(imageConfidenceInput.value)
-          })
-        });
-        renderResult("图片点击", await response.json());
-      } finally {
-        setBusy(false);
-      }
-    }
-
-    async function captureScreen() {
-      setBusy(true);
-      statusEl.textContent = "正在截屏...";
-      outputEl.textContent = "";
-      try {
-        const response = await fetch("/api/capture-screen", {
-          method: "POST",
-          headers: {"Content-Type": "application/json"},
-          body: JSON.stringify({})
-        });
-        renderResult("截屏诊断", await response.json());
-      } finally {
-        setBusy(false);
-      }
-    }
-
-    async function diagnoseScreen() {
-      setBusy(true);
-      statusEl.textContent = "正在诊断屏幕识别环境...";
-      outputEl.textContent = "";
-      try {
-        const response = await fetch("/api/diagnose-screen", {
-          method: "POST",
-          headers: {"Content-Type": "application/json"},
-          body: JSON.stringify({
-            min_confidence: Number.parseFloat(screenStateConfidenceInput.value)
-          })
-        });
-        renderResult("环境诊断", await response.json());
-      } finally {
-        setBusy(false);
-      }
-    }
-
-    async function captureRegionDiagnostics() {
-      setBusy(true);
-      statusEl.textContent = "正在生成区域诊断...";
-      outputEl.textContent = "";
-      try {
-        const response = await fetch("/api/capture-region-diagnostics", {
-          method: "POST",
-          headers: {"Content-Type": "application/json"},
-          body: JSON.stringify({})
-        });
-        renderResult("区域诊断", await response.json());
-      } finally {
-        setBusy(false);
-      }
-    }
-
-    async function captureProbeDiagnostics() {
-      setBusy(true);
-      statusEl.textContent = "正在生成探测诊断...";
-      outputEl.textContent = "";
-      try {
-        const response = await fetch("/api/capture-probe-diagnostics", {
-          method: "POST",
-          headers: {"Content-Type": "application/json"},
-          body: JSON.stringify({
-            min_confidence: Number.parseFloat(screenStateConfidenceInput.value)
-          })
-        });
-        renderResult("探测诊断", await response.json());
-      } finally {
-        setBusy(false);
-      }
-    }
-
-    async function captureRegionCrops() {
-      setBusy(true);
-      statusEl.textContent = "正在导出区域裁剪...";
-      outputEl.textContent = "";
-      try {
-        const response = await fetch("/api/capture-region-crops", {
-          method: "POST",
-          headers: {"Content-Type": "application/json"},
-          body: JSON.stringify({})
-        });
-        renderResult("区域裁剪", await response.json());
-      } finally {
-        setBusy(false);
-      }
-    }
-
-    async function captureProbeCrops() {
-      setBusy(true);
-      statusEl.textContent = "正在导出候选裁剪...";
-      outputEl.textContent = "";
-      try {
-        const response = await fetch("/api/capture-probe-crops", {
-          method: "POST",
-          headers: {"Content-Type": "application/json"},
-          body: JSON.stringify({
-            min_confidence: Number.parseFloat(screenStateConfidenceInput.value)
-          })
-        });
-        renderResult("候选裁剪", await response.json());
-      } finally {
-        setBusy(false);
-      }
-    }
-
-    async function startScreenStateProbe() {
-      activeScreenStateProbe = true;
-      setScreenStateBusy(true);
-      screenStateCurrent.textContent = "当前状态：启动中";
-      screenStateStats.textContent = "";
-      screenStateLog.textContent = "";
-      try {
-        const response = await fetch("/api/start-screen-state-probe", {
-          method: "POST",
-          headers: {"Content-Type": "application/json"},
-          body: JSON.stringify({
-            min_confidence: Number.parseFloat(screenStateConfidenceInput.value),
-            interval_seconds: Number.parseFloat(screenStateIntervalInput.value)
-          })
-        });
-        const result = await response.json();
-        renderScreenStateStatus(result);
-        activeScreenStateProbe = Boolean(result.running);
-        setScreenStateBusy(activeScreenStateProbe);
-        if (activeScreenStateProbe) {
-          scheduleScreenStateProbePoll();
-        }
-      } finally {
-        setScreenStateBusy(activeScreenStateProbe);
-      }
-    }
-
-    async function stopScreenStateProbe() {
-      screenStateCurrent.textContent = "当前状态：正在停止";
-      try {
-        const response = await fetch("/api/stop-screen-state-probe", {
-          method: "POST",
-          headers: {"Content-Type": "application/json"},
-          body: JSON.stringify({})
-        });
-        const result = await response.json();
-        renderScreenStateStatus(result);
-        activeScreenStateProbe = Boolean(result.running);
-        setScreenStateBusy(activeScreenStateProbe);
-        if (activeScreenStateProbe) {
-          scheduleScreenStateProbePoll();
-        }
-      } finally {
-        stopScreenStateProbeButton.disabled = !activeScreenStateProbe;
-      }
-    }
-
-    setupTabs();
-    runScriptButton.addEventListener("click", runScript);
-    stopScriptButton.addEventListener("click", stopScript);
-    scriptSelect.addEventListener("change", loadScriptDetails);
-    useProbedScreenStateButton.addEventListener("click", useProbedScreenState);
-    useScriptScreenStateButton.addEventListener("click", useScriptScreenState);
-    runTestsButton.addEventListener("click", runTests);
-    refreshImagesButton.addEventListener("click", loadImageAssets);
-    captureScreenButton.addEventListener("click", captureScreen);
-    diagnoseScreenButton.addEventListener("click", diagnoseScreen);
-    captureRegionDiagnosticsButton.addEventListener("click", captureRegionDiagnostics);
-    captureProbeDiagnosticsButton.addEventListener("click", captureProbeDiagnostics);
-    captureRegionCropsButton.addEventListener("click", captureRegionCrops);
-    captureProbeCropsButton.addEventListener("click", captureProbeCrops);
-    clickImageButton.addEventListener("click", clickImage);
-    copySelectedRegionButton.addEventListener("click", copySelectedRegion);
-    previewRegionMatchButton.addEventListener("click", previewRegionMatch);
-    imageAssetSelect.addEventListener("change", () => setBusy(activeScriptRun));
-    screenshotRegionStage.addEventListener("pointerdown", (event) => {
-      if (!debugScreenshot.src) {
-        return;
-      }
-      selectionDragStart = clientPointToScreenPoint(event);
-      if (!selectionDragStart) {
-        return;
-      }
-      screenshotRegionStage.setPointerCapture(event.pointerId);
-      renderSelectedRegion(regionFromPoints(selectionDragStart, selectionDragStart));
-      event.preventDefault();
-    });
-    screenshotRegionStage.addEventListener("pointermove", updateSelectionFromPointer);
-    screenshotRegionStage.addEventListener("pointerup", (event) => {
-      updateSelectionFromPointer(event);
-      selectionDragStart = null;
-      if (screenshotRegionStage.hasPointerCapture(event.pointerId)) {
-        screenshotRegionStage.releasePointerCapture(event.pointerId);
-      }
-    });
-    screenshotRegionStage.addEventListener("pointercancel", () => {
-      selectionDragStart = null;
-    });
-    debugScreenshot.addEventListener("load", () => {
-      if (selectedRegion) {
-        renderSelectionBox(selectedRegion);
-      }
-    });
-    startScreenStateProbeButton.addEventListener("click", startScreenStateProbe);
-    stopScreenStateProbeButton.addEventListener("click", stopScreenStateProbe);
-    loadScripts();
-    loadImageAssets();
-    loadScreenStateNames();
-    loadScreenStateConfigSummary();
+  runButton.addEventListener("click", runScript);
+  stopButton.addEventListener("click", stopScript);
+  scriptSelect.addEventListener("change", loadScriptDetails);
+  dryRun.addEventListener("change", syncControls);
+  syncControls();
+  loadStateNames();
+  pollStatus();
+})();

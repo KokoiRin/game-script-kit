@@ -9,101 +9,44 @@
 <body>
   <main>
     <header>
-      <h1>Star 控制台</h1>
-      <button class="secondary" id="run-tests" type="button">运行测试</button>
+      <div class="brand"><span class="brand-mark" aria-hidden="true">✦</span><span>STAR</span></div>
+      <span class="connection" id="connection-status" role="status">正在连接</span>
     </header>
-    <nav class="tabs" aria-label="控制台功能">
-      <button class="tab-button active" id="script-control-tab" type="button" data-tab-target="script-control-panel">脚本控制</button>
-      <button class="tab-button" id="screen-state-tab" type="button" data-tab-target="screen-state-panel">界面探测</button>
-    </nav>
-    <section class="tab-panel" id="script-control-panel">
-      <section class="toolbar">
-        <label>
-          脚本
-          <select id="script-select"></select>
-        </label>
-        <label class="checkbox-label">
-          <input id="dry-run-enabled" type="checkbox" checked>
-          模拟运行
-        </label>
-        <label>
-          模拟颜色
-          <input id="dry-run-color" value="#000000" pattern="#[0-9A-Fa-f]{6}">
-        </label>
-        <label>
-          模拟状态
-          <input id="dry-run-screen-state" value="未知" list="screen-state-suggestions">
-          <datalist id="screen-state-suggestions"></datalist>
-        </label>
-        <button class="secondary" id="use-probed-screen-state" type="button">使用探测状态</button>
-        <button class="secondary" id="use-script-screen-state" type="button">使用脚本状态</button>
-        <button id="run-script" type="button">运行脚本</button>
+    <section class="intro">
+      <p class="eyebrow">本地脚本控制台</p>
+      <h1>选好脚本，开始运行。</h1>
+      <p class="subtitle">查看步骤，先模拟一次，再交给 Star 执行。</p>
+    </section>
+    <section class="control-card" aria-label="脚本控制">
+      <div class="control-heading"><span>运行脚本</span><span class="mode-badge" id="run-mode">模拟模式</span></div>
+      <div class="toolbar">
+        <label class="script-field" for="script-select">脚本<select id="script-select" disabled><option value="">正在读取脚本…</option></select></label>
+        <button id="run-script" type="button" disabled>运行脚本 <span aria-hidden="true">↗</span></button>
         <button class="secondary" id="stop-script" type="button" disabled>停止</button>
-      </section>
-      <section class="output">
-        <div class="status" id="status"></div>
-        <pre id="output"></pre>
-        <div class="debug-preview" id="debug-preview">
-          <div class="screenshot-region-stage" id="screenshot-region-stage">
-            <img id="debug-screenshot" alt="最新截屏诊断图">
-            <div class="region-selection-box" id="region-selection-box"></div>
-          </div>
+      </div>
+      <div class="mode-row">
+        <label class="checkbox-label"><input id="dry-run-enabled" type="checkbox" checked disabled>模拟运行</label>
+        <p id="mode-description">只输出计划动作；图片依赖在模拟中视为已找到。</p>
+      </div>
+      <details class="simulation-settings" id="simulation-settings">
+        <summary>模拟设置</summary>
+        <div class="settings-grid">
+          <label for="dry-run-color">模拟颜色<input id="dry-run-color" value="#000000" pattern="#[0-9A-Fa-f]{6}" maxlength="7" required spellcheck="false"></label>
+          <label for="dry-run-screen-state">模拟状态<input id="dry-run-screen-state" value="未知" list="screen-state-suggestions"><datalist id="screen-state-suggestions"></datalist></label>
         </div>
-        <section class="region-selector-panel" id="region-selector-panel">
-          <div class="region-summary" id="selected-region-output">截图坐标：未选择</div>
-          <pre class="region-json" id="selected-region-json"></pre>
-          <div class="region-actions">
-            <button class="secondary" id="copy-selected-region" type="button" disabled>复制区域</button>
-            <button class="secondary" id="preview-region-match" type="button" disabled>区域匹配预览</button>
-          </div>
-          <div class="region-match-result" id="region-match-result">匹配预览：未运行</div>
-        </section>
-      </section>
-      <section class="script-details-panel">
-        <pre id="script-config-errors"></pre>
-        <pre id="script-details"></pre>
-      </section>
-      <section class="image-toolbar">
-        <label>
-          目标图片 <span id="image-asset-folder">assets</span>/
-          <select id="image-asset-select"></select>
-        </label>
-        <label>
-          最低置信度
-          <input id="image-confidence" type="number" min="0.01" max="1" step="0.01" value="0.8">
-        </label>
-        <button class="secondary" id="refresh-images" type="button">刷新图片</button>
-        <button class="secondary" id="capture-screen" type="button">截屏诊断</button>
-        <button class="secondary" id="diagnose-screen" type="button">环境诊断</button>
-        <button class="secondary" id="capture-region-diagnostics" type="button">区域诊断</button>
-        <button class="secondary" id="capture-probe-diagnostics" type="button">探测诊断</button>
-        <button class="secondary" id="capture-region-crops" type="button">区域裁剪</button>
-        <button class="secondary" id="capture-probe-crops" type="button">候选裁剪</button>
-        <button id="click-image" type="button">查找并点击图片</button>
-      </section>
+      </details>
+      <p class="notice" id="script-config-errors" role="alert" hidden></p>
     </section>
-    <section class="tab-panel" id="screen-state-panel" hidden>
-      <section class="screen-state-toolbar">
-        <label>
-          最低置信度
-          <input id="screen-state-confidence" type="number" min="0.01" max="1" step="0.01" value="0.8">
-        </label>
-        <label>
-          间隔秒数
-          <input id="screen-state-interval" type="number" min="0" step="0.1" value="1">
-        </label>
-        <button id="start-screen-state-probe" type="button">启动探测</button>
-        <button class="secondary" id="stop-screen-state-probe" type="button" disabled>停止探测</button>
-      </section>
-      <section class="screen-state-config-summary" id="screen-state-config-summary"></section>
-      <section class="output">
-        <div class="status" id="screen-state-current">当前状态：未知</div>
-        <div class="screen-state-stats" id="screen-state-stats"></div>
-        <div class="screen-state-hints" id="screen-state-hints">暂无诊断提示</div>
-        <div class="screen-state-candidates" id="screen-state-candidates">暂无候选结果</div>
-        <pre id="screen-state-log"></pre>
-      </section>
+    <section class="output-panel" aria-label="运行结果">
+      <div class="output-heading"><h2>运行记录</h2><span class="run-status" id="status" role="status">正在同步运行状态…</span></div>
+      <p class="notice" id="connection-error" role="alert" hidden></p>
+      <pre id="output" tabindex="0" aria-label="脚本输出">还没有运行记录。</pre>
     </section>
+    <details class="script-details-panel">
+      <summary>脚本步骤与依赖</summary>
+      <pre id="script-details">正在读取脚本详情…</pre>
+    </details>
+    <footer>Star · 桌面自动化，从一个可靠的脚本开始。</footer>
   </main>
   <script src="/static/control.js"></script>
 </body>
