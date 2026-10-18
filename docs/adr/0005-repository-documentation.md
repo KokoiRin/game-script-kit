@@ -41,12 +41,12 @@ OpenSpec 退出开发流程后，历史提案曾继续留在工作区。当前�
 
 ## 历史查询
 
-删除前的历史锚点为 `c2c10137ce850a913d0cc4760689c15cc5bb4444`，其中包含旧目录的 470 个已提交文件。查询示例：
+删除前的历史锚点为 `bf865a720029c67a26a3b83ca4d45b3a6101329c`，其中包含旧目录的 470 个已提交文件。查询示例：
 
 ```bash
 git log --all --oneline -- openspec/
-git show c2c1013:openspec/README.md
-git ls-tree -r --name-only c2c1013 -- openspec/
+git show bf865a7:openspec/README.md
+git ls-tree -r --name-only bf865a7 -- openspec/
 ```
 
 读取具体旧文件时，把 `git show` 中冒号后的路径换成所需文件即可。旧目录的退休说明和配置也保存在该提交中。
