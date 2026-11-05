@@ -16,6 +16,7 @@ from game_automation.portable.adapters.dry_run import (
     DryRunScreenStateReader,
 )
 from game_automation.portable.application.ports import ApplicationActivator, ApplicationWindowController
+from game_automation.portable.application.script_dependencies import validate_script_resource_references
 from game_automation.portable.domain import AreaWindow, Color, ImageMatch, ImageTemplate, Rect, Script
 from game_automation.portable.engine.ports import (
     CancellationToken,
@@ -71,6 +72,7 @@ def run_script(
             details={"script": script.name, "dry_run": str(dry_run)},
         )
     try:
+        validate_script_resource_references(script)
         prepared_script = _prepare_target_environment(
             script,
             dry_run=dry_run,
@@ -93,7 +95,7 @@ def run_script(
             logger=logger,
             emit_step_events=emit_step_events,
         )
-    except ValueError as exc:
+    except (LookupError, ValueError) as exc:
         _emit_run_lifecycle_event(
             logger,
             "run_finished",
@@ -106,7 +108,7 @@ def run_script(
             error_message=f"script run configuration failed: {exc}",
             finish_reason="configuration_failed",
         )
-    except RuntimeError as exc:
+    except Exception as exc:
         _emit_run_lifecycle_event(
             logger,
             "run_finished",
@@ -148,7 +150,7 @@ def run_script(
             error_message=f"script run timed out: {exc}",
             finish_reason="timed_out",
         )
-    except RuntimeError as exc:
+    except Exception as exc:
         _emit_run_lifecycle_event(
             logger,
             "run_finished",
@@ -259,8 +261,11 @@ def _build_runner(
             emit_step_events=emit_step_events,
         )
 
+    device = _build_real_device(real_device_factory)
+    if cancellation_token is not None:
+        device = _CancellableInputDevice(device, cancellation_token)
     return ScriptRunner(
-        device=_build_real_device(real_device_factory),
+        device=device,
         color_reader=_build_real_color_reader(
             needs_color_reader=requirements.needs_color_reader,
             real_color_reader_factory=real_color_reader_factory,
@@ -277,6 +282,39 @@ def _build_runner(
         logger=logger,
         emit_step_events=emit_step_events,
     )
+
+
+@dataclass(frozen=True, slots=True)
+class _CancellableInputDevice:
+    """维持设备原子输入契约，并将真实等待拆成可取消的短片段。"""
+
+    device: InputDevice
+    cancellation: CancellationToken
+
+    def click(self, target) -> None:
+        """保持点击操作由真实设备一次完成。"""
+        self.device.click(target)
+
+    def hotkey(self, keys) -> None:
+        """保持组合键及失败释放逻辑在真实设备内完成。"""
+        self.device.hotkey(keys)
+
+    def drag_to(self, start, end, duration_seconds=0.0) -> None:
+        """保持拖拽操作由真实设备一次完成。"""
+        self.device.drag_to(start, end, duration_seconds)
+
+    def wait(self, duration_seconds: float) -> None:
+        """每至多 50 毫秒检查取消，避免退出被固定长等待阻塞。"""
+        if duration_seconds == 0:
+            self.device.wait(0)
+            return
+        remaining = duration_seconds
+        while remaining > 1e-9:
+            if self.cancellation.is_cancelled():
+                raise ScriptCancelledError("script run cancelled")
+            interval = min(remaining, 0.05)
+            self.device.wait(interval)
+            remaining -= interval
 
 
 def _emit_run_lifecycle_event(

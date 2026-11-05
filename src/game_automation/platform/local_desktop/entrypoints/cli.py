@@ -35,8 +35,7 @@ from game_automation.portable.application.run_plan import (
     run_script_plan,
 )
 from game_automation.portable.application.script_resources import (
-    load_shared_script_resources,
-    script_with_shared_resources,
+    prepare_script_resources,
 )
 from game_automation.portable.scripts_manager import DEFAULT_SCRIPT_CATALOG
 from game_automation.portable.scripts_manager.catalog import ScriptCatalog, ScriptNotFoundError
@@ -72,7 +71,7 @@ def _run_script(args: argparse.Namespace) -> int:
         print(f"script configuration failed: {exc}", file=sys.stderr)
         return 2
     try:
-        script = script_with_shared_resources(script, load_shared_script_resources(args.project_root))
+        script = prepare_script_resources(script, args.project_root)
     except (LookupError, ValueError) as exc:
         print(f"script resource configuration failed: {exc}", file=sys.stderr)
         return 2
@@ -152,16 +151,10 @@ def _resolve_plan_items(args: argparse.Namespace) -> tuple[ScriptPlanItem, ...] 
             print(f"script configuration failed: {exc}", file=sys.stderr)
             return 2
         scripts.append((script_name, script))
-    try:
-        shared_resources = load_shared_script_resources(args.project_root)
-    except (LookupError, ValueError) as exc:
-        print(f"script resource configuration failed: {exc}", file=sys.stderr)
-        return 2
-
     items: list[ScriptPlanItem] = []
     for script_name, script in scripts:
         try:
-            script = script_with_shared_resources(script, shared_resources)
+            script = prepare_script_resources(script, args.project_root)
         except (LookupError, ValueError) as exc:
             print(f"script resource configuration failed: {exc}", file=sys.stderr)
             return 2
@@ -257,7 +250,7 @@ def _run_details(args: argparse.Namespace) -> int:
         print(f"script configuration failed: {exc}", file=sys.stderr)
         return 2
     try:
-        script = script_with_shared_resources(script, load_shared_script_resources(args.project_root))
+        script = prepare_script_resources(script, args.project_root)
         details = _describe_script(script, args.project_root)
     except (LookupError, ValueError) as exc:
         print(f"script details configuration failed: {exc}", file=sys.stderr)
@@ -321,8 +314,9 @@ def _configured_screen_state_names(project_root: Path) -> tuple[str, ...] | None
 
 def _print_script_details(details: ScriptDetailsResult) -> None:
     """把脚本详情结果打印成稳定的 CLI 文本。"""
-    if details.exit_code != 0:
+    if details.stderr:
         print(details.stderr, file=sys.stderr, end="")
+    if not details.steps:
         return
     print(f"脚本：{details.name}")
     _print_section("步骤", details.steps)
@@ -391,16 +385,22 @@ def _run_recorder(args: argparse.Namespace) -> int:
 
 
 def _run_ui(args: argparse.Namespace) -> int:
-    """启动本地控制 UI。"""
-    from game_automation.platform.local_desktop.entrypoints.local_ui import serve_local_control_ui
+    """启动 macOS 原生桌面壳，未指定工作区时由原生选择器选择。"""
+    from game_automation.platform.local_desktop.entrypoints.desktop_app import launch_desktop
 
-    return serve_local_control_ui(
-        host=args.host,
-        port=args.port,
-        open_browser=not args.no_open,
-        project_root=args.project_root,
-        include_builtin_scripts=args.workspace is None,
-    )
+    try:
+        return launch_desktop(workspace=args.project_root if args.workspace is not None else None)
+    except (OSError, RuntimeError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
+
+def _run_prepare(args: argparse.Namespace) -> int:
+    """在原生桌面壳中打开素材准备，任务素材使用显式工作区。"""
+    if args.workspace is None:
+        print("prepare requires --workspace PATH before the command", file=sys.stderr)
+        return 2
+    return _run_ui(args)
 
 
 def _resolve_workspace(workspace: str | None) -> Path:
@@ -511,10 +511,9 @@ def main(argv: list[str] | None = None) -> int:
     recorder_parser.add_argument("--display-interval", type=float, default=1.0, help="Seconds between coordinate prints.")
     recorder_parser.add_argument("--poll-interval", type=float, default=0.05, help="Seconds between keyboard polls.")
 
-    ui_parser = subparsers.add_parser("ui", help="Start the local control UI.")
-    ui_parser.add_argument("--host", default="127.0.0.1", help="Host address for the local UI server.")
-    ui_parser.add_argument("--port", type=int, default=8765, help="Port for the local UI server.")
-    ui_parser.add_argument("--no-open", action="store_true", help="Do not open a browser window after starting.")
+    subparsers.add_parser("ui", help="Start the macOS native desktop application.")
+
+    subparsers.add_parser("prepare", help="Open material preparation in the macOS native application.")
 
     args = parser.parse_args(argv)
     try:
@@ -535,6 +534,8 @@ def main(argv: list[str] | None = None) -> int:
         return _run_recorder(args)
     elif args.command == "ui":
         return _run_ui(args)
+    elif args.command == "prepare":
+        return _run_prepare(args)
     return 1
 
 

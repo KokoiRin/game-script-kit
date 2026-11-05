@@ -16,6 +16,7 @@ from game_automation.portable.domain import (
     ImageTarget,
     ImageTemplate,
     NamedImageSearch,
+    NamedPoint,
     Point,
     PointRef,
     Rect,
@@ -52,6 +53,50 @@ def test_file_hotkey_runs_in_order_in_dry_run(monkeypatch, tmp_path, capsys) -> 
     assert capsys.readouterr().out.splitlines() == [
         "wait 0.2s", "hotkey command+v", "hotkey command+v",
     ]
+
+
+@pytest.mark.parametrize("command", [
+    ["details", "paste"],
+    ["run", "paste", "--dry-run"],
+    ["run-plan", "paste", "paste", "--dry-run"],
+])
+def test_cli_hotkey_ignores_unrelated_missing_state_image(tmp_path, capsys, command) -> None:
+    """CLI 详情、单脚本与计划均不应因无关状态模板缺失而阻断组合键脚本。"""
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts" / "paste.json").write_text(json.dumps({
+        "name": "paste", "steps": [{"hotkey": ["command", "v"]}],
+    }))
+    (tmp_path / "assets").mkdir()
+    (tmp_path / "assets" / "screen-states.json").write_text(json.dumps({
+        "groups": [{"state": "unrelated", "searches": [{"image": "missing.png"}]}],
+    }))
+
+    assert main(["--workspace", str(tmp_path), *command]) == 0
+    captured = capsys.readouterr()
+    assert captured.err == ""
+    assert "command+v" in captured.out
+
+
+@pytest.mark.parametrize("command", [
+    ["details", "invalid"],
+    ["run", "invalid", "--dry-run"],
+    ["run-plan", "invalid", "--dry-run"],
+])
+def test_cli_reports_missing_point_without_executing_steps(tmp_path, capsys, command) -> None:
+    """CLI 应明确报告未定义点位；详情保留检查信息，执行则不能发送前序动作。"""
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts" / "invalid.json").write_text(json.dumps({
+        "name": "invalid", "steps": [{"wait": 0}, {"click": {"point": "missing"}}],
+    }))
+
+    assert main(["--workspace", str(tmp_path), *command]) == 2
+    captured = capsys.readouterr()
+    assert "missing" in captured.err
+    if command[0] == "details":
+        assert "[缺失] 点位: missing" in captured.out
+        assert 'Click PointRef("missing")' in captured.out
+    else:
+        assert "wait 0.0s" not in captured.out
 
 
 def test_star_cli_lists_available_scripts(capsys) -> None:
@@ -451,6 +496,7 @@ def test_star_cli_details_shows_point_dependencies(monkeypatch, capsys) -> None:
         name="point-dependency-cli",
         window=ScreenWindow(),
         steps=(Click(PointRef("头像")), Click(PointRef("头像")), Click(Point(100, 200))),
+        resources=TargetCatalog(points=(NamedPoint("头像", Point(10, 20)),)),
     )
     monkeypatch.setattr(cli, "DEFAULT_SCRIPT_CATALOG", ScriptCatalog((script,)))
 
@@ -776,12 +822,15 @@ def test_star_cli_run_injects_color_reader_for_conditional_script(monkeypatch, c
 def test_star_cli_run_reports_color_reader_setup_error(monkeypatch, capsys) -> None:
     """验证真实运行条件分支脚本时取色 adapter setup 失败会被报告。"""
     import game_automation.platform.desktop.adapters as desktop
+    from game_automation.platform.local_desktop import composition
+    from tests.support.fake_device import FakeInputDevice
 
     class FailingPixelColorReader:
         def __init__(self) -> None:
             """模拟取色 adapter 初始化失败。"""
             raise RuntimeError("screen color unavailable")
 
+    monkeypatch.setattr(composition, "build_real_input_device", FakeInputDevice)
     monkeypatch.setattr(desktop, "PyAutoGuiPixelColorReader", FailingPixelColorReader)
     monkeypatch.setitem(__import__("sys").modules, "game_automation.platform.desktop.adapters", desktop)
 
@@ -1026,51 +1075,36 @@ def test_star_cli_reports_unknown_script(capsys) -> None:
     assert "unknown script: missing" in captured.err
 
 
-def test_star_cli_ui_starts_local_control_without_opening_browser(monkeypatch, capsys) -> None:
-    """验证 ui 子命令会把 host/port/no-open 参数传给本地 UI 入口。"""
-    import game_automation.platform.local_desktop.entrypoints.local_ui as local_ui
+def test_star_cli_ui_starts_native_desktop(monkeypatch, capsys) -> None:
+    """验证 ui 启动原生桌面，工作区可由原生选择器选择。"""
+    from game_automation.platform.local_desktop.entrypoints import desktop_app
 
     calls = []
 
-    def fake_serve_local_control_ui(*, host, port, open_browser, project_root, include_builtin_scripts):
-        """记录 UI 启动使用的参数与工作区。"""
-        calls.append(
-            {
-                "host": host,
-                "port": port,
-                "open_browser": open_browser,
-                "project_root": project_root,
-                "include_builtin_scripts": include_builtin_scripts,
-            }
-        )
+    def fake_launch(**kwargs):
+        """记录原生桌面启动参数。"""
+        calls.append(kwargs)
         return 0
 
-    monkeypatch.setattr(local_ui, "serve_local_control_ui", fake_serve_local_control_ui)
+    monkeypatch.setattr(desktop_app, "launch_desktop", fake_launch)
 
-    assert main(["ui", "--host", "127.0.0.1", "--port", "8765", "--no-open"]) == 0
+    assert main(["ui"]) == 0
 
     captured = capsys.readouterr()
     assert captured.err == ""
-    assert calls == [
-        {
-            "host": "127.0.0.1",
-            "port": 8765,
-            "open_browser": False,
-            "project_root": cli.PROJECT_ROOT,
-            "include_builtin_scripts": True,
-        }
-    ]
+    assert calls == [{"workspace": None}]
 
 
-def test_star_cli_ui_help_does_not_start_local_control(capsys) -> None:
-    """验证 ui help 只展示参数，不启动本地服务。"""
+def test_star_cli_ui_help_does_not_start_desktop(capsys) -> None:
+    """验证 ui help 只展示原生入口，不启动应用。"""
     try:
         main(["ui", "--help"])
     except SystemExit as exc:
         assert exc.code == 0
 
     captured = capsys.readouterr()
-    assert "--no-open" in captured.out
+    assert "usage: star ui" in captured.out
+    assert "--port" not in captured.out
     assert "Star control UI:" not in captured.out
 
 
@@ -1285,7 +1319,7 @@ def test_star_cli_workspace_cannot_resolve_builtin_scripts(tmp_path, capsys, com
 
 @pytest.mark.parametrize("command", [
     ["list"], ["details", "demo"], ["run", "demo"],
-    ["run-plan", "demo"], ["ui", "--no-open"],
+    ["run-plan", "demo"], ["ui"],
 ])
 @pytest.mark.parametrize("kind", ["missing", "file"])
 def test_star_cli_invalid_workspace_fails_before_loading_or_desktop(tmp_path, monkeypatch, capsys, command, kind) -> None:
@@ -1298,10 +1332,10 @@ def test_star_cli_invalid_workspace_fails_before_loading_or_desktop(tmp_path, mo
         """阻止路径校验完成前进入任何加载或运行入口。"""
         raise AssertionError("invalid workspace must be rejected first")
 
-    import game_automation.platform.local_desktop.entrypoints.local_ui as local_ui
+    from game_automation.platform.local_desktop.entrypoints import desktop_app
     monkeypatch.setattr(cli, "load_project_script_catalog_result", reject_side_effect)
     monkeypatch.setattr(cli, "run_script_on_local_desktop", reject_side_effect)
-    monkeypatch.setattr(local_ui, "serve_local_control_ui", reject_side_effect)
+    monkeypatch.setattr(desktop_app, "launch_desktop", reject_side_effect)
 
     assert main(["--workspace", str(workspace), *command]) == 2
 
@@ -1312,9 +1346,9 @@ def test_star_cli_invalid_workspace_fails_before_loading_or_desktop(tmp_path, mo
         assert not workspace.exists()
 
 
-def test_star_cli_workspace_ui_expands_home_and_disables_builtin_scripts(monkeypatch) -> None:
-    """UI 收到展开后的绝对工作区，并禁止混入内置脚本。"""
-    import game_automation.platform.local_desktop.entrypoints.local_ui as local_ui
+def test_star_cli_workspace_ui_expands_home(monkeypatch) -> None:
+    """原生桌面收到展开后的绝对任务工作区。"""
+    from game_automation.platform.local_desktop.entrypoints import desktop_app
     calls = []
 
     def fake_serve(**kwargs):
@@ -1322,14 +1356,11 @@ def test_star_cli_workspace_ui_expands_home_and_disables_builtin_scripts(monkeyp
         calls.append(kwargs)
         return 0
 
-    monkeypatch.setattr(local_ui, "serve_local_control_ui", fake_serve)
+    monkeypatch.setattr(desktop_app, "launch_desktop", fake_serve)
 
-    assert main(["--workspace", "~", "ui", "--port", "8989", "--no-open"]) == 0
+    assert main(["--workspace", "~", "ui"]) == 0
 
-    assert calls == [{
-        "host": "127.0.0.1", "port": 8989, "open_browser": False,
-        "project_root": Path.home().resolve(), "include_builtin_scripts": False,
-    }]
+    assert calls == [{"workspace": Path.home().resolve()}]
 
 
 @pytest.mark.parametrize("command", [["run", "workspace-task"], ["run-plan", "workspace-task", "workspace-next"]])

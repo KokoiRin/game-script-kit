@@ -14,6 +14,11 @@ from types import ModuleType
 
 from PIL import Image
 
+from game_automation.platform.desktop.adapters.screen_capture import (
+    CapturedScreen,
+    capture_screen as _capture_screen,
+    crop_captured_screen as _crop_captured_screen,
+)
 from game_automation.portable.domain import ImageBatchMatchResult, ImageMatch, ImageSearchRequest, ImageTemplate, Rect
 from game_automation.portable.engine.ports import RunLogger, ScreenImageLocator
 
@@ -214,15 +219,6 @@ class PyAutoGuiScreenImageLocator(ScreenImageLocator):
 
 
 @dataclass(frozen=True, slots=True)
-class CapturedScreen:
-    image: Image.Image
-    origin_left_pixels: int
-    origin_top_pixels: int
-    pixels_per_point_x: float
-    pixels_per_point_y: float
-
-
-@dataclass(frozen=True, slots=True)
 class LoadedTemplateImage:
     image: Image.Image
     array: object
@@ -262,68 +258,6 @@ def _load_cv_modules() -> tuple[ModuleType, ModuleType]:
             "and numpy. Install dependencies with: pip install -e ."
         ) from exc
     return cv2, numpy
-
-
-def _capture_screen(backend: object, *, region: Rect | None) -> CapturedScreen:
-    """截取屏幕并按鼠标坐标系区域裁剪。"""
-    screenshot = backend.screenshot().convert("RGB")
-    pixels_per_point_x, pixels_per_point_y = _calculate_pixels_per_point(
-        backend,
-        screenshot,
-    )
-    if region is None:
-        return CapturedScreen(
-            image=screenshot,
-            origin_left_pixels=0,
-            origin_top_pixels=0,
-            pixels_per_point_x=pixels_per_point_x,
-            pixels_per_point_y=pixels_per_point_y,
-        )
-
-    left = round(region.left * pixels_per_point_x)
-    top = round(region.top * pixels_per_point_y)
-    right = round((region.left + region.width) * pixels_per_point_x)
-    bottom = round((region.top + region.height) * pixels_per_point_y)
-    return CapturedScreen(
-        image=screenshot.crop((left, top, right, bottom)),
-        origin_left_pixels=left,
-        origin_top_pixels=top,
-        pixels_per_point_x=pixels_per_point_x,
-        pixels_per_point_y=pixels_per_point_y,
-    )
-
-
-def _crop_captured_screen(screenshot: CapturedScreen, *, region: Rect) -> CapturedScreen:
-    """在已截取的全屏图上按鼠标坐标系区域裁剪搜索图。"""
-    left = round(region.left * screenshot.pixels_per_point_x)
-    top = round(region.top * screenshot.pixels_per_point_y)
-    right = round((region.left + region.width) * screenshot.pixels_per_point_x)
-    bottom = round((region.top + region.height) * screenshot.pixels_per_point_y)
-    return CapturedScreen(
-        image=screenshot.image.crop((left, top, right, bottom)),
-        origin_left_pixels=left,
-        origin_top_pixels=top,
-        pixels_per_point_x=screenshot.pixels_per_point_x,
-        pixels_per_point_y=screenshot.pixels_per_point_y,
-    )
-
-
-def _calculate_pixels_per_point(backend: object, screenshot: Image.Image) -> tuple[float, float]:
-    """计算截图像素到鼠标坐标点的缩放比例。"""
-    pointer_width, pointer_height = _read_pointer_size(backend)
-    if pointer_width <= 0 or pointer_height <= 0:
-        raise RuntimeError("screen pointer size must be positive")
-    return screenshot.width / pointer_width, screenshot.height / pointer_height
-
-
-def _read_pointer_size(backend: object) -> tuple[int, int]:
-    """读取 pyautogui 鼠标坐标系尺寸。"""
-    size = backend.size()
-    try:
-        return int(size.width), int(size.height)
-    except AttributeError:
-        width, height = size
-        return int(width), int(height)
 
 
 def _load_template_image(template: ImageTemplate, numpy: ModuleType) -> LoadedTemplateImage:

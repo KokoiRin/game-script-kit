@@ -3,6 +3,8 @@
 这些测试直接覆盖 portable run_script 的 interface，真实平台 adapter 通过工厂注入。
 """
 
+import pytest
+
 from game_automation.portable.application.script_run import run_script
 from game_automation.portable.application.ports import FocusedApplicationWindow
 from game_automation.portable.domain import (
@@ -13,11 +15,16 @@ from game_automation.portable.domain import (
     ImageMatch,
     ImageTemplate,
     ImageTarget,
+    ImageRef,
+    ImageSearchSpec,
+    PointRef,
+    RegionRef,
     Point,
     Rect,
     ScreenWindow,
     ScreenStateIs,
     Script,
+    SearchRef,
     Wait,
     WaitUntil,
 )
@@ -29,6 +36,35 @@ from game_automation.portable.scripts_manager import (
 
 
 IMAGE_TEMPLATE_PATH = "assets/start.png"
+
+
+@pytest.mark.parametrize("target", [
+    PointRef("missing"),
+    PointRef("missing").offset(x=10),
+    ImageTarget(ImageRef("missing")),
+    ImageTarget(SearchRef("missing")),
+    ImageTarget(ImageSearchSpec(ImageTemplate("fake.png"), region=RegionRef("missing"))),
+])
+@pytest.mark.parametrize("dry_run", [False, True])
+def test_run_rejects_missing_references_before_side_effects(target, dry_run) -> None:
+    """未定义的资源引用必须在初始化桌面或发送任何动作前报告。"""
+    def unexpected_factory():
+        """配置无效时不允许激活应用或初始化设备。"""
+        raise AssertionError("desktop touched before validation")
+
+    logger = FakeRunLogger()
+    script = Script("invalid", ScreenWindow(), (Hotkey(("command", "v")), Click(target)))
+
+    result = run_script(
+        script, dry_run=dry_run, target_application="TextEdit",
+        real_device_factory=unexpected_factory,
+        real_application_activator_factory=unexpected_factory,
+        logger=logger, emit_step_events=True,
+    )
+
+    assert (result.exit_code, result.finish_reason) == (2, "configuration_failed")
+    assert "unknown" in result.error_message
+    assert [event.event_type for event in logger.events] == ["run_started", "run_finished"]
 
 
 class FakeRunLogger:

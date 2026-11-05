@@ -76,6 +76,13 @@ def run_script_plan(
             stderr=result.stderr,
         )
         item_results.append(item_result)
+        # 取消是整轮停止请求，优先于普通失败后的继续与聚合策略。
+        if result.finish_reason == "cancelled":
+            return ScriptPlanResult(
+                exit_code=130,
+                finish_reason="cancelled",
+                items=tuple(item_results),
+            )
         incomplete = result.exit_code != 0 or result.finish_reason != "completed"
         if incomplete and first_incomplete_reason == "completed":
             first_incomplete_reason = (

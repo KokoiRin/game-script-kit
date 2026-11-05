@@ -63,8 +63,9 @@ def describe_script_details(
         supported_image_suffixes=supported_image_suffixes,
         state_names=state_names,
     )
+    missing = tuple(label for label, status, _ in dependency_details.readiness if status == "missing")
     return ScriptDetailsResult(
-        exit_code=0,
+        exit_code=2 if missing else 0,
         name=script.name,
         steps=_describe_steps(script.steps),
         dependencies=dependency_details.dependencies,
@@ -74,6 +75,7 @@ def describe_script_details(
         state_decisions=_describe_state_decisions(script.steps),
         image_dependencies=dependency_details.image_dependencies,
         readiness=dependency_details.readiness,
+        stderr=f"脚本依赖缺失：{'、'.join(missing)}\n" if missing else "",
     )
 
 

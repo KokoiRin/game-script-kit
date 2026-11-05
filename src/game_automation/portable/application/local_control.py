@@ -8,9 +8,10 @@ from __future__ import annotations
 
 import io
 import threading
+from collections import deque
 from contextlib import redirect_stderr, redirect_stdout
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from game_automation.portable.application.config_script_loader import ScriptConfigError
@@ -27,8 +28,7 @@ from game_automation.portable.application.screen_state_reader import (
 )
 from game_automation.portable.application.script_details import ScriptDetailsResult, describe_script_details
 from game_automation.portable.application.script_resources import (
-    load_shared_script_resources,
-    script_with_shared_resources,
+    prepare_script_resources,
 )
 from game_automation.portable.application.script_run import (
     InputDeviceFactory,
@@ -88,7 +88,7 @@ class _ThreadSafeRunLog:
         self._lock = threading.Lock()
         self._stdout = io.StringIO()
         self._stderr = io.StringIO()
-        self._events: list[ScriptRunEvent] = []
+        self._events: deque[ScriptRunEvent] = deque(maxlen=2048)
 
     def stdout_writer(self):
         """返回用于重定向 stdout 的 writer。"""
@@ -105,18 +105,31 @@ class _ThreadSafeRunLog:
     def log_event(self, event: ScriptRunEvent) -> None:
         """记录结构化运行事件，并同步追加可读文本日志。"""
         with self._lock:
-            self._events.append(event)
-            self._stdout.write(f"{format_script_run_event(event)}\n")
+            self._events.append(replace(event, details={key: value[:4096] for key, value in event.details.items()}))
+            self._append(self._stdout, f"{format_script_run_event(event)}\n")
 
     def write_stdout(self, text: str) -> None:
         """追加一段 stdout 文本。"""
         with self._lock:
-            self._stdout.write(text)
+            self._append(self._stdout, text)
 
     def write_stderr(self, text: str) -> None:
         """追加一段 stderr 文本。"""
         with self._lock:
-            self._stderr.write(text)
+            self._append(self._stderr, text)
+
+    @staticmethod
+    def _append(stream: io.StringIO, text: str) -> None:
+        """按块淘汰旧日志，限制内存并避免每次写入都复制整个缓冲。"""
+        limit = 262144
+        text = text[-limit:]
+        if stream.tell() + len(text) > limit:
+            keep = min(limit // 2, limit - len(text))
+            tail = stream.getvalue()[-keep:] if keep else ""
+            stream.seek(0)
+            stream.write(tail)
+            stream.truncate()
+        stream.write(text)
 
     def snapshot(self) -> tuple[str, str]:
         """返回当前 stdout/stderr 文本快照。"""
@@ -211,6 +224,7 @@ class LocalControlApplication:
         self._real_image_batch_locator_factory = real_image_batch_locator_factory
         self._run_lock = threading.Lock()
         self._current_run: _BackgroundScriptRun | None = None
+        self._run_thread: threading.Thread | None = None
 
     @property
     def workspace_path(self) -> Path:
@@ -347,6 +361,7 @@ class LocalControlApplication:
                 ),
                 daemon=True,
             )
+            self._run_thread = thread
             thread.start()
             return session.snapshot()
 
@@ -365,6 +380,15 @@ class LocalControlApplication:
             self._current_run.cancellation.cancel()
             return self._current_run.snapshot()
 
+    def wait_for_script_stop(self, timeout: float | None = None) -> bool:
+        """等待后台线程真正退出，供宿主在取消后有序回收进程。"""
+        with self._run_lock:
+            thread = self._run_thread
+        if thread is None:
+            return True
+        thread.join(timeout)
+        return not thread.is_alive()
+
     def _run_script_session(
         self,
         script: Script,
@@ -375,24 +399,36 @@ class LocalControlApplication:
         session: _BackgroundScriptRun,
     ) -> None:
         """在后台线程中运行脚本并写入会话状态。"""
-        with redirect_stdout(session.log.stdout_writer()), redirect_stderr(session.log.stderr_writer()):
-            result = run_script(
-                script,
-                dry_run=dry_run,
-                dry_run_color=dry_run_color,
-                dry_run_images=dry_run_images,
-                dry_run_screen_state=dry_run_screen_state,
-                real_device_factory=self._real_device_factory,
-                real_color_reader_factory=self._real_color_reader_factory,
-                real_image_locator_factory=self._real_image_locator_factory,
-                real_screen_state_reader_factory=self.build_screen_state_reader,
-                cancellation_token=session.cancellation,
-                logger=session.log,
-                emit_step_events=True,
-            )
-        if result.error_message is not None:
-            session.log.write_stderr(f"{result.error_message}\n")
-        session.finish(result.exit_code, result.finish_reason)
+        exit_code, finish_reason = 1, "failed"
+        try:
+            with redirect_stdout(session.log.stdout_writer()), redirect_stderr(session.log.stderr_writer()):
+                result = run_script(
+                    script,
+                    dry_run=dry_run,
+                    dry_run_color=dry_run_color,
+                    dry_run_images=dry_run_images,
+                    dry_run_screen_state=dry_run_screen_state,
+                    real_device_factory=self._real_device_factory,
+                    real_color_reader_factory=self._real_color_reader_factory,
+                    real_image_locator_factory=self._real_image_locator_factory,
+                    real_screen_state_reader_factory=self.build_screen_state_reader,
+                    cancellation_token=session.cancellation,
+                    logger=session.log,
+                    emit_step_events=True,
+                )
+            exit_code, finish_reason = result.exit_code, result.finish_reason
+            if result.error_message is not None:
+                session.log.write_stderr(f"{result.error_message}\n")
+        except Exception as exc:
+            message = f"unexpected script run failure: {type(exc).__name__}: {exc}"
+            session.log.write_stderr(f"{message}\n")
+            session.log.log_event(ScriptRunEvent(
+                event_type="run_finished", status="failed",
+                details={"exit_code": "1", "error": message},
+            ))
+        finally:
+            # 会话状态由本层持有，即使用例漏掉异常归一化也必须释放运行槽位。
+            session.finish(exit_code, finish_reason)
 
     def _image_asset_root(self) -> Path:
         """返回本地 UI 允许读取模板图片的项目内目录。"""
@@ -406,12 +442,8 @@ class LocalControlApplication:
             return None
 
     def _script_with_shared_resources(self, script: Script) -> Script:
-        """把状态配置里的共享搜索资源合并进脚本资源目录。"""
-        return script_with_shared_resources(script, self._shared_script_resources())
-
-    def _shared_script_resources(self):
-        """读取本地状态配置中可供脚本复用的资源目录。"""
-        return load_shared_script_resources(self._project_root)
+        """按脚本需要合并状态配置里的共享搜索资源。"""
+        return prepare_script_resources(script, self._project_root)
 
     def build_screen_state_reader(self) -> ScreenStateReader:
         """创建按需读取最新配置和画面的状态 reader。"""

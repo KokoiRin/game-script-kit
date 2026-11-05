@@ -4,6 +4,8 @@
 也不绑定单个脚本 runner 的内部实现。
 """
 
+import pytest
+
 from game_automation.portable.application.run_plan import (
     ScriptPlanItem,
     ScriptPlanScriptResult,
@@ -95,6 +97,51 @@ def test_run_script_plan_stops_after_unmet_condition() -> None:
     assert [(item.script_name, item.finish_reason) for item in result.items] == [
         ("first", "stopped_unmet_condition")
     ]
+
+
+@pytest.mark.parametrize("continue_on_error", [False, True])
+def test_run_script_plan_always_stops_on_cancellation(continue_on_error) -> None:
+    """用户取消后，即使允许失败后继续，也不能启动后续脚本。"""
+    calls = []
+    items = tuple(
+        ScriptPlanItem(name, Script(name, ScreenWindow(), (Wait(0),)))
+        for name in ("first", "second")
+    )
+
+    def cancel(item):
+        """记录调用并模拟用户取消当前项。"""
+        calls.append(item.name)
+        return ScriptPlanScriptResult(exit_code=130, finish_reason="cancelled")
+
+    result = run_script_plan(items, run_item=cancel, continue_on_error=continue_on_error)
+
+    assert calls == ["first"]
+    assert result.exit_code == 130
+    assert result.finish_reason == "cancelled"
+    assert len(result.items) == 1
+
+
+def test_run_script_plan_cancellation_overrides_previous_failure() -> None:
+    """先失败后取消时，整轮结果应表达取消，并保留各项的原始结果。"""
+    calls = []
+    items = tuple(
+        ScriptPlanItem(name, Script(name, ScreenWindow(), (Wait(0),)))
+        for name in ("first", "second", "third")
+    )
+
+    def fail_then_cancel(item):
+        """第一项失败，第二项被用户取消。"""
+        calls.append(item.name)
+        return ScriptPlanScriptResult(
+            exit_code=1 if item.name == "first" else 130,
+            finish_reason="failed" if item.name == "first" else "cancelled",
+        )
+
+    result = run_script_plan(items, run_item=fail_then_cancel, continue_on_error=True)
+
+    assert calls == ["first", "second"]
+    assert (result.exit_code, result.finish_reason) == (130, "cancelled")
+    assert [item.finish_reason for item in result.items] == ["failed", "cancelled"]
 
 
 def _record_success(script_name: str, calls: list[str]) -> ScriptPlanScriptResult:

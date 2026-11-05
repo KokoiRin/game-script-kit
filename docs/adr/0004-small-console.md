@@ -3,6 +3,8 @@
 - 状态：accepted
 - 日期：2026-10-18（本轮用户授权精简，当前工作区已实现）
 - 性质：产品范围与本地控制边界
+- 后续修订：2026-11-05 的 [ADR 0007](0007-preparation-and-execution.md) 新增独立素材准备壳；本记录仍约束原运行控制台，删除旧调试路由的历史不变。
+- 界面替换：同日 [ADR 0008](0008-native-macos-desktop.md) 以原生壳组合准备与运行，旧 HTTP UI 已删除；本记录中的 HTTP 描述是历史取舍。
 
 ## 背景
 
@@ -34,6 +36,6 @@
 
 ## 依据
 
-- [HTTP 入口](../../src/game_automation/platform/local_desktop/entrypoints/local_ui.py)、[控制台页面](../../src/game_automation/platform/local_desktop/entrypoints/ui_static/index.html)。
+- 历史 HTTP 入口 `src/game_automation/platform/local_desktop/entrypoints/local_ui.py` 和 `ui_static/` 已删除，可从原主线 `4c51f3b` 查询。
 - [本地控制用例](../../src/game_automation/portable/application/local_control.py)、[状态 reader](../../src/game_automation/portable/application/screen_state_reader.py)。
 - [CLI](../../src/game_automation/platform/local_desktop/entrypoints/cli.py)、[重启计划](../restart-plan.md)。

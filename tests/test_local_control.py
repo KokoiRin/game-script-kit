@@ -11,6 +11,7 @@ import pytest
 
 from game_automation.portable.domain import (
     Click,
+    Hotkey,
     If,
     ImageBatchMatchResult,
     ImageExists,
@@ -21,9 +22,12 @@ from game_automation.portable.domain import (
     ImageTemplate,
     NamedImage,
     NamedImageSearch,
+    NamedPoint,
+    NamedRegion,
     Point,
     PointRef,
     Rect,
+    RegionRef,
     SearchRef,
     Repeat,
     ScreenStateIs,
@@ -308,6 +312,31 @@ def test_local_control_describes_point_dependencies() -> None:
     assert details.point_dependencies == ("头像",)
 
 
+@pytest.mark.parametrize("defined", [False, True])
+def test_point_readiness_and_background_result_agree(tmp_path, defined) -> None:
+    """详情检查与后台运行应一致报告点位是否已定义，且坏脚本不占住运行槽位。"""
+    script = Script(
+        "point-check", ScreenWindow(),
+        (Repeat(1, (Click(PointRef("button").offset(x=5)),)),),
+        resources=TargetCatalog(points=(NamedPoint("button", Point(10, 20)),) if defined else ()),
+    )
+    valid = Script("valid", ScreenWindow(), (Wait(0),))
+    app = LocalControlApplication(catalog=ScriptCatalog((script, valid)), project_root=tmp_path)
+
+    details = app.describe_script(script.name)
+    assert details.exit_code == (0 if defined else 2)
+    assert details.readiness == (("点位: button", "ok" if defined else "missing",
+                                  "点位已配置" if defined else "命名点位未配置"),)
+
+    app.start_named_script(script.name, dry_run=True)
+    status = _wait_until_finished(app)
+    assert (status.exit_code, status.finish_reason) == (
+        (0, "completed") if defined else (2, "configuration_failed")
+    )
+    app.start_named_script(valid.name, dry_run=True)
+    assert _wait_until_finished(app).finish_reason == "completed"
+
+
 def test_local_control_describes_named_image_dependencies() -> None:
     """验证 UI 用例会把命名图片依赖解析成 dry-run 可用图片路径。"""
     script = Script(
@@ -439,6 +468,54 @@ def test_local_control_script_resources_override_screen_state_search_ref(tmp_pat
     details = app.describe_script("local-search-override")
 
     assert details.image_dependencies == ("assets/脚本.png",)
+
+
+@pytest.mark.parametrize("config", [
+    "{",
+    json.dumps({"groups": [{"state": "主页", "searches": [{"image": "missing.png"}]}]}),
+])
+@pytest.mark.parametrize("kind", ["hotkey", "point", "image", "local-search", "state"])
+def test_self_contained_scripts_ignore_unrelated_broken_state_config(tmp_path, config, kind) -> None:
+    """未依赖共享搜索的脚本不应因无关状态配置损坏而无法查看、模拟或运行。"""
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    image_path = str(assets / "local.png")
+    (assets / "local.png").write_bytes(b"fake")
+    (assets / "screen-states.json").write_text(config, encoding="utf-8")
+    resources = TargetCatalog(
+        points=(NamedPoint("button", Point(10, 20)),),
+        images=(NamedImage("local", ImageTemplate(image_path)),),
+        regions=(NamedRegion("area", Rect(0, 0, 100, 100)),),
+        searches=(NamedImageSearch("local-search", ImageSearchSpec(ImageRef("local"), RegionRef("area"))),),
+    )
+    steps = {
+        "hotkey": Hotkey(("command", "v")),
+        "point": Click(PointRef("button")),
+        "image": Click(ImageTarget(ImageRef("local"))),
+        "local-search": Click(ImageTarget(SearchRef("local-search"))),
+        "state": If(ScreenStateIs("主页"), (Wait(0),)),
+    }
+    script = Script(kind, ScreenWindow(), (steps[kind],), resources=resources)
+    app = LocalControlApplication(catalog=ScriptCatalog((script,)), project_root=tmp_path)
+
+    assert app.describe_script(script.name).exit_code == 0
+    result = app.run_named_script(script.name, dry_run=True, dry_run_images=(image_path,))
+    assert (result.exit_code, result.finish_reason) == (0, "completed")
+    app.start_named_script(script.name, dry_run=True, dry_run_images=(image_path,))
+    assert _wait_until_finished(app).finish_reason == "completed"
+
+
+def test_shared_search_still_reports_broken_required_config(tmp_path) -> None:
+    """实际依赖共享搜索时仍须报告配置错误，不能把坏配置当作图片未命中。"""
+    (tmp_path / "assets").mkdir()
+    (tmp_path / "assets" / "screen-states.json").write_text("{")
+    script = Script("shared", ScreenWindow(), (Click(ImageTarget(SearchRef("shared"))),))
+    app = LocalControlApplication(catalog=ScriptCatalog((script,)), project_root=tmp_path)
+
+    result = app.run_named_script(script.name, dry_run=True)
+
+    assert (result.exit_code, result.finish_reason) == (2, "configuration_failed")
+    assert "invalid screen state config json" in result.stderr
 
 
 def test_local_control_checks_named_image_readiness(tmp_path) -> None:
@@ -920,6 +997,94 @@ def _wait_until_finished(app: LocalControlApplication):
             return status
         time.sleep(0.01)
     raise AssertionError("background script did not finish")
+
+
+@pytest.mark.parametrize("failure_stage", ["setup", "action"])
+def test_background_unexpected_failure_finishes_and_allows_next_run(tmp_path, failure_stage) -> None:
+    """平台初始化或动作抛出意外异常时会话必须结束，并允许再次运行。"""
+    class FailingDevice(InputDevice):
+        def wait(self, duration_seconds: float) -> None:
+            """模拟未被平台包装的系统错误。"""
+            raise OSError("device disconnected")
+
+    def build_device():
+        """按测试场景在初始化时失败或返回动作失败的设备。"""
+        if failure_stage == "setup":
+            raise OSError("device disconnected")
+        return FailingDevice()
+
+    script = Script("sample", ScreenWindow(), (Wait(0),))
+    app = LocalControlApplication(
+        catalog=ScriptCatalog((script,)), project_root=tmp_path,
+        real_device_factory=build_device,
+    )
+
+    app.start_named_script(script.name, dry_run=False)
+    status = _wait_until_finished(app)
+
+    assert status.exit_code == 1
+    assert status.finish_reason == ("setup_failed" if failure_stage == "setup" else "failed")
+    assert "device disconnected" in status.stderr
+    assert status.events[-1].event_type == "run_finished"
+    assert status.events[-1].status == status.finish_reason
+
+    app.start_named_script(script.name, dry_run=True)
+    assert _wait_until_finished(app).finish_reason == "completed"
+
+
+def test_background_session_finishes_when_run_use_case_raises(tmp_path, monkeypatch) -> None:
+    """后台会话在用例出现未归一化异常时仍须结束并保留诊断。"""
+    from game_automation.portable.application import local_control
+
+    def broken_run(*args, **kwargs):
+        """模拟运行用例自身发生意外错误。"""
+        raise ValueError("unexpected run error")
+
+    monkeypatch.setattr(local_control, "run_script", broken_run)
+    script = Script("sample", ScreenWindow(), (Wait(0),))
+    app = LocalControlApplication(catalog=ScriptCatalog((script,)), project_root=tmp_path)
+
+    app.start_named_script(script.name, dry_run=True)
+    status = _wait_until_finished(app)
+
+    assert (status.exit_code, status.finish_reason) == (1, "failed")
+    assert "unexpected run error" in status.stderr
+    assert status.events[-1].event_type == "run_finished"
+
+
+def test_stopping_a_long_wait_joins_the_background_thread(tmp_path) -> None:
+    """关闭桌面应用时长等待应迅速响应取消，且可等待实际线程回收。"""
+    import threading
+
+    entered = threading.Event()
+
+    class WaitingDevice(InputDevice):
+        def wait(self, duration_seconds):
+            """保留真实等待语义，记录已经进入等待。"""
+            entered.set()
+            time.sleep(duration_seconds)
+
+    script = Script("long-wait", ScreenWindow(), (Wait(60),))
+    app = LocalControlApplication(catalog=ScriptCatalog((script,)), project_root=tmp_path,
+                                  real_device_factory=WaitingDevice)
+    app.start_named_script(script.name, dry_run=False)
+    assert entered.wait(1)
+    app.stop_running_script()
+    assert app.wait_for_script_stop(timeout=1)
+    assert app.current_script_run().finish_reason == "cancelled"
+
+
+def test_long_run_keeps_recent_logs_and_events_bounded(tmp_path) -> None:
+    """长期运行只保留有界日志和近期事件，并保留最终结束原因。"""
+    script = Script("many-steps", ScreenWindow(), (Repeat(3000, (Wait(0),)),))
+    app = LocalControlApplication(catalog=ScriptCatalog((script,)), project_root=tmp_path)
+    app.start_named_script(script.name, dry_run=True)
+    assert app.wait_for_script_stop(timeout=3)
+    status = app.current_script_run()
+    assert len(status.stdout) <= 262144
+    assert len(status.events) <= 2048
+    assert status.events[-1].event_type == "run_finished"
+    assert status.finish_reason == "completed"
 
 
 def _write_home_state_config(project_root) -> None:

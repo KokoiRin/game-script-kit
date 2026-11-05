@@ -1,0 +1,22 @@
+name: macOS native desktop
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  native:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+      - name: Install Python core
+        run: |
+          python -m venv .venv
+          .venv/bin/python -m pip install -e '.[dev]'
+      - name: Test core and backend lifecycle
+        run: .venv/bin/python -m pytest
+      - name: Build native development application
+        run: .venv/bin/python tools/build_macos_app.py

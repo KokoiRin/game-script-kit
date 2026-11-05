@@ -1,6 +1,6 @@
 # Star 当前实现快照
 
-快照日期：2026-10-18。本文供接手项目、讨论下一步或修改相关行为时快速定位。
+快照日期：2026-11-05。本文供接手项目、讨论下一步或修改相关行为时快速定位。
 它描述当前代码与已获得的证据；架构约束见 [architecture.md](architecture.md)，运行方法见 [README](../README.md)。
 实现变化后更新对应条目；缺口解决后删除旧问题，保留必要的验证证据。
 
@@ -9,8 +9,10 @@
 - 用户已明确：由用户描述任务和结果要求，Agent 负责观察目标画面、补齐流程、生成并维护脚本。
 - 当前使用目标是完成一款游戏的实际日常任务；具体业务脚本、素材与进度由外部本地工作区维护。
 - 手写 JSON 是现有存储和加载方式，并不意味着用户需要亲自学习全部 JSON 语法。
-- 当前控制台负责选脚本、看详情、模拟或真实运行、停止和查看结果。
-- 创建、编辑、保存脚本仍通过文件完成；没有控制台编辑器、项目选择器或脚本热加载。
+- 用户选择 macOS 原生优先。SwiftUI/AppKit 壳组合素材准备与脚本运行，Python 后台通过本地管道提供独立用例，旧网页入口和 HTTP UI 已移除；边界见 [ADR 0008](adr/0008-native-macos-desktop.md)。
+- 准备用例提供选窗、冻结截图、点击取点和框选保存模板，不依赖脚本执行；服务边界见 [ADR 0007](adr/0007-preparation-and-execution.md)。
+- 创建、编辑、保存脚本仍通过文件完成；原生壳可显式重新加载脚本，也可在空闲时通过关闭旧后台切换工作区。没有完整编辑器或自动热加载。
+- 原生界面源码与开发构建入口已提供，当前云端未进行 macOS SDK 编译或 GUI 实测；不能将下述后台测试当作原生应用验收。
 - 方向与阶段讨论见 [重启计划](restart-plan.md)；恢复能力尚在 [设计草案](design/local-recovery.md) 中讨论。
 - 本文记录的实现限制和债务不构成未来架构要求；已决定事项另见 [ADR 索引](adr/README.md)。
 
@@ -35,12 +37,32 @@ JSON 文件按文件名排序加载，不递归读取子目录；脚本名来自
 | CLI `list/details/run` | 查列表、查依赖、单脚本运行；CLI 默认真实运行，需显式选择模拟 | 每次调用重新读取脚本 JSON |
 | CLI `run-plan` | 按顺序运行多个已有脚本，选择停止或继续策略 | 每项开始前重新激活并绑定所选窗口 |
 | CLI `recorder` | 打印鼠标屏幕坐标和颜色；终端保持焦点，按 `1` 记录、`Q` 结束 | 只打印结果，不创建 JSON 或模板 |
-| 本地 UI | 默认模拟；显示工作区路径，选择、运行、停止、日志、折叠详情与模拟设置 | 一个服务绑定一个根并在启动时保存 catalog；改脚本后需重启，刷新网页不足以更新 |
+| 原生壳 `ui` / `star-desktop` | 工作区选择、素材准备、脚本详情、模拟/真实运行、停止和诊断 | macOS 13+；后台单实例，工作区切换先回收旧进程；Mac SDK 编译和 GUI 待验证 |
+| `prepare` | 打开同一原生壳的素材准备入口 | 要求显式工作区；不启动 HTTP；仅进入执行功能时加载 catalog |
 
-UI 只允许一个后台脚本会话；运行中禁止切换和重复启动，服务端也拒绝第二次启动。
-断网时 UI 自动重试状态查询；启动 POST 没收到结果时不会自动重发，避免重复执行。
-现有 UI 没有接入 CLI 的目标应用/窗口参数，也没有暂停、单步执行或从中断点恢复。
-入口代码见 [CLI](../src/game_automation/platform/local_desktop/entrypoints/cli.py)、[HTTP](../src/game_automation/platform/local_desktop/entrypoints/local_ui.py) 和 [页面交互](../src/game_automation/platform/local_desktop/entrypoints/ui_static/control.js)。
+原生协议只允许一个后台脚本会话；运行中拒绝新的素材操作、工作区切换和重复启动。
+平台初始化或执行抛出普通异常时，用例返回失败原因；后台会话还有独立兜底，确保结束状态并释放运行槽位，失败后可启动其他脚本。
+原生会话通过标准管道请求与后台通信。超时或异常退出显示诊断并回收进程，不自动重放动作。关闭窗口、Command+Q 与信号退出共用关闭路径；后台收到 shutdown、EOF 或 SIGTERM 时取消并等待线程，释放临时帧和工作区锁。
+原生运行页尚未接入 CLI 的目标应用/窗口参数，也没有暂停、单步执行或从中断点恢复。
+入口代码见 [CLI](../src/game_automation/platform/local_desktop/entrypoints/cli.py)、[后台协议](../src/game_automation/platform/local_desktop/entrypoints/desktop_backend.py) 和 [原生会话](../native/StarDesktop/Sources/StarDesktop/Session.swift)。
+
+## 素材准备与执行隔离
+
+[PreparationService](../src/game_automation/portable/preparation/service.py) 只消费窗口、截图、图像编辑和模板存储端口，不引用 runner、脚本目录或运行控制会话。原生后台按请求映射到准备或运行用例，执行服务延迟创建。准备逻辑可通过 fake 窗口和内存画面测试。
+
+- 冻结帧绑定 ID、时间、窗口范围和 PNG 尺寸；取点返回窗口相对点及截图时的屏幕点，裁图使用同一帧像素。
+- 当前服务只保留一帧，新捕获会使旧帧失效；旧 ID 返回冲突，捕获失败也不能继续操作旧帧。
+- 名称只作为 assets 下的 PNG 文件名；拒绝越界裁图、路径名称及已有文件覆盖。点位和资源片段由原生界面展示，当前不自动写脚本或状态配置。
+- 准备和运行识图共用 `screen_capture.py` 的像素比例转换。真实准备截图限主屏幕内的 macOS 窗口，超出范围报错；窗口必须保持可见且无遮挡，同进程重复标题需先消除歧义。
+- 准备选窗不会改变运行目标；脚本仍通过原 CLI 参数显式绑定。当前没有持续截图、截图回放、统一实时状态流或动作前后验证。
+
+## 桌面生命周期和性能边界
+
+- Python 后台通过文件锁保证每个工作区只有一个所有者；正常关闭、管道 EOF 和 SIGTERM 均走同一回收路径。
+- 截图通过后台独占的临时 PNG 路径交付，不经 JSON Base64 传输，只缓存一帧。原生图片读取在后台任务中执行，过期结果不重新挂回已关闭或已切换的会话。
+- 每个运行输出流最多保留 262144 字符和最近 2048 个事件，原生协议每次最多交付 65536 字符 stdout 和 8192 字符 stderr。诊断面板及文件也有上限。
+- 原生壳先等待后台有序退出，超过 7 秒发送 SIGTERM，再等 2 秒才强制回收已确认的后台进程组。强制回收需核对最后一次操作，不能当作业务成功。
+- 当前 `.app` 开发构建绑定 checkout 和 `.venv`，尚未打包 Python、签名或公证。Swift 语法检查不代替 SDK 类型检查，真实 Mac 验收仍待执行。
 
 ## JSON 与 Python 的能力边界
 
@@ -72,14 +94,18 @@ JSON 也没有变量、通用函数/脚本调用、文本输入、剪贴板赋�
 
 | 概念 | 当前表达 | 生命周期或限制 |
 | --- | --- | --- |
-| 点位 | `resources.points` 的命名 `{x,y}` | JSON 加载时保存；点击时解析别名 |
+| 点位 | `resources.points` 的命名 `{x,y}` | JSON 加载时保存；运行前校验别名，点击时解析坐标 |
 | 图片 | `resources.images` 的名称到文件路径 | 路径相对所选根的 `assets/`，允许子目录；loader 本身不检查文件存在 |
 | 区域 | `resources.regions` 的命名矩形 | 必须有正宽高；用于搜索范围 |
 | 搜索 | `resources.searches` 组合图片、区域、置信度 | 可在步骤中引用搜索名称 |
 | 状态 | `assets/screen-states.json` 的 groups/searches | 顺序代表优先级，首次命中停止；每次状态读取重新加载配置并识别当前画面 |
-| 共享资源 | 状态配置提供的 regions/searches | 每次描述或启动脚本时合并；脚本局部同名资源覆盖共享资源 |
+| 共享资源 | 状态配置提供的 regions/searches | 仅当被引用的搜索或区域不能由局部资源解析时加载；局部同名资源覆盖共享资源 |
 
 共享资源装配见 [script_resources.py](../src/game_automation/portable/application/script_resources.py)，实时状态读取见 [screen_state_reader.py](../src/game_automation/portable/application/screen_state_reader.py)。
+纯按键、固定点位和资源自足的图片脚本不再因无关状态模板缺失或状态 JSON 损坏而阻断。真实状态读取仍按最新配置校验；实际需要共享搜索时也仍会解析整份配置并报告错误。
+
+`details` 的 readiness 覆盖点位、图片和状态；发现 `missing` 时返回退出码 2，CLI/UI 仍展示步骤和依赖检查，`unknown` 不作为已确认缺失。
+单脚本运行在激活目标应用和创建设备前校验全部分支的点位、图片、搜索和区域别名，未知引用返回 `2/configuration_failed`，不会先执行前序动作。该校验不要求模拟模板文件存在，也不代替真实识图或业务验收。
 基础 Python catalog 的命名图片资源及搜索中的直接模板在 catalog 装配时按工作区根绑定（例如 `assets/start.png`）；JSON 图片路径仍相对 `assets/`。两个通用图片示例通过资源引用使用绑定后的路径，避免依赖启动目录。
 状态配置与共享资源均读取所选工作区的 `assets/`，不回退到主仓。没有状态配置时，reader 保留按该根 `assets/` 顶层图片文件名推断状态名称的兼容路径。
 候选配置自己的阈值优先于状态读取参数；状态读取默认阈值为 0.8。
@@ -118,12 +144,13 @@ UI 自动把所选脚本解析出的图片依赖全部视为找到；CLI 通过�
 | `WaitUntil` 有限等待到期仍未满足 | `exit_code=0, stopped_unmet_condition` | 同样停止整个脚本；不是自动重试或继续 |
 | `break_if_image` 命中 | 退出对应层 Repeat，无独立脚本结束原因 | 循环后的步骤继续；外层中断仍能穿透嵌套循环 |
 | UI 用户停止被执行器观察到 | `exit_code=130, cancelled` | 当前脚本取消；已发生的输入不会回滚 |
-| 运行配置/初始化/动作失败 | 通常分别为 `configuration_failed/setup_failed/failed` | 返回错误原因；异常覆盖缺口见下节 |
-| Run Plan 默认遇到未完整执行项 | 保留首个未完成原因和首个非零退出码 | 停止后续脚本，即使该项退出码为 0 |
-| Run Plan 开启 `continue_on_error` | 当前实现对所有未完成项继续 | 取消也继续是已复现缺口，见下节 |
+| 运行配置/初始化/动作失败 | 分别为 `configuration_failed/setup_failed/failed` | 返回错误原因，后台会话结束并可再次运行 |
+| Run Plan 默认遇到未完整执行项 | 普通失败保留首个未完成原因和首个非零退出码 | 停止后续脚本，即使该项退出码为 0 |
+| Run Plan 开启 `continue_on_error` | 普通失败或条件未满足后继续 | 用户取消始终停止后续脚本 |
+| Run Plan 任一项返回 `cancelled` | 整轮为 `exit_code=130, cancelled` | 取消优先于此前普通失败；各项原始结果保留 |
 
 取消是协作式检查：步骤边界、真正点击前、图片等待轮询、每组连续按键前会检查。
-当前设备 `wait` 使用阻塞休眠；正在进行的等待/平台调用结束前，停止请求不保证立即生效。
+后台真实等待通过可取消设备包装每最多 50ms 检查取消；正在进行的平台原子调用仍可能延迟停止，原生宿主提供有界的进程回收。
 `click.then_hotkeys` 之间检查用户取消，但不再次检查循环图片 guard。
 实现见 [runner.py](../src/game_automation/portable/engine/runner.py) 与 [run_plan.py](../src/game_automation/portable/application/run_plan.py)。
 相关行为测试见 [test_runner.py](../tests/test_runner.py)、[test_repeat_break_image.py](../tests/test_repeat_break_image.py)、[test_run_plan.py](../tests/test_run_plan.py) 和 [test_local_control.py](../tests/test_local_control.py)。
@@ -142,19 +169,8 @@ UI 自动把所选脚本解析出的图片依赖全部视为找到；CLI 通过�
 
 下面是待处理现状，解决后更新或删除；不能把这些问题固化为预期行为。
 
-**已在 2026-10-18 前轮通过纯 fake 复现，未写成本轮新增回归测试：**
-
-- 未定义 `PointRef`：后台线程因 `UnknownPointNameError` 退出，但会话仍为 `running=True`，无法正确反映结束。
-  路径是 `TargetCatalog.resolve_point` → runner → `run_script` 的异常覆盖之外 → `_run_script_session` 未执行 `session.finish`。
-  定位：[point_aliases.py](../src/game_automation/portable/domain/point_aliases.py)、`script_run.py`、[local_control.py](../src/game_automation/portable/application/local_control.py)。
-- Run Plan 开启 `continue_on_error`：第一项返回 `cancelled` 后仍调用下一项。
-  `run_script_plan` 当前仅按 `incomplete and not continue_on_error` 决定是否结束，没有独立的取消边界。
-  该复现验证用例层结果编排，不是 CLI 真实 Ctrl+C 或桌面停止验证。
-
 **静态代码核查所得，尚未独立复现：**
 
-- 所有脚本在描述/运行前都加载全局状态共享资源；无关状态模板损坏或缺失可能阻断纯按键脚本。
-- `details` 的 readiness 主要检查图片和状态名称，未覆盖点位别名；缺失依赖也不改变详情的 `exit_code=0`。
 - JSON 局部图片路径仅拼接 assets；状态配置却严格限制路径位于 assets，路径约束不一致。
 - loader 对多余字段通常不报错，部分可选字段拼写错误可能被忽略；缺少统一严格校验入口。
 
@@ -163,6 +179,9 @@ UI 自动把所选脚本解析出的图片依赖全部视为找到；CLI 通过�
 
 ## 验证记录
 
+- **2026-11-05 原生迁移**：Linux/Python 3.14 完整测试 `528 passed`（包含新增的管道 EOF、运行中取消、真实子进程退出/信号、单实例锁、原生启动参数与有界日志测试；删除了已移除 HTTP UI 的测试）。5 份 Swift 文件通过语法解析，未进行 SDK 类型检查。macOS CI 构建配置已提供但本会话未执行；原生应用构建、窗口交互及平台验收仍待完成。
+- **2026-11-05 准备与执行分离**：Linux/Python 3.14 完整测试 `564 passed`，在可靠性修复后新增 34 项准备能力用例。覆盖独立导入和延迟设备加载、冻结帧、二倍像素取点、越界拒绝、窗口候选变化、同名拒绝、模板不覆盖、HTTP 错误映射及 CLI 工作区传递。Chromium 配合 fake 窗口和内存画面验证了点击取点、拖框保存、重名报错后改名重存和重截清除框选，无页面脚本错误。尚未进行真实 macOS 窗口、权限和截图验收。
+- **2026-11-05 可靠性修复**：Linux/Python 3.14 完整测试 `530 passed`，新增 36 项回归用例，覆盖异常会话收尾、再次运行、全部引用预检查、无关状态配置隔离、取消优先级及 CLI/HTTP 映射。全新虚拟环境只安装项目即可导入 Pillow 和桌面 adapter，并通过示例模拟；已显式声明 Pillow 依赖。JavaScript 语法检查和 Node DOM/fetch 替身验证通过，确认依赖缺失时保留步骤明细、配置失败后恢复运行按钮。本轮未进行真实浏览器、macOS 桌面或游戏验收。
 - **2026-10-18 本轮自动化**：完整测试 `494 passed`；`git diff --check`、JavaScript 语法检查和 193 个本地文档链接/锚点检查通过。覆盖 CLI/HTTP 工作区隔离、状态 reader 装配、资源根与启动目录无关，以及显式图片模拟路径兼容。
 - **本轮迁移**：32 份原始任务文件按大小与 SHA256 校验一致；旧分支和完整 stash 保存到仓库外的自包含 Git bundle，`git bundle verify` 通过。未采纳实验没有合入主线。
 - **本轮浏览器证据**：控制台显示外部任务工作区的绝对路径，列表只含该根的四个脚本，初始仍为模拟模式；个人坐标脚本和粘贴计划已通过 CLI 模拟。

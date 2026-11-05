@@ -10,6 +10,7 @@ readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
     "opencv-python-headless>=4.13.0",
+    "pillow>=12.0",
     "pyautogui>=0.9.54",
 ]
 
@@ -23,8 +24,10 @@ dev = [
 star = "game_automation.platform.local_desktop.entrypoints.cli:main"
 star-lab = "star_visual_lab.server:main"
 
+[project.gui-scripts]
+star-desktop = "game_automation.platform.local_desktop.entrypoints.desktop_app:main"
+
 [tool.setuptools.package-data]
-"game_automation.platform.local_desktop.entrypoints" = ["ui_static/*"]
 "star_visual_lab" = ["static/*", "static/images/*"]
 
 [tool.pytest.ini_options]

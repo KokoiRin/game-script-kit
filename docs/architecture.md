@@ -27,7 +27,9 @@ Star 使用 ports-and-adapters，把脚本规则与桌面设备、权限和入�
 | 应用用例 | 编排一次用户意图、准备依赖、组织会话与运行结果 | [application](../src/game_automation/portable/application/) |
 | Adapter | 将 port 请求落到设备、图像库和平台能力 | [platform](../src/game_automation/platform/)、[dry-run](../src/game_automation/portable/adapters/dry_run.py) |
 | 装配 | 选择平台实现，向用例注入 factory | [composition.py](../src/game_automation/platform/local_desktop/composition.py) |
-| 入口 | 解析 CLI/HTTP 输入，调用用例，转换展示格式 | [entrypoints](../src/game_automation/platform/local_desktop/entrypoints/) |
+| 原生界面 | SwiftUI 展示与 AppKit 画布、窗口和进程生命周期 | [StarDesktop](../native/StarDesktop/) |
+| 入口 | 解析 CLI/本地管道请求，调用用例，转换展示格式 | [entrypoints](../src/game_automation/platform/local_desktop/entrypoints/) |
+| 素材准备用例 | 冻结帧、取点换算、裁图边界与保存编排，独立于脚本执行 | [preparation](../src/game_automation/portable/preparation/) |
 
 依赖方向比目录名称更重要：领域对象不访问设备；执行层不创建真实 adapter；平台细节留在 adapter。
 具体任务的点位、模板和步骤由脚本表达；任务编写取舍见 [ADR 0001](adr/0001-agent-authored-tasks.md)。
@@ -41,23 +43,34 @@ cli → 项目 catalog / 共享资源 → run_script_on_local_desktop
     → run_script → ScriptRunner → 已注入的输入、识图与状态 ports
 ```
 
-控制台链路：
+原生桌面链路：
 
 ```text
-local_ui → 已装配的 LocalControlApplication → 后台运行会话
-         → run_script → ScriptRunner → 相同的运行 ports
+SwiftUI/AppKit 壳 → 受管理的 Python 子进程 / desktop_backend
+  → LocalControlApplication → 后台运行会话 → run_script → ScriptRunner → 运行 ports
 ```
 
 [run_script](../src/game_automation/portable/application/script_run.py) 按脚本需求创建运行依赖，并在真实执行前准备目标应用与窗口。
 [run_script_plan](../src/game_automation/portable/application/run_plan.py) 编排已有脚本及停止策略，单份脚本仍交给注入的运行函数。
 [ProjectScreenStateReader](../src/game_automation/portable/application/screen_state_reader.py) 直接连接配置与识图 port；状态读取不反向装配控制台。
-新增入口复用这些用例；保持控制台聚焦运行与停止的理由见 [ADR 0004](adr/0004-small-console.md)。
+新增执行入口复用这些用例；保持运行控制台聚焦运行与停止的理由见 [ADR 0004](adr/0004-small-console.md)，独立素材准备壳见 [ADR 0007](adr/0007-preparation-and-execution.md)。
+
+素材准备链路：
+
+```text
+原生准备页 → desktop_backend → PreparationService → 准备 ports ← 平台 adapter
+```
+
+准备 UI 拥有选择和框选交互；通用准备服务拥有冻结帧身份、坐标转换与校验。
+准备服务不导入 runner、运行控制应用或脚本目录；执行器不读取准备 UI 的状态。
+原生壳组合两个用例，不能通过共享可变界面状态驱动规则。生命周期和进程边界见 [ADR 0008](adr/0008-native-macos-desktop.md)：原生层负责监督进程，Python 会话负责取消和等待实际执行线程，双方各自回收所拥有的资源。
 
 ## Port 归属与副作用
 
 Port 的接口由消费它的核心职责决定，adapter 负责实现；新增接缝先确定调用方需要知道什么。
 [engine ports](../src/game_automation/portable/engine/ports.py) 声明执行所需的输入、取色、识图、状态、日志和取消能力。
 [application ports](../src/game_automation/portable/application/ports.py) 声明运行前激活应用、选择窗口等环境能力。
+[准备 ports](../src/game_automation/portable/preparation/ports.py) 声明素材采集所需的窗口、截图、裁图和存储能力。准备与执行可共享公共几何及 [截图坐标转换](../src/game_automation/platform/desktop/adapters/screen_capture.py)，不互相装配。
 现有坐标记录工具也从 engine ports 使用指针和按键 reader；工具读取按键与模拟键盘输出各有职责。
 
 - `InputDevice` 负责原子输入；组合键的按下、释放和失败清理由 adapter 一次完成。
@@ -84,7 +97,7 @@ Port 的接口由消费它的核心职责决定，adapter 负责实现；新增�
 
 [JSON loader](../src/game_automation/portable/application/config_script_loader.py) 将文件结构转换为标准 `Script`、步骤和资源对象。
 它负责字段解析、文件格式错误和资源路径解析；领域类型负责可复用的不变量，执行器负责步骤语义。
-CLI 和 HTTP 入口不自行解释 JSON 步骤，也不为某个游戏增加 runner 分支。
+CLI 和管道协议入口不自行解释 JSON 步骤，也不为某个游戏增加 runner 分支。
 
 [项目 catalog](../src/game_automation/portable/application/project_scripts.py) 从所选数据根加载命名脚本、隔离坏文件并报告错误，注册过程不执行步骤。
 [共享资源合并](../src/game_automation/portable/application/script_resources.py) 保留脚本局部资源的同名覆盖权，避免入口重复实现资源优先级。
@@ -96,7 +109,7 @@ JSON 只是现有脚本入口之一；领域能力是否已开放到 JSON，须�
 主仓保存框架、通用示例与开发验收工具；业务脚本、素材、状态配置和任务记录保存在仓库外的任务工作区，取舍见 [ADR 0006](adr/0006-local-task-workspaces.md)。
 全局 `--workspace PATH` 将 CLI 和控制台绑定到同一个数据根；脚本发现、详情依赖、共享资源和状态 reader 使用该根，不由各入口自行猜测目录。
 显式工作区只加载其中的文件脚本，不混入内置示例；无参数时保留主仓通用示例模式。
-控制台服务生命周期内绑定一个根，页面仅展示其身份；当前没有运行时项目选择器。
+一个后台进程始终绑定一个根。原生壳切换工作区时先关闭旧后台，再创建新会话；不能在运行中切换或把旧帧带入新工作区。
 任务工作区不是 Git 分支，新增任务不改变框架分层，也不需要建立游戏专用分支。
 
 ## 窗口与坐标边界
@@ -105,6 +118,8 @@ JSON 只是现有脚本入口之一；领域能力是否已开放到 JSON，须�
 运行前选窗得到的范围用于本次脚本副本，不修改 catalog 中的脚本定义。
 脚本点位、图片匹配结果、显示像素和实际输入坐标要在对应边界转换，调用方应明确自己使用的坐标系。
 窗口移动、状态识别区域及入口能力差异的当前限制记录在 [项目现状](current-state.md)；它们不是需要永久保留的架构规则。
+
+准备会话按帧 ID 绑定 PNG、实际像素尺寸、窗口逻辑范围与采集时间。UI 的显示坐标先转图像像素，再由准备服务转窗口相对或屏幕坐标；裁图只读取指定帧的内容。准备选窗不会修改运行目标，准备截图不充当运行状态缓存。
 
 ## 结果与验证边界
 

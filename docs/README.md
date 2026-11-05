@@ -14,7 +14,7 @@
 | 调整创作方式或用户流程 | [项目上下文](../CONTEXT.md)、[ADR 0001](adr/0001-agent-authored-tasks.md) |
 | 新建具体任务、选择数据根或调整资源隔离 | [README](../README.md)、[ADR 0006](adr/0006-local-task-workspaces.md)；任务上下文读取所选外部工作区 |
 | 修改结果、停止、验证或任务完成语义 | [ADR 0003](adr/0003-results-and-verification.md)、[当前状态](current-state.md) |
-| 增加控制台或诊断能力 | [ADR 0004](adr/0004-small-console.md) |
+| 增加桌面界面、生命周期或诊断能力 | [ADR 0008](adr/0008-native-macos-desktop.md)、[原生壳说明](../native/StarDesktop/README.md) |
 | 设计循环恢复、重试或子任务组合 | [当前状态](current-state.md)、[恢复机制讨论稿](design/local-recovery.md) |
 | 选择下一项产品工作 | [重启计划](restart-plan.md) |
 | 了解旧需求为何曾这样实现 | 按 [历史查询方法](adr/0005-repository-documentation.md#历史查询) 读取旧提交中的资料，再与现有代码核对 |

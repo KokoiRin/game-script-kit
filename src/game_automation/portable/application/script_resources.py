@@ -14,7 +14,15 @@ from game_automation.portable.application.project_assets import (
     screen_state_config_path,
 )
 from game_automation.portable.application.screen_state_config import load_screen_state_target_catalog
+from game_automation.portable.application.script_dependencies import script_needs_shared_resources
 from game_automation.portable.domain import Script, TargetCatalog
+
+
+def prepare_script_resources(script: Script, project_root: Path) -> Script:
+    """仅在局部资源不足时加载共享搜索，隔离无关状态配置错误。"""
+    if not script_needs_shared_resources(script):
+        return script
+    return script_with_shared_resources(script, load_shared_script_resources(project_root))
 
 
 def load_shared_script_resources(project_root: Path) -> TargetCatalog | None:

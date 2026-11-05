@@ -24,3 +24,6 @@ assets/*
 resources/xqtd/
 
 .DS_Store
+native/StarDesktop/.build/
+native/StarDesktop/.swiftpm/
+native/StarDesktop/dist/

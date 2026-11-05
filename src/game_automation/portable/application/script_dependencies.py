@@ -1,6 +1,6 @@
-"""分析脚本详情中的外部依赖和运行前检查。
+"""静态分析脚本资源引用、运行前校验和详情依赖。
 
-本 module 负责从 Script 步骤树提取可展示依赖、结构化状态/图片依赖和 readiness；
+本 module 负责解析步骤树中的资源引用、判断共享资源需求并生成 readiness；
 它不生成步骤摘要、不运行脚本，也不处理 HTTP/UI 展示细节。
 """
 
@@ -31,6 +31,8 @@ from game_automation.portable.domain import (
 from game_automation.portable.domain.point_aliases import (
     UnknownImageNameError,
     UnknownImageSearchNameError,
+    UnknownPointNameError,
+    UnknownRegionNameError,
 )
 
 
@@ -44,6 +46,28 @@ class ScriptDependencyDetails:
     point_dependencies: tuple[str, ...] = ()
     image_dependencies: tuple[str, ...] = ()
     readiness: tuple[tuple[str, str, str], ...] = ()
+
+
+def validate_script_resource_references(script: Script) -> None:
+    """执行前解析全部分支的资源引用，不读取桌面或要求模拟模板文件存在。"""
+    for name in _collect_point_dependencies(script.steps):
+        script.resources.resolve_point(PointRef(name))
+    for image in _collect_image_sources(script.steps):
+        _resolve_image_dependency_template(image, resources=script.resources)
+
+
+def script_needs_shared_resources(script: Script) -> bool:
+    """仅在脚本引用的搜索或区域无法由局部资源解析时请求共享配置。"""
+    for image in _collect_image_sources(script.steps):
+        if isinstance(image, ImageSearchSpec | SearchRef):
+            try:
+                script.resources.resolve_search(image)
+            except (UnknownImageSearchNameError, UnknownRegionNameError):
+                return True
+            except UnknownImageNameError:
+                # 状态配置不提供命名图片，缺失的局部图片由预检查报告。
+                continue
+    return False
 
 
 def describe_script_dependencies(
@@ -93,6 +117,13 @@ def _describe_readiness(
     for dependency in dependencies:
         if dependency.startswith("状态: "):
             checks.append(_screen_state_readiness(dependency, state_names=state_names))
+    for name in _collect_point_dependencies(steps):
+        try:
+            resources.resolve_point(PointRef(name))
+        except UnknownPointNameError:
+            checks.append((f"点位: {name}", "missing", "命名点位未配置"))
+        else:
+            checks.append((f"点位: {name}", "ok", "点位已配置"))
     checks.extend(
         _image_readiness(
             dependency,
@@ -172,71 +203,45 @@ def _collect_image_dependencies(
 ) -> tuple[str, ...]:
     """按脚本阅读顺序收集可直接传给 dry-run 的图片模板路径。"""
     images: list[str] = []
-    for step in steps:
-        _collect_step_image_dependencies(step, images, resources=resources)
+    for image in _collect_image_sources(steps):
+        try:
+            images.append(_resolve_image_dependency_template(image, resources=resources).path)
+        except LookupError:
+            continue
     return tuple(dict.fromkeys(images))
 
 
-def _collect_step_image_dependencies(
-    step: Step,
-    images: list[str],
-    *,
-    resources: TargetCatalog,
-) -> None:
-    """收集单个步骤内直接或嵌套引用的图片模板路径。"""
+def _collect_image_sources(steps: tuple[Step, ...]) -> tuple[ImageDependencySource, ...]:
+    """按步骤顺序收集图片引用，供预检查、共享资源装配与详情复用。"""
+    images: list[ImageDependencySource] = []
+    for step in steps:
+        _collect_step_image_sources(step, images)
+    return tuple(dict.fromkeys(images))
+
+
+def _collect_step_image_sources(step: Step, images: list[ImageDependencySource]) -> None:
+    """收集单个步骤及其全部分支中的图片引用。"""
     if isinstance(step, Click):
-        _collect_target_image_dependencies(step.point, images, resources=resources)
+        target = step.point
+        while isinstance(target, OffsetTarget):
+            target = target.base
+        if isinstance(target, ImageTarget):
+            images.append(target.template)
         return
     if isinstance(step, If):
-        _collect_condition_image_dependencies(step.condition, images, resources=resources)
+        if isinstance(step.condition, ImageExists):
+            images.append(step.condition.template)
         for child in (*step.then_steps, *step.else_steps):
-            _collect_step_image_dependencies(child, images, resources=resources)
+            _collect_step_image_sources(child, images)
         return
     if isinstance(step, Repeat):
-        _collect_condition_image_dependencies(step.break_if, images, resources=resources)
+        if isinstance(step.break_if, ImageExists):
+            images.append(step.break_if.template)
         for child in step.steps:
-            _collect_step_image_dependencies(child, images, resources=resources)
+            _collect_step_image_sources(child, images)
         return
-    if isinstance(step, WaitUntil):
-        _collect_condition_image_dependencies(step.condition, images, resources=resources)
-
-
-def _collect_condition_image_dependencies(
-    condition,
-    images: list[str],
-    *,
-    resources: TargetCatalog,
-) -> None:
-    """收集条件中的图片模板路径。"""
-    if isinstance(condition, ImageExists):
-        _append_resolved_image_dependency(condition.template, images, resources=resources)
-
-
-def _collect_target_image_dependencies(
-    target,
-    images: list[str],
-    *,
-    resources: TargetCatalog,
-) -> None:
-    """收集点击目标中的图片模板路径。"""
-    if isinstance(target, ImageTarget):
-        _append_resolved_image_dependency(target.template, images, resources=resources)
-        return
-    if isinstance(target, OffsetTarget):
-        _collect_target_image_dependencies(target.base, images, resources=resources)
-
-
-def _append_resolved_image_dependency(
-    image: ImageDependencySource,
-    images: list[str],
-    *,
-    resources: TargetCatalog,
-) -> None:
-    """把直接模板、命名图片或命名搜索追加为 dry-run 可用路径。"""
-    try:
-        images.append(_resolve_image_dependency_template(image, resources=resources).path)
-    except LookupError:
-        return
+    if isinstance(step, WaitUntil) and isinstance(step.condition, ImageExists):
+        images.append(step.condition.template)
 
 
 @dataclass(frozen=True, slots=True)
@@ -252,59 +257,10 @@ def _collect_image_readiness_dependencies(
     resources: TargetCatalog,
 ) -> tuple[_ImageReadinessDependency, ...]:
     """按脚本阅读顺序收集图片依赖检查项。"""
-    dependencies: list[_ImageReadinessDependency] = []
-    for step in steps:
-        _collect_step_image_readiness_dependencies(step, dependencies, resources=resources)
-    return tuple(dict.fromkeys(dependencies))
-
-
-def _collect_step_image_readiness_dependencies(
-    step: Step,
-    dependencies: list[_ImageReadinessDependency],
-    *,
-    resources: TargetCatalog,
-) -> None:
-    """收集单个步骤内图片依赖检查项。"""
-    if isinstance(step, Click):
-        _collect_target_image_readiness_dependencies(step.point, dependencies, resources=resources)
-        return
-    if isinstance(step, If):
-        _collect_condition_image_readiness_dependencies(step.condition, dependencies, resources=resources)
-        for child in (*step.then_steps, *step.else_steps):
-            _collect_step_image_readiness_dependencies(child, dependencies, resources=resources)
-        return
-    if isinstance(step, Repeat):
-        _collect_condition_image_readiness_dependencies(step.break_if, dependencies, resources=resources)
-        for child in step.steps:
-            _collect_step_image_readiness_dependencies(child, dependencies, resources=resources)
-        return
-    if isinstance(step, WaitUntil):
-        _collect_condition_image_readiness_dependencies(step.condition, dependencies, resources=resources)
-
-
-def _collect_condition_image_readiness_dependencies(
-    condition,
-    dependencies: list[_ImageReadinessDependency],
-    *,
-    resources: TargetCatalog,
-) -> None:
-    """收集条件中的图片依赖检查项。"""
-    if isinstance(condition, ImageExists):
-        dependencies.append(_image_readiness_dependency(condition.template, resources=resources))
-
-
-def _collect_target_image_readiness_dependencies(
-    target,
-    dependencies: list[_ImageReadinessDependency],
-    *,
-    resources: TargetCatalog,
-) -> None:
-    """收集点击目标中的图片依赖检查项。"""
-    if isinstance(target, ImageTarget):
-        dependencies.append(_image_readiness_dependency(target.template, resources=resources))
-        return
-    if isinstance(target, OffsetTarget):
-        _collect_target_image_readiness_dependencies(target.base, dependencies, resources=resources)
+    return tuple(dict.fromkeys(
+        _image_readiness_dependency(image, resources=resources)
+        for image in _collect_image_sources(steps)
+    ))
 
 
 def _image_readiness_dependency(
@@ -345,6 +301,10 @@ def _image_readiness_dependency(
                 label=label,
                 template=None,
                 source_kind="missing_search_image",
+            )
+        except UnknownRegionNameError:
+            return _ImageReadinessDependency(
+                label=label, template=None, source_kind="missing_search_region",
             )
     return _ImageReadinessDependency(label=label, template=image)
 
@@ -414,6 +374,8 @@ def _missing_image_dependency_message(dependency: _ImageReadinessDependency) -> 
         return "命名搜索未配置"
     if dependency.source_kind == "missing_search_image":
         return "命名搜索引用的命名图片未配置"
+    if dependency.source_kind == "missing_search_region":
+        return "命名搜索引用的区域未配置"
     return "命名图片未配置"
 
 
