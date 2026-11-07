@@ -6,8 +6,10 @@
 
 from __future__ import annotations
 
+from game_automation.portable.application.capture_errors import WindowCaptureError
+
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from time import perf_counter
 from types import ModuleType
@@ -74,7 +76,7 @@ class PyAutoGuiScreenImageLocator(ScreenImageLocator):
             )
             return match
         except Exception as exc:
-            if _is_setup_error(exc):
+            if isinstance(exc, WindowCaptureError) or _is_setup_error(exc):
                 raise exc
             raise RuntimeError(
                 "failed to perform screen image matching. Check template path, "
@@ -111,23 +113,49 @@ class PyAutoGuiScreenImageLocator(ScreenImageLocator):
         *,
         logger: RunLogger | None = None,
         stop_on_first_match: bool = False,
+        stop_on_priority_match: bool = False,
     ) -> tuple[ImageBatchMatchResult, ...]:
         """在一次截图中查找多条图片搜索请求。"""
+        if stop_on_first_match and stop_on_priority_match:
+            raise ValueError('first-match and priority-match modes are mutually exclusive')
         try:
             total_started_at = perf_counter()
             cv_started_at = perf_counter()
-            cv2, numpy = _load_cv_modules()
-            cv_load_ms = _elapsed_ms(cv_started_at)
+            cv2 = numpy = None
+            cv_load_ms = 0.0
             screenshot_started_at = perf_counter()
             screenshot = _capture_screen(self._backend, region=None)
             screenshot_ms = _elapsed_ms(screenshot_started_at)
-            results: list[ImageBatchMatchResult] = []
+            results = [replace(ImageBatchMatchResult.skipped_result(r.template), point_count=None if r.pattern is None else len(r.pattern.points)) for r in requests]
+            order = sorted(range(len(requests)), key=lambda i: -requests[i].priority) if stop_on_priority_match else range(len(requests))
+            matched_priority = None
             template_load_ms = 0.0
             match_ms = 0.0
-            screenshot_array_started_at = perf_counter()
-            screenshot_array = numpy.array(screenshot.image)
-            match_ms += _elapsed_ms(screenshot_array_started_at)
-            for request in requests:
+            screenshot_array = None
+            for index in order:
+                request = requests[index]
+                if stop_on_priority_match and matched_priority is not None and request.priority < matched_priority:
+                    break
+                if request.pattern is not None:
+                    from game_automation.platform.desktop.adapters.color_matching import locate_color_pattern
+                    point_started = perf_counter()
+                    located = locate_color_pattern(screenshot, request.template, request.pattern)
+                    one_match_ms = _elapsed_ms(point_started)
+                    results[index] = replace(located, elapsed_ms=one_match_ms)
+                    match_ms += one_match_ms
+                    if located.match is not None:
+                        if stop_on_priority_match:
+                            matched_priority = request.priority
+                        if stop_on_first_match:
+                            break
+                    continue
+                if numpy is None:
+                    cv_started_at = perf_counter()
+                    cv2, numpy = _load_cv_modules()
+                    cv_load_ms += _elapsed_ms(cv_started_at)
+                    array_started = perf_counter()
+                    screenshot_array = numpy.array(screenshot.image)
+                    match_ms += _elapsed_ms(array_started)
                 template_started_at = perf_counter()
                 template = request.template
                 template_image = self._load_template_image(template, numpy)
@@ -150,20 +178,16 @@ class PyAutoGuiScreenImageLocator(ScreenImageLocator):
                 match = located.match
                 one_match_ms = _elapsed_ms(match_started_at)
                 match_ms += one_match_ms
-                results.append(
-                    ImageBatchMatchResult(
+                results[index] = ImageBatchMatchResult(
                         template=template,
                         match=match,
                         elapsed_ms=one_match_ms,
                         best_confidence=located.best_confidence,
                         best_rect=located.best_rect,
                     )
-                )
+                if stop_on_priority_match and match is not None:
+                    matched_priority = request.priority
                 if stop_on_first_match and match is not None:
-                    results.extend(
-                        ImageBatchMatchResult.skipped_result(skipped_request.template)
-                        for skipped_request in requests[len(results) :]
-                    )
                     break
             batch_results = tuple(results)
             _log_batch_match_stages(
@@ -179,7 +203,7 @@ class PyAutoGuiScreenImageLocator(ScreenImageLocator):
             )
             return batch_results
         except Exception as exc:
-            if _is_setup_error(exc):
+            if isinstance(exc, WindowCaptureError) or _is_setup_error(exc):
                 raise exc
             raise RuntimeError(
                 "failed to perform screen image matching. Check template path, "

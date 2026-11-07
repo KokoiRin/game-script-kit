@@ -7,6 +7,7 @@ PNG 通过独占临时文件交付，协议输出固定写入宿主传入的原�
 import argparse
 from dataclasses import asdict
 import json
+import math
 import os
 from pathlib import Path
 import signal
@@ -44,7 +45,7 @@ class WorkspaceLock:
 
 
 class DesktopBackend:
-    def __init__(self, workspace: Path, *, preparation=None, control_factory: Callable | None = None) -> None:
+    def __init__(self, workspace: Path, *, preparation=None, control_factory: Callable | None = None, permissions=None, observation_factory=None) -> None:
         """装配独立准备服务，延迟加载执行服务并创建单帧缓存。"""
         self.workspace = workspace.resolve()
         if not self.workspace.is_dir():
@@ -53,6 +54,9 @@ class DesktopBackend:
             from game_automation.platform.local_desktop.preparation_composition import build_preparation_service
             preparation = build_preparation_service(self.workspace)
         self.preparation = preparation
+        self._observation_factory = observation_factory
+        self._observation = None
+        self._permissions = permissions
         self._control_factory = control_factory
         self._control_app = None
         self._cache = tempfile.TemporaryDirectory(prefix="star-desktop-")
@@ -70,13 +74,68 @@ class DesktopBackend:
                 self._control_app = build_local_control_application(project_root=self.workspace, include_builtin_scripts=False)
         return self._control_app
 
+    def _observer(self):
+        """延迟创建只读观察会话，不加载脚本目录。"""
+        if self._observation is None:
+            from game_automation.portable.application.state_observation import StateObservation
+            self._observation = StateObservation()
+        return self._observation
+
     def dispatch(self, method: str, params: dict) -> dict:
         """串行处理壳请求，运行中不允许新的素材操作或重复启动。"""
         if self.stopping:
             raise RuntimeError("desktop backend is stopping")
         running = self._control_app is not None and self._control_app.current_script_run().running
-        if running and (method.startswith("preparation.") or method in {"script.reload", "script.start"}):
+        if running and (method.startswith("preparation.") or method in {"script.reload", "script.start", "permissions.request"}):
             raise RuntimeError("a script is running; stop it before preparing materials or starting another")
+        observing = self._observation is not None and self._observation.snapshot().running
+        if observing and method in {'preparation.capture', 'preparation.crop', 'observation.rule.save', 'script.start', 'permissions.request'}:
+            raise RuntimeError('请先停止实时识别，再采集素材、申请权限或运行脚本')
+        if running and method in {'observation.start', 'observation.rule.save'}:
+            raise RuntimeError('请先停止脚本，再启动实时识别或登记素材')
+        if method == 'observation.rules':
+            from game_automation.portable.application.window_state_rules import list_window_state_rules
+            return list_window_state_rules(self.workspace)
+        if method == 'observation.rule.save':
+            from game_automation.portable.application.window_state_rules import save_window_state_rule
+            crop = _rect(params.get('region'))
+            search = params.get('search_region')
+            return save_window_state_rule(self.workspace, self.preparation, frame_id=_text(params, 'frame_id'),
+                crop=crop, name=_text(params, 'name'), state=_text(params, 'state'),
+                min_confidence=params.get('min_confidence', 0.9), search_region=None if search is None else _rect(search), priority=params.get('priority'))
+        if method == 'observation.start':
+            from game_automation.portable.application.window_state_rules import load_window_state_rules
+            application, window_id = _text(params, 'application'), _text(params, 'window_id')
+            hz, confirmations = params.get('hz', 2), params.get('confirmations', 2)
+            from game_automation.portable.application.state_observation import ObservationSettings
+            settings = ObservationSettings(hz, confirmations)
+            if observing:
+                raise RuntimeError('实时识别已经运行，请先停止')
+            rules = load_window_state_rules(self.workspace)
+            window = next((w for w in self.preparation.list_windows(application) if w.id == window_id), None)
+            if window is None:
+                raise RuntimeError('目标窗口已关闭，请重新读取窗口')
+            if self._observation_factory is None:
+                from game_automation.platform.macos.adapters.window_state_probe import MacOSWindowStateProbe
+                probe = MacOSWindowStateProbe(window, rules, hz=settings.hz)
+            else:
+                probe = self._observation_factory(window, rules)
+            try:
+                return observation_wire(self._observer().start(probe, settings=settings))
+            except BaseException:
+                probe.close()
+                raise
+        if method == 'observation.status':
+            return observation_wire(self._observer().snapshot())
+        if method == 'observation.stop':
+            return observation_wire(self._observer().request_stop())
+        if method in {"permissions.status", "permissions.request"}:
+            if self._permissions is None:
+                from game_automation.platform.macos.adapters.desktop_permissions import MacOSDesktopPermissions
+                self._permissions = MacOSDesktopPermissions()
+            if method == "permissions.request":
+                return self._permissions.request(_text(params, "kind"))
+            return self._permissions.status()
         if method == "session.info":
             return {"protocol": 1, "workspace": str(self.workspace), "pid": os.getpid(), "process_group": os.getpgrp()}
         if method == "session.shutdown":
@@ -138,9 +197,11 @@ class DesktopBackend:
             return True
         self.stopping = True
         stopped = True
+        if self._observation is not None:
+            stopped = self._observation.stop(timeout)
         if self._control_app is not None:
             self._control_app.stop_running_script()
-            stopped = self._control_app.wait_for_script_stop(timeout)
+            stopped = self._control_app.wait_for_script_stop(timeout) and stopped
         self._cache.cleanup()
         self._closed = True
         return stopped
@@ -160,6 +221,13 @@ def _text(params: dict, key: str, default=None) -> str:
     return value.strip()
 
 
+def _rect(value) -> Rect:
+    """校验协议矩形全部字段，拒绝隐式浮点截断或布尔值。"""
+    if not isinstance(value, dict):
+        raise ValueError('region must be an object')
+    return Rect(*(_integer(value, key) for key in ('left', 'top', 'width', 'height')))
+
+
 def _integer(params: dict, key: str) -> int:
     """校验像素字段为整数而非布尔值或浮点数。"""
     value = params.get(key)
@@ -168,7 +236,10 @@ def _integer(params: dict, key: str) -> int:
     return value
 
 
-def run_stdio(session: DesktopBackend, source: TextIO, output: TextIO, errors: TextIO) -> int:
+def run_stdio(
+    session: DesktopBackend, source: TextIO, output: TextIO, errors: TextIO,
+    *, process_events: Callable[[], None] | None = None,
+) -> int:
     """处理 JSON-RPC 行协议；关闭、管道 EOF 和中断统一回收后台。"""
     exit_code = 0
     try:
@@ -176,6 +247,8 @@ def run_stdio(session: DesktopBackend, source: TextIO, output: TextIO, errors: T
             line = source.readline(1048577)
             if not line:
                 break
+            if process_events is not None:
+                process_events()
             request_id = None
             try:
                 if len(line) > 1048576:
@@ -225,11 +298,51 @@ def main(argv: list[str] | None = None) -> int:
         print("workspace must be an existing directory", file=sys.stderr)
         return 2
     try:
+        process_events = None
+        if sys.platform == "darwin":
+            from game_automation.platform.macos.adapters.application_events import process_application_events
+            process_events = process_application_events
         with WorkspaceLock(root):
-            return run_stdio(DesktopBackend(root), sys.stdin, sys.stdout, sys.stderr)
+            return run_stdio(DesktopBackend(root), sys.stdin, sys.stdout, sys.stderr, process_events=process_events)
     except (OSError, RuntimeError, ValueError) as exc:
         print(str(exc), file=sys.stderr)
         return 1
+
+
+
+
+def observation_wire(value) -> dict:
+    """只在线协议边界展开不可变观察快照与领域证据。"""
+    sample = value.sample
+    stats = value.performance
+    evidence = [] if sample is None else [
+        {'state': item.candidate.name, 'name': item.candidate.search_name or item.candidate.name,
+         'found': item.found, 'skipped': item.skipped, 'priority': item.priority, 'score': item.best_confidence,
+         'method': 'points' if item.point_count is not None else 'template',
+         'matched_points': item.matched_points, 'point_count': item.point_count,
+         'rect': None if item.best_rect is None else {
+             'left': item.best_rect.left, 'top': item.best_rect.top,
+             'width': item.best_rect.width, 'height': item.best_rect.height}}
+        for item in sample.result.candidates]
+    return {'running': value.running, 'phase': value.phase.value, 'current_state': value.current_state,
+            'candidate_state': value.candidate_state, 'sequence': value.sequence,
+            'observed_at': None if sample is None else sample.observed_at,
+            'elapsed_ms': 0 if sample is None else (sample.completed - (sample.capture_started if sample.read_started is None else sample.read_started)) * 1000,
+            'hz': value.settings.hz, 'actual_hz': 0 if sample is None else sample.actual_hz,
+            'age_ms': value.age_ms, 'error': value.error, 'evidence': evidence,
+            'performance': {'attempts': stats.attempts, 'failures': stats.failures,
+                'over_budget': stats.over_budget, 'stale_results': stats.stale_results,
+                'duplicate_results': stats.duplicate_results, 'capture_mode': stats.capture_mode,
+                'source_age_ms': stats.source_age_ms,
+                'source_age_p95_ms': None if not stats.source_ages_ms else sorted(stats.source_ages_ms)[math.ceil(len(stats.source_ages_ms)*.95)-1],
+                'checked_count': stats.checked_count, 'skipped_count': stats.skipped_count,
+                'material_count': stats.material_count, 'screenshot_ms': stats.screenshot_ms,
+                'last_failure_message': stats.last_failure_message, 'last_failure_at': stats.last_failure_at,
+                'recognition_ms': stats.recognition_ms, 'round_ms': stats.round_ms,
+                'window_limit': 120, 'sample_count': len(stats.rounds_ms),
+                'p50_ms': stats.percentile(0.5), 'p95_ms': stats.percentile(0.95),
+                'max_ms': max(stats.rounds_ms) if stats.rounds_ms else None},
+            'history': [{'at': item.at, 'previous': item.previous, 'state': item.state} for item in value.history]}
 
 
 if __name__ == "__main__":

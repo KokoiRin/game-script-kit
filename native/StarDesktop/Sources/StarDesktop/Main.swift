@@ -10,12 +10,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var sourceRoot: URL?
     private var python: URL?
     private var signalSources: [DispatchSourceSignal] = []
+    private var wideFrame: CGRect?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         Darwin.signal(SIGPIPE, SIG_IGN)
         sourceRoot = configuredURL("STAR_SOURCE_ROOT", bundleKey: "StarSourceRoot") ?? developmentRoot()
         python = configuredURL("STAR_PYTHON", bundleKey: "StarPython") ?? sourceRoot?.appendingPathComponent(".venv/bin/python")
-        let view = WorkspaceView(session: session, tab: argument("--tab") ?? "prepare", chooseWorkspace: { [weak self] in self?.chooseWorkspace() })
+        let initialTab = argument("--tab") ?? "observe"
+        let compact = initialTab == "observe"
+        let view = WorkspaceView(session: session, tab: initialTab, compact: compact, floating: compact,
+                                 chooseWorkspace: { [weak self] in self?.chooseWorkspace() },
+                                 changeObservationMode: { [weak self] in self?.setObservationMode($0) },
+                                 changeFloating: { [weak self] floating in self?.window?.level = floating ? .floating : .normal })
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1100, height: 850),
                               styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
         window.title = "Star"
@@ -25,6 +31,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         window.setFrameAutosaveName("StarMainWindow")
         if !window.setFrameUsingName("StarMainWindow") { window.center() }
         self.window = window
+        if let screen = window.screen ?? NSScreen.main {
+            let visible = screen.visibleFrame
+            wideFrame = windowFrame(CGRect(x: visible.midX - 550, y: visible.midY - 425,
+                                           width: 1100, height: 850), fitting: visible)
+        }
+        setObservationMode(compact)
+        window.level = compact ? .floating : .normal
         installMenus()
         installSignals()
         window.makeKeyAndOrderFront(nil)
@@ -33,6 +46,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         else if let last = UserDefaults.standard.string(forKey: "lastWorkspace"), FileManager.default.fileExists(atPath: last) {
             open(URL(fileURLWithPath: last))
         } else { chooseWorkspace() }
+    }
+
+    private func setObservationMode(_ compact: Bool) {
+        guard let window, let screen = window.screen ?? NSScreen.main else { return }
+        let visible = screen.visibleFrame
+        if compact {
+            if window.frame.width >= min(980, visible.width) { wideFrame = window.frame }
+            window.minSize = NSSize(width: min(460, visible.width), height: min(620, visible.height))
+            window.setFrame(sideObservationFrame(in: visible), display: true)
+        } else {
+            window.minSize = NSSize(width: min(980, visible.width), height: min(750, visible.height))
+            let restored = wideFrame ?? CGRect(x: visible.minX, y: visible.minY, width: 1100, height: 850)
+            window.setFrame(windowFrame(restored, fitting: visible), display: true)
+        }
     }
 
     private func configuredURL(_ variable: String, bundleKey: String) -> URL? {
@@ -56,7 +83,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     @objc private func chooseWorkspace() {
         guard !terminating else { return }
-        guard !session.busy, !session.runRunning, session.phase != .starting, session.phase != .stopping else {
+        guard !session.busy, !session.runRunning, !session.observationRunning, session.phase != .starting, session.phase != .stopping else {
             session.errorMessage = "请先停止当前任务，再切换工作区。"
             return
         }

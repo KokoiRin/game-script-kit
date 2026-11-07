@@ -24,7 +24,9 @@ class CapturedScreen:
 
 def capture_screen(backend: object, *, region: Rect | None = None) -> CapturedScreen:
     """截取主屏幕并按可选逻辑坐标区域裁剪。"""
-    image = backend.screenshot().convert("RGB")
+    image = backend.screenshot()
+    if image.mode != "RGB":
+        image = image.convert("RGB")
     size = backend.size()
     try:
         width, height = int(size.width), int(size.height)

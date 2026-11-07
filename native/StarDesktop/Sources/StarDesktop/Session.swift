@@ -8,13 +8,6 @@ struct WindowChoice: Identifiable {
     let title: String
 }
 
-struct PixelRegion: Equatable {
-    let left: Int
-    let top: Int
-    let width: Int
-    let height: Int
-    var payload: [String: Int] { ["left": left, "top": top, "width": width, "height": height] }
-}
 
 struct FrozenFrame {
     let id: String
@@ -40,6 +33,10 @@ final class DesktopSession: ObservableObject {
     @Published var status = "请选择任务工作区。"
     @Published var errorMessage = ""
     @Published var diagnostics = ""
+    @Published var permissionsKnown = false
+    @Published var accessibilityAllowed = false
+    @Published var screenRecordingAllowed = false
+    @Published var checkingPermissions = false
     @Published var workspace: URL?
     @Published var application = ""
     @Published var windows: [WindowChoice] = []
@@ -53,10 +50,26 @@ final class DesktopSession: ObservableObject {
     @Published var scriptDetails = ""
     @Published var runLog = ""
     @Published var runRunning = false
+    @Published var observationRunning = false
+    @Published var observationHz = 2
+    @Published var confirmObservation = true
+    @Published var observationState = "未知"
+    @Published var observationCandidate = "未知"
+    @Published var observationPhase = "未启动"
+    @Published var observationMetrics = "暂无检测结果"
+    @Published var observationPerformanceSummary = "性能：尚无采样"
+    @Published var observationPerformanceDetails = "统计随每轮采样更新，轮询不重复计数。"
+    @Published var observationEvidence = "暂无匹配证据"
+    @Published var observationHistory = "暂无状态变化"
+    @Published var observationError = ""
+    @Published var observationRuleSummary = "尚未读取状态素材"
+    @Published var stateName = ""
+    @Published var stateConfidence = "0.90"
+    @Published var searchRegion: PixelRegion?
     @Published var dryRun = true
     @Published var dryRunColor = "#000000"
     @Published var dryRunState = "未知"
-    var canOperate: Bool { phase == .ready && !busy && !runRunning }
+    var canOperate: Bool { phase == .ready && !busy && !runRunning && !observationRunning }
     var processRunning: Bool { process?.isRunning ?? false }
 
     private var process: Process?
@@ -69,11 +82,17 @@ final class DesktopSession: ObservableObject {
     private var deadlines: [Int: DispatchWorkItem] = [:]
     private var pollTimer: Timer?
     private var polling = false
+    private var observationPolling = false
+    private var observationTimer: Timer?
     private var stopCompletions: [() -> Void] = []
     private var python: URL?
     private var sourceRoot: URL?
     private var ownsProcessGroup = false
     private var frameGeneration = UUID()
+    private var observationGeneration = UUID()
+    private var observationGrace: DispatchWorkItem?
+    private var observationDeadline: TimeInterval?
+    private var observationStopping = false
 
     func start(workspace: URL, python: URL, sourceRoot: URL) {
         guard !processRunning else { return }
@@ -81,6 +100,19 @@ final class DesktopSession: ObservableObject {
         self.python = python
         self.sourceRoot = sourceRoot
         phase = .starting
+        ownsProcessGroup = false
+        observationGeneration = UUID()
+        observationGrace?.cancel(); observationGrace = nil
+        observationDeadline = nil; observationStopping = false
+        observationPerformanceSummary = "性能：尚无采样"
+        observationPerformanceDetails = "统计随每轮采样更新，轮询不重复计数。"
+        observationMetrics = "暂无检测结果"; observationRuleSummary = "尚未读取状态素材"
+        observationRunning = false
+        observationPhase = "未启动"; observationState = "未知"; observationCandidate = "未知"
+        observationEvidence = "暂无匹配证据"; observationHistory = "暂无状态变化"; observationError = ""
+        observationPolling = false
+        permissionsKnown = false
+        checkingPermissions = false
         errorMessage = ""
         status = "正在启动本地后台…"
         scripts = []; selectedScript = ""; scriptDetails = ""; runLog = ""
@@ -98,7 +130,8 @@ final class DesktopSession: ObservableObject {
         input = stdinPipe.fileHandleForWriting
         outputPipe = stdoutPipe; errorPipe = stderrPipe
         stdoutPipe.fileHandleForReading.readabilityHandler = { [weak self, weak child] handle in
-            let data = (try? handle.read(upToCount: 65536)) ?? Data()
+            // 只读取当前可用字节，固定长度读取会让短响应等待后续数据或 EOF。
+            let data = handle.availableData
             guard !data.isEmpty else { return }
             Task { @MainActor in
                 guard let self, let child, self.process === child else { return }
@@ -106,7 +139,8 @@ final class DesktopSession: ObservableObject {
             }
         }
         stderrPipe.fileHandleForReading.readabilityHandler = { [weak self, weak child] handle in
-            let data = (try? handle.read(upToCount: 65536)) ?? Data()
+            // 只读取当前可用字节，固定长度读取会让短响应等待后续数据或 EOF。
+            let data = handle.availableData
             guard !data.isEmpty else { return }
             Task { @MainActor in
                 guard let self, let child, self.process === child else { return }
@@ -121,7 +155,7 @@ final class DesktopSession: ObservableObject {
             try child.run()
             record("后台已启动，PID \(child.processIdentifier)\n")
             call("session.info") { [weak self] reply in
-                guard let self else { return }
+                guard let self, self.process === child, self.phase == .starting else { return }
                 switch reply {
                 case .success(let info):
                     guard info["protocol"] as? Int == 1 else {
@@ -131,6 +165,7 @@ final class DesktopSession: ObservableObject {
                     self.ownsProcessGroup = (info["process_group"] as? Int) == Int(child.processIdentifier)
                     self.phase = .ready
                     self.status = "就绪。素材准备和脚本运行使用同一受管理的后台。"
+                    self.refreshPermissions()
                     self.pollTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
                         Task { @MainActor in self?.pollRun() }
                     }
@@ -159,8 +194,15 @@ final class DesktopSession: ObservableObject {
         stopCompletions.append(completion)
         guard phase != .stopping else { return }
         phase = .stopping; busy = true
+        observationGeneration = UUID()
+        observationGrace?.cancel(); observationGrace = nil
+        observationDeadline = nil
+        observationState = "未知"; observationCandidate = "未知"
+        observationEvidence = "暂无有效画面证据"
+        if observationRunning { observationPhase = "正在停止" }
         status = "正在停止任务并回收后台，请稍候…"
         pollTimer?.invalidate(); pollTimer = nil
+        observationTimer?.invalidate(); observationTimer = nil
         // 先走协作式停止，只有后台无响应时才终止属于本应用的进程组。
         sendShutdown()
         DispatchQueue.main.asyncAfter(deadline: .now() + 7) { [weak self, weak child] in
@@ -197,11 +239,19 @@ final class DesktopSession: ObservableObject {
         process = nil
         ownsProcessGroup = false
         pollTimer?.invalidate(); pollTimer = nil
+        observationTimer?.invalidate(); observationTimer = nil
         deadlines.values.forEach { $0.cancel() }; deadlines.removeAll()
         let replies = pending.values.map { $0 }; pending.removeAll()
         busy = false; polling = false; runRunning = false
+        observationGeneration = UUID()
+        observationGrace?.cancel(); observationGrace = nil
+        observationDeadline = nil; observationStopping = false
+        observationRunning = false; observationPolling = false; observationState = "未知"
+        observationCandidate = "未知"; observationEvidence = "暂无有效画面证据"
+        observationPhase = "后台已停止"
         clearFrame()
-        record("后台已退出，状态码 \(child.terminationStatus)\n")
+        let reason = child.terminationReason == .uncaughtSignal ? "信号终止" : "正常退出"
+        record("后台已退出，状态码 \(child.terminationStatus)，\(reason)\n")
         if expected {
             phase = .idle; status = "后台已停止。"
         } else {
@@ -222,7 +272,7 @@ final class DesktopSession: ObservableObject {
         input = nil; outputPipe = nil; errorPipe = nil
     }
 
-    private func call(_ method: String, _ params: Object = [:], completion: @escaping Reply) {
+    private func call(_ method: String, _ params: Object = [:], timeoutSeconds: TimeInterval = 15, completion: @escaping Reply) {
         guard let input, processRunning, phase != .stopping else {
             completion(.failure(DesktopError(message: "后台当前不可用。")))
             return
@@ -239,7 +289,7 @@ final class DesktopSession: ObservableObject {
                 reply(.failure(DesktopError(message: "操作超时，正在回收后台。")))
             }
             deadlines[id] = timeout
-            DispatchQueue.main.asyncAfter(deadline: .now() + 15, execute: timeout)
+            DispatchQueue.main.asyncAfter(deadline: .now() + timeoutSeconds, execute: timeout)
             try input.write(contentsOf: data + Data([10]))
         } catch {
             deadlines.removeValue(forKey: id)?.cancel()
@@ -290,12 +340,79 @@ final class DesktopSession: ObservableObject {
         }
     }
 
+    // 权限由实际执行后台查询，界面不以自身授权代替子进程授权。
+    func refreshPermissions() {
+        guard canOperate, !checkingPermissions else { return }
+        checkingPermissions = true
+        call("permissions.status") { [weak self] reply in
+            guard let self else { return }
+            self.checkingPermissions = false
+            switch reply {
+            case .success(let value): self.renderPermissions(value)
+            case .failure(let error): self.errorMessage = "权限检测失败：\(error.localizedDescription)"
+            }
+        }
+    }
+
+    func requestPermission(_ kind: String) {
+        guard canOperate, !checkingPermissions else { return }
+        busy = true; errorMessage = ""
+        status = "请按 macOS 提示确认权限，完成后返回 Star。"
+        // 截图权限提示可能等待用户选择，不能套用普通操作的短超时。
+        call("permissions.request", ["kind": kind], timeoutSeconds: 120) { [weak self] reply in
+            guard let self else { return }
+            self.busy = false
+            switch reply {
+            case .success(let value):
+                self.renderPermissions(value)
+                self.status = "权限申请已发出。请在系统设置中确认，然后重新检测；必要时重启后台。"
+            case .failure(let error): self.errorMessage = "权限申请失败：\(error.localizedDescription)"
+            }
+        }
+    }
+
+    func openPrivacySettings() {
+        guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security") else { return }
+        NSWorkspace.shared.open(url)
+    }
+
+    func restartBackend() {
+        guard !busy, !runRunning, let workspace, let python, let sourceRoot else { return }
+        stop { [weak self] in
+            self?.start(workspace: workspace, python: python, sourceRoot: sourceRoot)
+        }
+    }
+
+    private func renderPermissions(_ value: Object) {
+        guard let accessibility = value["accessibility"] as? Bool,
+              let screenRecording = value["screen_recording"] as? Bool else {
+            errorMessage = "后台返回了无效的权限状态。"
+            return
+        }
+        accessibilityAllowed = accessibility
+        screenRecordingAllowed = screenRecording
+        permissionsKnown = true
+    }
+
+    private func requirePermission(_ kind: String) -> Bool {
+        let allowed = kind == "accessibility" ? accessibilityAllowed : screenRecordingAllowed
+        guard permissionsKnown, allowed else {
+            errorMessage = kind == "accessibility"
+                ? "需要窗口控制权限，请点击上方“申请窗口控制”。"
+                : "需要屏幕截图权限，请点击上方“申请屏幕截图”。"
+            refreshPermissions()
+            return false
+        }
+        return true
+    }
+
     func clearFrame() {
         frameGeneration = UUID()
-        frame = nil; selection = nil; resourceText = ""
+        frame = nil; selection = nil; searchRegion = nil; resourceText = ""
     }
 
     func readWindows() {
+        guard requirePermission("accessibility") else { return }
         clearFrame(); windows = []; selectedWindow = ""
         perform("preparation.windows", ["application": application]) { [weak self] result in
             guard let self else { return }
@@ -309,6 +426,7 @@ final class DesktopSession: ObservableObject {
     }
 
     func capture() {
+        guard requirePermission("accessibility"), requirePermission("screen_recording") else { return }
         clearFrame()
         let generation = frameGeneration
         perform("preparation.capture", ["application": application, "window_id": selectedWindow]) { [weak self] result in
@@ -359,6 +477,202 @@ final class DesktopSession: ObservableObject {
         }
     }
 
+    func reloadObservationRules() {
+        perform("observation.rules") { [weak self] result in
+            self?.renderObservationRules(result)
+        }
+    }
+
+    func useSelectionAsSearchRegion() {
+        guard canOperate, let selection else { return }
+        searchRegion = selection
+    }
+
+    func saveStateMaterial() {
+        guard let frame, let selection, let threshold = Double(stateConfidence), threshold.isFinite else {
+            errorMessage = "请框选素材并填写有效的匹配阈值。"
+            return
+        }
+        var params: Object = ["frame_id": frame.id, "region": selection.payload, "name": targetName,
+                              "state": stateName, "min_confidence": threshold]
+        if let searchRegion { params["search_region"] = searchRegion.payload }
+        perform("observation.rule.save", params) { [weak self] result in
+            self?.renderObservationRules(result)
+            self?.status = "状态素材已保存，可进入实时识别页开始观察。"
+        }
+    }
+
+    func startObservation() {
+        guard canOperate, requirePermission("accessibility"), requirePermission("screen_recording") else { return }
+        observationGeneration = UUID()
+        let generation = observationGeneration
+        let requested = ProcessInfo.processInfo.systemUptime
+        perform("observation.start", ["application": application, "window_id": selectedWindow,
+                                      "hz": observationHz, "confirmations": confirmObservation ? 2 : 1]) { [weak self] result in
+            guard let self else { return }
+            guard self.phase == .ready, self.observationGeneration == generation else { return }
+            self.observationStopping = false
+            self.renderObservation(result, requested: requested)
+            self.observationTimer?.invalidate()
+            self.observationTimer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self] _ in
+                Task { @MainActor in
+                    guard let self, self.observationGeneration == generation else { return }
+                    self.pollObservation()
+                }
+            }
+        }
+    }
+
+    func stopObservation() {
+        guard phase == .ready, observationRunning, !observationStopping else { return }
+        observationGeneration = UUID()
+        let generation = observationGeneration
+        observationStopping = true; busy = true; observationPolling = false
+        observationDeadline = nil
+        observationState = "未知"; observationCandidate = "未知"
+        observationEvidence = "暂无有效画面证据"; observationPhase = "正在停止"
+        observationTimer?.invalidate()
+        observationTimer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                guard let self, self.observationGeneration == generation else { return }
+                self.pollObservation()
+            }
+        }
+        let grace = DispatchWorkItem { [weak self] in
+            guard let self, self.observationGeneration == generation, self.observationRunning else { return }
+            self.observationError = "采集尚未结束，正在回收后台。请等待实际退出后手动重启。"
+            self.stop {}
+        }
+        observationGrace = grace
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3, execute: grace)
+        let requested = ProcessInfo.processInfo.systemUptime
+        call("observation.stop") { [weak self] reply in
+            guard let self, self.phase == .ready, self.observationGeneration == generation else { return }
+            switch reply {
+            case .success(let result): self.renderObservation(result, requested: requested)
+            case .failure(let error): self.observationError = error.localizedDescription
+            }
+        }
+    }
+
+    private func pollObservation() {
+        if let deadline = observationDeadline, ProcessInfo.processInfo.systemUptime > deadline {
+            observationState = "未知"; observationCandidate = "未知"
+            observationEvidence = "暂无有效画面证据"; observationPhase = "画面已过期"
+        }
+        guard phase == .ready, observationRunning, !observationPolling else { return }
+        observationPolling = true
+        let generation = observationGeneration
+        let requested = ProcessInfo.processInfo.systemUptime
+        call("observation.status") { [weak self] reply in
+            guard let self, self.phase == .ready, self.observationGeneration == generation else { return }
+            self.observationPolling = false
+            switch reply {
+            case .success(let result): self.renderObservation(result, requested: requested)
+            case .failure(let error): self.observationError = error.localizedDescription
+            }
+        }
+    }
+
+    private func renderObservationRules(_ result: Object) {
+        let rules = result["rules"] as? [Object] ?? []
+        observationRuleSummary = rules.isEmpty ? "还没有状态素材，请到素材准备页框选并登记。" : rules.map { rule in
+            let state = rule["state"] as? String ?? ""
+            let image = rule["image"] as? String ?? ""
+            let region = (rule["region"] as? Object).map { self.pretty($0) } ?? "整个窗口"
+            let isPoints = rule["method"] as? String == "points"
+            let method = isPoints ? "多点 · \(rule["point_count"] as? Int ?? 0) 点" : "模板"
+            let location = isPoints ? "固定截图像素点位 · 整体偏移 ±\(rule["offset_radius"] as? Int ?? 0) 像素" : "搜索范围：\(region)"
+            return "\(state) · 优先级 \(rule["priority"] as? Int ?? 0) · \(method) · \(image) · \(location)"
+        }.joined(separator: "\n")
+    }
+
+    private func renderObservation(_ result: Object, requested: TimeInterval) {
+        renderPerformance(result["performance"] as? Object ?? [:])
+        observationRunning = result["running"] as? Bool ?? false
+        observationState = result["current_state"] as? String ?? "未知"
+        observationCandidate = result["candidate_state"] as? String ?? "未知"
+        let phase = result["phase"] as? String ?? "idle"
+        observationPhase = ["idle": "未启动", "waiting": "等待首帧", "observing": "正在观察", "unavailable": "画面不可用",
+                            "stale": "画面已过期", "stopping": "正在停止", "stopped": "已停止"][phase] ?? phase
+        observationError = result["error"] as? String ?? ""
+        let sequence = result["sequence"] as? Int ?? 0
+        let elapsed = result["elapsed_ms"] as? Double ?? 0
+        let actual = result["actual_hz"] as? Double ?? 0
+        let age = result["age_ms"] as? Double
+        observationMetrics = "第 \(sequence) 轮 · 耗时 \(String(format: "%.0f", elapsed)) ms · 实际 \(String(format: "%.1f", actual)) 次/秒" +
+            (age.map { " · 画面距今 \(String(format: "%.0f", $0)) ms" } ?? "")
+        let evidence = result["evidence"] as? [Object] ?? []
+        observationEvidence = evidence.isEmpty ? "暂无有效画面证据" : evidence.map { item in
+            let skipped = item["skipped"] as? Bool ?? false
+            let priority = item["priority"] as? Int ?? 0
+            let status = skipped ? "未检测" : ((item["found"] as? Bool ?? false) ? "命中" : "未命中")
+            let score = (item["score"] as? Double).map { String(format: "%.3f", $0) } ?? "—"
+            let rect = (item["rect"] as? Object).map { self.pretty($0) } ?? "无位置"
+            let detail = item["method"] as? String == "points" ? "多点 · 匹配 \((item["matched_points"] as? Int).map(String.init) ?? "—")/\(item["point_count"] as? Int ?? 0) 点" : "相似度 \(score)"
+            return "\(item["state"] as? String ?? "") / \(item["name"] as? String ?? "") · 优先级 \(priority) · \(status) · \(detail) · \(rect)"
+        }.joined(separator: "\n\n")
+        let formatter = DateFormatter(); formatter.dateFormat = "HH:mm:ss"
+        let history = result["history"] as? [Object] ?? []
+        observationHistory = history.isEmpty ? "暂无状态变化" : "历史记录（不代表当前画面）\n" + history.prefix(32).map { item in
+            let time = formatter.string(from: Date(timeIntervalSince1970: item["at"] as? Double ?? 0))
+            return "\(time)  \(item["previous"] as? String ?? "") → \(item["state"] as? String ?? "")"
+        }.joined(separator: "\n")
+        let hz = result["hz"] as? Double ?? 2
+        observationDeadline = requested + max(2, 3 / hz) - (age ?? 0) / 1000
+        if observationStopping || ProcessInfo.processInfo.systemUptime > (observationDeadline ?? 0) {
+            observationState = "未知"; observationCandidate = "未知"
+            observationEvidence = "暂无有效画面证据"
+            if observationStopping { observationPhase = observationRunning ? "正在停止" : "已停止" }
+            else if observationRunning { observationPhase = "画面已过期" }
+        }
+        if !observationRunning {
+            observationTimer?.invalidate(); observationTimer = nil
+            observationGrace?.cancel(); observationGrace = nil
+            observationDeadline = nil
+            if observationStopping { busy = false; observationStopping = false }
+        }
+    }
+
+    private func renderPerformance(_ value: Object) {
+        func milliseconds(_ key: String) -> String {
+            guard let number = value[key] as? Double else { return "—" }
+            return String(format: "%.1f", number) + " ms"
+        }
+        let materials = (value["material_count"] as? Int).map(String.init) ?? "—"
+        let attempts = value["attempts"] as? Int ?? 0
+        let failures = value["failures"] as? Int ?? 0
+        let overBudget = value["over_budget"] as? Int ?? 0
+        let stale = value["stale_results"] as? Int ?? 0
+        let samples = value["sample_count"] as? Int ?? 0
+        let limit = value["window_limit"] as? Int ?? 120
+        let recentFailure: String
+        if let at = value["last_failure_at"] as? Double {
+            let formatter = DateFormatter()
+            formatter.dateStyle = .short; formatter.timeStyle = .medium
+            let message = value["last_failure_message"] as? String ?? ""
+            recentFailure = formatter.string(from: Date(timeIntervalSince1970: at)) + " " +
+                (message.isEmpty ? "未提供错误详情" : message)
+        } else {
+            recentFailure = "无"
+        }
+        let streaming = value["capture_mode"] as? String == "window_stream"
+        let captureLabel = streaming ? "窗口流取帧" : "截图"
+        let duplicates = value["duplicate_results"] as? Int ?? 0
+        let checked = (value["checked_count"] as? Int).map(String.init) ?? "—"
+        let skipped = (value["skipped_count"] as? Int).map(String.init) ?? "—"
+        observationPerformanceSummary = "素材 \(materials) · 本轮检查 \(checked) · 跳过 \(skipped) · 最近轮 \(milliseconds("round_ms")) · p95 \(milliseconds("p95_ms"))"
+        observationPerformanceDetails = "\(captureLabel) \(milliseconds("screenshot_ms")) · 识别 \(milliseconds("recognition_ms"))\n" +
+            "高优先级先检查，命中后跳过低层素材。\n" +
+            "源画面年龄 p95 \(milliseconds("source_age_p95_ms")) · 重复读取 \(duplicates) 次（不增加连续确认）\n" +
+            "本次累计 \(attempts) 轮 · 成功 \(attempts - failures) · 失败 \(failures) · 超频率预算 \(overBudget) · 超龄结果 \(stale)\n" +
+            "最近失败（历史，不代表当前不可用）：\(recentFailure)\n" +
+            "最近最多 \(limit) 轮，当前 \(samples) 个样本（含失败）\n" +
+            "整轮 p50 \(milliseconds("p50_ms")) · p95 \(milliseconds("p95_ms")) · max \(milliseconds("max_ms"))\n" +
+            (streaming ? "采集频率跟随检测频率。取帧含窗口核对和内存转换，首轮含启动等待；源画面年龄单独统计，重复缓存不会续期。" : "截图含窗口核对和 PNG 读取。") +
+            "识别含 OpenCV 加载、图像转换、模板加载与匹配。整轮不含调频等待或界面刷新；超过 1000/目标频率 ms 记一次超预算。停止保留统计。"
+    }
+
     func reloadScripts() {
         perform("script.reload") { [weak self] result in
             guard let self else { return }
@@ -381,6 +695,7 @@ final class DesktopSession: ObservableObject {
     }
 
     func startScript() {
+        guard dryRun || requirePermission("accessibility") else { return }
         runLog = ""
         perform("script.start", ["name": selectedScript, "dry_run": dryRun,
                                  "dry_run_color": dryRunColor, "dry_run_screen_state": dryRunState]) { [weak self] result in
@@ -428,6 +743,7 @@ final class DesktopSession: ObservableObject {
     }
 
     private func record(_ message: String) {
+        let message = ISO8601DateFormatter().string(from: Date()) + " " + message
         diagnostics = String((diagnostics + message).suffix(32768))
         guard let workspace else { return }
         let folder = workspace.appendingPathComponent(".star")

@@ -7,8 +7,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 
 from game_automation.portable.domain.geometry import Rect
+from game_automation.portable.domain.color_pattern import validate_point_evidence
 from game_automation.portable.domain.image_matching import ImageMatch, ImageTemplate
 from game_automation.portable.domain.point_aliases import ImageSearchSpec
 
@@ -49,11 +51,15 @@ class ScreenStateCandidateResult:
     skipped: bool = False
     best_confidence: float | None = None
     best_rect: Rect | None = None
+    priority: int = 0
+    matched_points: int | None = None
+    point_count: int | None = None
 
     def __post_init__(self) -> None:
         """校验单个候选探测耗时、跳过状态和最佳诊断信息必须自洽。"""
         if self.elapsed_ms < 0:
             raise ValueError("screen state candidate elapsed_ms cannot be negative")
+        validate_point_evidence(self.point_count, self.matched_points, skipped=self.skipped, found=self.match is not None)
         if self.skipped and self.match is not None:
             raise ValueError("skipped screen state candidate cannot contain a match")
         if self.skipped and self.best_confidence is not None:
@@ -79,9 +85,41 @@ class ScreenStateCandidateResult:
 
 
 @dataclass(frozen=True, slots=True)
+class ProbeTiming:
+    """记录单帧截图与其余识别处理耗时，不将识别误称为纯匹配。"""
+    screenshot_ms: float
+    recognition_ms: float
+    capture_mode: str = 'snapshot'
+
+    def __post_init__(self) -> None:
+        """确保阶段计时为有限非负单调时钟差。"""
+        if any(not math.isfinite(value) or value < 0 for value in (self.screenshot_ms, self.recognition_ms)):
+            raise ValueError('probe timing must be finite and nonnegative')
+
+
+@dataclass(frozen=True, slots=True)
+class FrameProof:
+    """表达系统新画面或明确未变化事件，不把重复读取当新证据。"""
+    sequence: int
+    captured_at: float
+    kind: str = 'complete'
+
+    def __post_init__(self) -> None:
+        """源序号与单调时间必须有效，idle只代表系统明确未变化。"""
+        if type(self.sequence) is not int or self.sequence < 1:
+            raise ValueError('source sequence must be a positive integer')
+        if not math.isfinite(self.captured_at) or self.captured_at < 0:
+            raise ValueError('source timestamp must be finite and nonnegative')
+        if self.kind not in ('complete', 'idle'):
+            raise ValueError('source proof must be complete or idle')
+
+
+@dataclass(frozen=True, slots=True)
 class ScreenStateProbeResult:
     candidates: tuple[ScreenStateCandidateResult, ...]
     elapsed_ms: float
+    timing: ProbeTiming | None = None
+    proof: FrameProof | None = None
 
     def __post_init__(self) -> None:
         """校验一轮探测耗时必须非负。"""

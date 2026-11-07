@@ -15,6 +15,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+macos = [
+    "pyobjc-framework-ScreenCaptureKit>=12.1; sys_platform == 'darwin'",
+    "pyobjc-framework-libdispatch>=12.1; sys_platform == 'darwin'",
+]
 dev = [
     "pytest>=8.0",
     "pytest-cov>=5.0",

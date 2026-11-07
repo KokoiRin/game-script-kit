@@ -3,31 +3,67 @@ import SwiftUI
 
 struct WorkspaceView: View {
     @ObservedObject var session: DesktopSession
-    @State var tab = "prepare"
+    @State var tab = "observe"
+    @State var compact = true
+    @State var floating = true
     let chooseWorkspace: () -> Void
+    let changeObservationMode: (Bool) -> Void
+    let changeFloating: (Bool) -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: compact ? 10 : 16) {
             HStack {
                 Label("Star", systemImage: "sparkle").font(.title2.bold())
                 Spacer()
-                Text(session.workspace?.path ?? "尚未选择工作区").foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                Text((compact ? session.workspace?.lastPathComponent : session.workspace?.path) ?? "尚未选择工作区").foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle).help(session.workspace?.path ?? "请选择任务工作区")
                 Button("选择工作区…", action: chooseWorkspace)
-                    .disabled(session.busy || session.runRunning || session.phase == .starting || session.phase == .stopping)
+                    .disabled(session.busy || session.runRunning || session.observationRunning || session.phase == .starting || session.phase == .stopping)
             }
-            TabView(selection: $tab) {
-                preparation.tabItem { Label("素材准备", systemImage: "viewfinder") }.tag("prepare")
-                execution.tabItem { Label("脚本运行", systemImage: "play.circle") }.tag("run")
+            HStack {
+                Button(compact ? "展开准备" : "并排观察") {
+                    compact.toggle()
+                    tab = compact ? "observe" : "prepare"
+                    floating = compact
+                    changeObservationMode(compact)
+                    changeFloating(floating)
+                    if compact && session.canOperate { session.reloadObservationRules() }
+                }
+                Spacer()
+                Toggle("置顶", isOn: $floating).toggleStyle(.checkbox)
+                    .onChange(of: floating) { changeFloating($0) }
+            }
+            permissions
+            Group {
+                if compact {
+                    ObservationView(session: session, compact: true)
+                } else {
+                    TabView(selection: $tab) {
+                        preparation.tabItem { Label("素材准备", systemImage: "viewfinder") }.tag("prepare")
+                        ObservationView(session: session).tabItem { Label("实时识别", systemImage: "eye") }.tag("observe")
+                        execution.tabItem { Label("脚本运行", systemImage: "play.circle") }.tag("run")
+                    }
+                }
             }
             .onChange(of: tab) { value in
                 if value == "run" && session.scripts.isEmpty && session.canOperate { session.reloadScripts() }
+                if value == "observe" && session.canOperate { session.reloadObservationRules() }
+            }
+            .onChange(of: session.phase) { value in
+                if value == .ready && session.canOperate {
+                    if tab == "run" { session.reloadScripts() }
+                    if tab == "observe" { session.reloadObservationRules() }
+                }
             }
             HStack {
                 if session.busy || session.phase == .starting || session.phase == .stopping {
                     ProgressView().controlSize(.small)
                 }
                 Text(session.status).font(.callout).foregroundStyle(.secondary)
+                    .lineLimit(compact ? 2 : nil).help(session.status)
                 Spacer()
+                if session.observationRunning {
+                    Button("停止识别", action: session.stopObservation).disabled(session.phase != .ready)
+                }
                 if session.runRunning {
                     Button("停止脚本", action: session.stopScript).disabled(session.busy || session.phase != .ready)
                 }
@@ -38,6 +74,7 @@ struct WorkspaceView: View {
             if !session.errorMessage.isEmpty {
                 Label(session.errorMessage, systemImage: "exclamationmark.triangle")
                     .foregroundStyle(.orange).textSelection(.enabled).font(.callout)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             DisclosureGroup("诊断") {
                 ScrollView { Text(session.diagnostics.isEmpty ? "暂无后台诊断。" : session.diagnostics)
@@ -45,23 +82,83 @@ struct WorkspaceView: View {
                     .frame(height: 90)
             }.font(.caption)
         }
-        .padding(20)
-        .frame(minWidth: 980, minHeight: 720)
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            session.refreshPermissions()
+        }
+        .padding(compact ? 12 : 20)
+        .frame(minWidth: compact ? 440 : 980, minHeight: compact ? 580 : 720)
+    }
+
+    @ViewBuilder private var permissions: some View {
+        if compact && session.permissionsKnown && session.accessibilityAllowed && session.screenRecordingAllowed {
+            HStack {
+                Label("窗口与截图已授权", systemImage: "checkmark.circle").font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                Button("检测", action: session.refreshPermissions)
+                    .disabled(!session.canOperate || session.checkingPermissions)
+            }
+        } else {
+            GroupBox("系统权限") {
+                VStack(alignment: .leading, spacing: 8) {
+                    permissionControls
+                    if !session.accessibilityAllowed || !session.screenRecordingAllowed {
+                        Text("读取窗口需要窗口控制，截取画面需要录屏权限。请按系统提示为 Star 授权。")
+                            .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                        HStack {
+                            Button("打开隐私设置", action: session.openPrivacySettings)
+                            Button("重启后台", action: session.restartBackend).disabled(!session.canOperate)
+                        }
+                    }
+                }.padding(4)
+            }
+        }
+    }
+
+    @ViewBuilder private var permissionControls: some View {
+        if compact {
+            VStack(alignment: .leading, spacing: 8) {
+                accessibilityControl
+                screenRecordingControl
+                Button("重新检测", action: session.refreshPermissions).disabled(session.checkingPermissions)
+            }.disabled(!session.canOperate)
+        } else {
+            HStack {
+                accessibilityControl
+                Spacer()
+                screenRecordingControl
+                Spacer()
+                Button("重新检测", action: session.refreshPermissions).disabled(session.checkingPermissions)
+            }.disabled(!session.canOperate)
+        }
+    }
+
+    private var accessibilityControl: some View {
+        HStack {
+            Label("窗口控制：" + permissionLabel(session.accessibilityAllowed),
+                  systemImage: session.accessibilityAllowed ? "checkmark.circle" : "lock")
+            if !session.accessibilityAllowed {
+                Button("申请窗口控制") { session.requestPermission("accessibility") }
+            }
+        }
+    }
+
+    private var screenRecordingControl: some View {
+        HStack {
+            Label("屏幕截图：" + permissionLabel(session.screenRecordingAllowed),
+                  systemImage: session.screenRecordingAllowed ? "checkmark.circle" : "lock")
+            if !session.screenRecordingAllowed {
+                Button("申请屏幕截图") { session.requestPermission("screen_recording") }
+            }
+        }
+    }
+
+    private func permissionLabel(_ allowed: Bool) -> String {
+        session.permissionsKnown ? (allowed ? "已授权" : "未授权") : "待检测"
     }
 
     private var preparation: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                TextField("目标应用，例如 Safari 或游戏应用名", text: $session.application)
-                    .onChange(of: session.application) { _ in session.windows = []; session.selectedWindow = ""; session.clearFrame() }
-                Button("读取窗口", action: session.readWindows).disabled(!session.canOperate || session.application.isEmpty)
-                Picker("窗口", selection: $session.selectedWindow) {
-                    Text("请选择窗口").tag("")
-                    ForEach(session.windows) { Text($0.title).tag($0.id) }
-                }.frame(minWidth: 200)
-                    .onChange(of: session.selectedWindow) { _ in session.clearFrame() }
-                Button("截取画面", action: session.capture).disabled(!session.canOperate || session.selectedWindow.isEmpty)
-            }.disabled(session.busy || session.runRunning || session.phase != .ready)
+            TargetWindowPicker(session: session, showCapture: true)
             Text(session.frame.map { "\($0.title) · \($0.width) × \($0.height) 像素 · 点击取点，拖动框选" } ?? "选窗后截取一帧画面，准备点位和模板。")
                 .font(.caption).foregroundStyle(.secondary)
             ScreenshotCanvas(frame: session.frame, enabled: session.canOperate,
@@ -75,6 +172,25 @@ struct WorkspaceView: View {
                     .disabled(!session.canOperate || session.selection == nil || session.targetName.isEmpty)
                 Button("复制资源") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(session.resourceText, forType: .string) }
                     .disabled(session.resourceText.isEmpty)
+            }
+            GroupBox("登记状态素材") {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        TextField("该素材代表的状态，例如 对话框", text: $session.stateName)
+                        TextField("匹配阈值", text: $session.stateConfidence).frame(width: 90)
+                        Button("保存状态素材", action: session.saveStateMaterial)
+                            .disabled(!session.canOperate || session.selection == nil || session.targetName.isEmpty || session.stateName.isEmpty)
+                    }
+                    HStack {
+                        Text(session.searchRegion.map { "搜索范围：\($0.width) × \($0.height) 像素" } ?? "搜索范围：整个游戏窗口")
+                            .font(.caption).foregroundStyle(.secondary)
+                        Button("将框选设为搜索范围", action: session.useSelectionAsSearchRegion)
+                            .disabled(!session.canOperate || session.selection == nil)
+                        Button("使用整个窗口") { session.searchRegion = nil }.disabled(!session.canOperate)
+                    }
+                    Text("可先框选较大的搜索范围，再框选小素材。保存后到实时识别页开始观察。")
+                        .font(.caption).foregroundStyle(.secondary)
+                }.padding(4)
             }
             Text("点位以窗口左上角为原点，运行时仍需绑定目标窗口。模板保存到当前工作区 assets，重名不覆盖。")
                 .font(.caption).foregroundStyle(.secondary)

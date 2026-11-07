@@ -73,7 +73,7 @@ final class CanvasView: NSView {
 
     override func mouseDragged(with event: NSEvent) {
         guard let start, let current = pixel(event) else { return }
-        selected = region(start, current)
+        selected = canvasRegion(start, current)
         needsDisplay = true
     }
 
@@ -84,15 +84,11 @@ final class CanvasView: NSView {
             selected = nil
             onPoint?(last)
         } else {
-            let result = region(first, last)
+            let result = canvasRegion(first, last)
             selected = result
             onRegion?(result)
         }
         needsDisplay = true
     }
 
-    private func region(_ a: CGPoint, _ b: CGPoint) -> PixelRegion {
-        PixelRegion(left: Int(min(a.x, b.x)), top: Int(min(a.y, b.y)),
-                    width: max(1, Int(abs(a.x - b.x))), height: max(1, Int(abs(a.y - b.y))))
-    }
 }

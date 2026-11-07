@@ -22,6 +22,11 @@ ADR 保存重要设计取舍的状态、理由和代价。下表收录当前已�
 | [0006](0006-local-task-workspaces.md) | accepted | 框架主仓与外部本地任务工作区分离 | 本轮用户确认并授权实施 |
 | [0007](0007-preparation-and-execution.md) | accepted | 素材准备壳与脚本执行独立，底层截图能力共享 | 2026-11-05 用户要求分离 |
 | [0008](0008-native-macos-desktop.md) | accepted | SwiftUI/AppKit 原生壳与受管理的 Python 后台，替换网页入口 | 用户选择 macOS 原生优先并关注性能 |
+| [0009](0009-live-window-observation.md) | accepted | 原生状态观察页、独立只读采样和窗口素材坐标 | 用户要求接入实时识别 |
+
+| [0010](0010-window-stream-observation.md) | accepted | 低频常驻窗口流、源时间及独立确认 | 用户要求按2到5Hz接入 |
+
+| [0011](0011-priority-window-observation.md) | accepted | 窗口状态按优先级分组截断 | 用户要求命中高层后跳过低层 |
 
 ## 如何新增
 

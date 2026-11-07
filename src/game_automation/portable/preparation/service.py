@@ -43,6 +43,11 @@ class PreparationService:
             self._frame = PreparedFrame(uuid4().hex, window, image, time.time())
             return self._frame
 
+    def current_frame(self, frame_id: str) -> PreparedFrame:
+        """返回指定冻结帧的不可变数据，供素材登记验证采集环境。"""
+        with self._lock:
+            return self._require_frame(frame_id)
+
     def locate_point(self, frame_id: str, pixel: Point) -> tuple[Point, Point]:
         """把冻结图像中的像素点转换为窗口相对坐标和屏幕坐标。"""
         with self._lock:

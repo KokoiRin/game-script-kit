@@ -31,7 +31,14 @@ swift build --package-path native/StarDesktop
 open native/StarDesktop/dist/Star.app
 ```
 
-当前 `.app` 绑定本机仓库与 `.venv`，尚未打包 Python 或签名、公证。构建说明和 Mac 验收清单见 [原生壳说明](native/StarDesktop/README.md)，生命周期边界见 [ADR 0008](docs/adr/0008-native-macos-desktop.md)。当前云端尚未完成 macOS SDK 编译与 GUI 实测。
+建议安装到当前用户的“应用程序”，方便从 Finder 打开并确认授权对象：
+
+```bash
+.venv/bin/python tools/build_macos_app.py --install
+open ~/Applications/Star.app
+```
+
+首次进入后，顶部“系统权限”分别显示窗口控制与屏幕截图状态；点击所需权限的申请按钮，按系统提示确认。返回后会重新检测，必要时可点击“重启后台”。查询状态不主动申请权限，模拟运行不要求授权。构建器不申请权限；当前应用使用本地临时签名，仍绑定本机仓库与 Python 环境，尚未打包 Python 或进行发布签名、公证。SwiftPM 与本机工具链不兼容时，可显式加上 `--compiler swiftc`，按相同的 macOS 13 最低版本直接编译。详情见 [原生壳说明](native/StarDesktop/README.md) 和 [ADR 0008](docs/adr/0008-native-macos-desktop.md)。
 
 ## 使用本地任务工作区
 
@@ -98,6 +105,12 @@ CLI 可在真实运行前激活应用，并按标题绑定唯一的可见顶层�
 绑定后，点位按窗口左上角偏移，默认图片搜索限制在窗口内。Run Plan 在每个脚本开始前重新读取窗口位置。`--target-window-title` 要求同时指定 `--target-app`；目标应用参数不能与 `--dry-run` 同用。
 
 控制台尚未接入目标窗口选择。状态配置的区域仍是屏幕绝对坐标，不随窗口移动；模板也需要匹配当前缩放和主题。
+
+## 实时识别窗口状态
+
+在素材准备页登记状态素材及搜索范围，再进入“实时识别”页选择窗口，点击“开始观察”。支持每秒 1、2 或 5 次采样、连续帧确认、每条素材的证据及状态变化记录。停止、截图失败和过期结果不输出有效状态。
+
+窗口规则与素材保存在所选任务工作区。首次使用流程、坐标约定和限制见 [原生应用说明](native/StarDesktop/README.md#登记素材并开始实时识别)。观察保持只读，暂不驱动脚本动作。
 
 ## 创建和维护任务
 
