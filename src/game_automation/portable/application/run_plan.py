@@ -83,6 +83,13 @@ def run_script_plan(
                 finish_reason="cancelled",
                 items=tuple(item_results),
             )
+        # 资源尚未停止时不能继续建立新的运行环境，即使允许普通失败后继续。
+        if result.finish_reason == "cleanup_failed":
+            return ScriptPlanResult(
+                exit_code=result.exit_code or 1,
+                finish_reason="cleanup_failed",
+                items=tuple(item_results),
+            )
         incomplete = result.exit_code != 0 or result.finish_reason != "completed"
         if incomplete and first_incomplete_reason == "completed":
             first_incomplete_reason = (

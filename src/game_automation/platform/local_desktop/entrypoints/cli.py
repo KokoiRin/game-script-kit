@@ -18,7 +18,6 @@ from game_automation.platform.local_desktop.composition import (
 from game_automation.portable.application.project_assets import (
     IMAGE_ASSET_SUFFIXES,
     PROJECT_ROOT,
-    SCREEN_STATE_CONFIG_NAME,
     image_asset_root,
 )
 from game_automation.portable.application.screen_state_config import load_screen_state_names
@@ -36,6 +35,7 @@ from game_automation.portable.application.run_plan import (
 )
 from game_automation.portable.application.script_resources import (
     prepare_script_resources,
+    script_state_config_path,
 )
 from game_automation.portable.scripts_manager import DEFAULT_SCRIPT_CATALOG
 from game_automation.portable.scripts_manager.catalog import ScriptCatalog, ScriptNotFoundError
@@ -284,7 +284,7 @@ def _describe_script(script, project_root: Path) -> ScriptDetailsResult:
         script,
         asset_root=image_asset_root(project_root),
         supported_image_suffixes=IMAGE_ASSET_SUFFIXES,
-        state_names=_configured_screen_state_names(project_root),
+        state_names=_configured_screen_state_names(project_root, script),
     )
 
 
@@ -304,10 +304,10 @@ def _merge_dry_run_images(
     return tuple(dict.fromkeys((*explicit_images, *script_images)))
 
 
-def _configured_screen_state_names(project_root: Path) -> tuple[str, ...] | None:
+def _configured_screen_state_names(project_root: Path, script) -> tuple[str, ...] | None:
     """读取状态配置中的状态名，配置不可用时返回 None。"""
     try:
-        return load_screen_state_names(image_asset_root(project_root) / SCREEN_STATE_CONFIG_NAME)
+        return load_screen_state_names(script_state_config_path(script, project_root))
     except ValueError:
         return None
 

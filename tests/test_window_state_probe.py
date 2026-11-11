@@ -192,3 +192,20 @@ def test_invalid_window_number_is_not_coerced(number):
                 'bounds': {'X': 0, 'Y': 0, 'Width': 80, 'Height': 60}, 'id': number}]
     with pytest.raises(RuntimeError, match='有效编号'):
         WindowFrameSource(DesktopWindow('42:1', 'App', '页面', Rect(0, 0, 80, 60)), quartz=quartz(windows))
+
+
+@pytest.mark.parametrize('changed', [{'Width': 81}, {'Height': 59}])
+def test_window_size_error_reports_original_and_current_geometry(changed):
+    """尺寸变化错误保留前后矩形，便于定位短时系统窗口变化。"""
+    from game_automation.platform.macos.adapters.window_identity import BoundWindow
+    windows = [{'pid': 42, 'layer': 0, 'title': '页面',
+                'bounds': {'X': 20, 'Y': 30, 'Width': 80, 'Height': 60}, 'id': 100}]
+    binding = BoundWindow(DesktopWindow('42:1', 'App', '页面', Rect(20, 30, 80, 60)), quartz=quartz(windows))
+    windows[0]['bounds'].update(changed)
+    bounds = windows[0]['bounds']
+    with pytest.raises(RuntimeError) as caught:
+        binding.check()
+    message = str(caught.value)
+    assert '尺寸已变化' in message
+    assert '原窗口=(20, 30, 80, 60)' in message
+    assert f"当前窗口={(bounds['X'], bounds['Y'], bounds['Width'], bounds['Height'])}" in message

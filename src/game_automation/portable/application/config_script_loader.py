@@ -105,6 +105,7 @@ def _parse_config_script(data: Any, *, path: Path, asset_root: Path) -> Script:
     return Script(
         name=_required_text(data, "name", "script name"),
         window=ScreenWindow(),
+        target=_parse_target(data.get("target")),
         steps=_parse_steps(data.get("steps")),
         resources=_parse_resources(data.get("resources", {}), asset_root=asset_root),
     )
@@ -387,3 +388,15 @@ def _int_value(value: Any, field: str) -> int:
     if isinstance(value, bool) or not isinstance(value, int):
         raise ValueError(f"{field} must be an integer")
     return value
+
+
+def _parse_target(value):
+    """解析可选目标窗口声明，旧脚本仍保持屏幕坐标语义。"""
+    from game_automation.portable.domain.script import ScriptTarget
+    if value is None:
+        return None
+    if not isinstance(value,dict):
+        raise ValueError('script target must be an object')
+    if set(value) - {'application','window_title','width','height','backend'} or not {'application','window_title','width','height'} <= set(value):
+        raise ValueError('script target requires application, window_title, width, height and optional backend')
+    return ScriptTarget(value['application'],value['window_title'],value['width'],value['height'], backend=value.get('backend', 'desktop'))

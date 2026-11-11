@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 from game_automation.portable.application.capture_errors import WindowCaptureError
+from game_automation.portable.engine.cancellation import ScriptCancelledError
 
 import threading
 from dataclasses import dataclass, replace
@@ -73,10 +74,11 @@ class PyAutoGuiScreenImageLocator(ScreenImageLocator):
                 match_ms=match_ms,
                 total_ms=_elapsed_ms(total_started_at),
                 match=match,
+                best_confidence=located.best_confidence,
             )
             return match
         except Exception as exc:
-            if isinstance(exc, WindowCaptureError) or _is_setup_error(exc):
+            if isinstance(exc, (WindowCaptureError, ScriptCancelledError)) or _is_setup_error(exc):
                 raise exc
             raise RuntimeError(
                 "failed to perform screen image matching. Check template path, "
@@ -203,7 +205,7 @@ class PyAutoGuiScreenImageLocator(ScreenImageLocator):
             )
             return batch_results
         except Exception as exc:
-            if isinstance(exc, WindowCaptureError) or _is_setup_error(exc):
+            if isinstance(exc, (WindowCaptureError, ScriptCancelledError)) or _is_setup_error(exc):
                 raise exc
             raise RuntimeError(
                 "failed to perform screen image matching. Check template path, "
@@ -340,6 +342,7 @@ def _log_match_stages(
     match_ms: float,
     total_ms: float,
     match: ImageMatch | None,
+    best_confidence: float | None = None,
 ) -> None:
     """记录桌面图像匹配各阶段耗时，帮助定位性能瓶颈。"""
     if logger is None:
@@ -356,7 +359,8 @@ def _log_match_stages(
         f"match_ms={match_ms:.2f} "
         f"total_ms={total_ms:.2f} "
         f"found={match is not None} "
-        f"confidence={None if match is None else match.confidence}"
+        f"confidence={None if match is None else match.confidence} "
+        f"best_score={best_confidence}"
     )
 
 

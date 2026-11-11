@@ -13,6 +13,7 @@ from game_automation.platform.macos.adapters.application_window import (
     MacOSWindowCandidate,
 )
 from game_automation.portable.domain import Rect
+from game_automation.portable.application.ports import FocusedApplicationWindow
 
 
 class MacOSAccessibilityWindowBackend(MacOSWindowBackend):
@@ -61,6 +62,20 @@ class MacOSAccessibilityWindowBackend(MacOSWindowBackend):
                     )
                 )
         return tuple(candidates)
+
+    def read_focused_window(self, pid: int) -> FocusedApplicationWindow:
+        """只读取固定进程的 AX 焦点窗口及完整几何，不搜索或激活其他窗口。"""
+        accessibility = self._accessibility
+        application = accessibility.AXUIElementCreateApplication(pid)
+        error, window = accessibility.AXUIElementCopyAttributeValue(
+            application, accessibility.kAXFocusedWindowAttribute, None)
+        if error != accessibility.kAXErrorSuccess or window is None:
+            raise RuntimeError(f'无法读取绑定进程的焦点窗口：pid={pid} ax_error={error}')
+        title = self._read_ax_text(window, accessibility.kAXTitleAttribute)
+        rect = self._read_ax_window_rect(window)
+        if not title or rect is None:
+            raise RuntimeError('绑定进程焦点窗口缺少有效标题或完整几何')
+        return FocusedApplicationWindow(title, rect)
 
     def raise_window(self, window: MacOSWindowCandidate) -> None:
         """在窗口所属进程的 Accessibility tree 中找到同名窗口并 Raise。"""

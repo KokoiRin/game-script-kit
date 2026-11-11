@@ -29,9 +29,13 @@ from game_automation.portable.application.screen_state_reader import (
 from game_automation.portable.application.script_details import ScriptDetailsResult, describe_script_details
 from game_automation.portable.application.script_resources import (
     prepare_script_resources,
+    script_state_config_path,
 )
+from game_automation.portable.application.runtime_ports import RuntimeFactory
 from game_automation.portable.application.script_run import (
     InputDeviceFactory,
+    ApplicationActivatorFactory,
+    ApplicationWindowControllerFactory,
     PixelColorReaderFactory,
     ScreenImageLocatorFactory,
     run_script,
@@ -209,15 +213,21 @@ class LocalControlApplication:
         *,
         script_config_errors: tuple[ScriptConfigError, ...] = (),
         project_root: Path = PROJECT_ROOT,
+        real_runtime_factory: RuntimeFactory | None = None,
         real_device_factory: InputDeviceFactory | None = None,
         real_color_reader_factory: PixelColorReaderFactory | None = None,
         real_image_locator_factory: ScreenImageLocatorFactory | None = None,
         real_image_batch_locator_factory: ScreenImageBatchLocatorFactory | None = None,
+        real_application_activator_factory: ApplicationActivatorFactory | None = None,
+        real_application_window_controller_factory: ApplicationWindowControllerFactory | None = None,
     ) -> None:
         """注入脚本目录、项目路径和运行所需的外部能力工厂。"""
+        self._real_application_activator_factory = real_application_activator_factory
+        self._real_application_window_controller_factory = real_application_window_controller_factory
         self._catalog = catalog
         self._script_config_errors = script_config_errors
         self._project_root = project_root
+        self._real_runtime_factory = real_runtime_factory
         self._real_device_factory = real_device_factory
         self._real_color_reader_factory = real_color_reader_factory
         self._real_image_locator_factory = real_image_locator_factory
@@ -259,7 +269,7 @@ class LocalControlApplication:
             script,
             asset_root=self._image_asset_root(),
             supported_image_suffixes=IMAGE_ASSET_SUFFIXES,
-            state_names=self._configured_screen_state_names_for_readiness(),
+            state_names=self._configured_screen_state_names_for_readiness(script),
         )
 
     def run_named_script(
@@ -292,6 +302,9 @@ class LocalControlApplication:
                 dry_run_color=dry_run_color,
                 dry_run_images=dry_run_images if dry_run else (),
                 dry_run_screen_state=dry_run_screen_state,
+                real_application_activator_factory=self._real_application_activator_factory,
+                real_application_window_controller_factory=self._real_application_window_controller_factory,
+                real_runtime_factory=self._real_runtime_factory,
                 real_device_factory=self._real_device_factory,
                 real_color_reader_factory=self._real_color_reader_factory,
                 real_image_locator_factory=self._real_image_locator_factory,
@@ -408,6 +421,9 @@ class LocalControlApplication:
                     dry_run_color=dry_run_color,
                     dry_run_images=dry_run_images,
                     dry_run_screen_state=dry_run_screen_state,
+                    real_application_activator_factory=self._real_application_activator_factory,
+                    real_application_window_controller_factory=self._real_application_window_controller_factory,
+                    real_runtime_factory=self._real_runtime_factory,
                     real_device_factory=self._real_device_factory,
                     real_color_reader_factory=self._real_color_reader_factory,
                     real_image_locator_factory=self._real_image_locator_factory,
@@ -434,10 +450,10 @@ class LocalControlApplication:
         """返回本地 UI 允许读取模板图片的项目内目录。"""
         return image_asset_root(self._project_root)
 
-    def _configured_screen_state_names_for_readiness(self) -> tuple[str, ...] | None:
+    def _configured_screen_state_names_for_readiness(self, script: Script) -> tuple[str, ...] | None:
         """读取状态名用于详情检查，配置不可用时返回 None。"""
         try:
-            return load_screen_state_names(screen_state_config_path(self._project_root))
+            return load_screen_state_names(script_state_config_path(script, self._project_root))
         except ValueError:
             return None
 

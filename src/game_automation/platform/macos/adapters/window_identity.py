@@ -40,7 +40,11 @@ class BoundWindow:
         item = candidates[0]
         bounds = logical_bounds(item.get(q.kCGWindowBounds, {}))
         if bounds is None or bounds[2:] != (self.window.rect.width, self.window.rect.height):
-            raise WindowCaptureError('目标窗口尺寸已变化，请恢复采集素材时的窗口尺寸')
+            rect = self.window.rect
+            expected = (rect.left, rect.top, rect.width, rect.height)
+            raise WindowCaptureError(
+                f'目标窗口尺寸已变化，原窗口={expected}，当前窗口={bounds}，请恢复采集素材时的窗口尺寸'
+            )
         if self.number is None:
             number = item.get(q.kCGWindowNumber)
             if isinstance(number, bool) or not isinstance(number, int) or number <= 0:

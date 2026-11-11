@@ -102,12 +102,14 @@ class MacOSWindowStateProbe:
         """返回本探测器配置的搜索素材数量。"""
         return len(self._candidates)
 
-    def read(self) -> ScreenStateProbeResult:
+    def read(self, *, default_min_confidence=0.9) -> ScreenStateProbeResult:
         """在同一张窗口截图中按优先级核对，命中后跳过低层素材。"""
+        if not 0 < default_min_confidence <= 1:
+            raise ValueError("minimum state confidence must be greater than 0 and at most 1")
         started = perf_counter()
         self._screenshot_ms = 0.0
         self._proof = None
-        requests = tuple(ImageSearchRequest(c.template, c.search.region, c.search.min_confidence or 0.9, priority, pattern)
+        requests = tuple(ImageSearchRequest(c.template, c.search.region, c.search.min_confidence if c.search.min_confidence is not None else default_min_confidence, priority, pattern)
                          for c, priority, pattern in zip(self._candidates, self._priorities, self._patterns, strict=True))
         results = self._locator.locate_requests(requests, stop_on_priority_match=True)
         candidates = tuple(ScreenStateCandidateResult(c, r.match, r.elapsed_ms,

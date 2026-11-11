@@ -48,6 +48,7 @@ def run_script_on_local_desktop(
         target_window_title=target_window_title,
         real_application_activator_factory=build_real_application_activator,
         real_application_window_controller_factory=build_real_application_window_controller,
+        real_runtime_factory=build_native_runtime_factory(project_root),
         real_device_factory=build_real_input_device,
         real_color_reader_factory=build_real_color_reader,
         real_image_locator_factory=build_real_screen_image_locator,
@@ -81,10 +82,13 @@ def build_local_control_application(
         project_root=project_root,
         catalog=catalog_result.catalog,
         script_config_errors=catalog_result.script_config_errors,
+        real_runtime_factory=build_native_runtime_factory(project_root),
         real_device_factory=build_real_input_device,
         real_color_reader_factory=build_real_color_reader,
         real_image_locator_factory=build_real_screen_image_locator,
         real_image_batch_locator_factory=build_real_screen_image_batch_locator,
+        real_application_activator_factory=build_real_application_activator,
+        real_application_window_controller_factory=build_real_application_window_controller,
     )
 
 
@@ -123,3 +127,10 @@ def build_real_screen_state_reader(*, project_root: Path = PROJECT_ROOT) -> Scre
         real_image_locator_factory=build_real_screen_image_locator,
         real_image_batch_locator_factory=build_real_screen_image_batch_locator,
     )
+
+
+def build_native_runtime_factory(project_root: Path):
+    """延迟导入原生工厂；每个控制应用保留独立租约，不共享采集源。"""
+    from game_automation.platform.macos.adapters.window_runtime import MacOSRuntimeFactory
+
+    return MacOSRuntimeFactory(project_root)

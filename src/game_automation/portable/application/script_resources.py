@@ -7,12 +7,14 @@
 from __future__ import annotations
 
 from pathlib import Path
+from dataclasses import replace
 
 from game_automation.portable.application.project_assets import (
     IMAGE_ASSET_SUFFIXES,
     image_asset_root,
     screen_state_config_path,
 )
+from game_automation.portable.application.window_state_rules import rules_path
 from game_automation.portable.application.screen_state_config import load_screen_state_target_catalog
 from game_automation.portable.application.script_dependencies import script_needs_shared_resources
 from game_automation.portable.domain import Script, TargetCatalog
@@ -41,12 +43,7 @@ def script_with_shared_resources(script: Script, shared: TargetCatalog | None) -
     resources = merge_target_catalogs(shared, script.resources)
     if resources == script.resources:
         return script
-    return Script(
-        name=script.name,
-        window=script.window,
-        steps=script.steps,
-        resources=resources,
-    )
+    return replace(script, resources=resources)
 
 
 def merge_target_catalogs(shared: TargetCatalog, local: TargetCatalog) -> TargetCatalog:
@@ -63,3 +60,10 @@ def _merge_named_resources(shared, local):
     """按名称合并资源元组。"""
     local_names = {item.name for item in local}
     return (*tuple(item for item in shared if item.name not in local_names), *local)
+
+
+def script_state_config_path(script: Script, project_root: Path) -> Path:
+    """按脚本后端选取状态规则，供 CLI 和控制台的依赖检查一致使用。"""
+    if script.target is not None and script.target.uses_native_window:
+        return rules_path(project_root)
+    return screen_state_config_path(project_root)
