@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from game_automation.portable.adapters.sqlite_run_history import SqliteRunHistoryStore
 from game_automation.portable.application.local_control import LocalControlApplication
 from game_automation.portable.application.ports import ApplicationActivator, ApplicationWindowController
 from game_automation.portable.application.project_assets import PROJECT_ROOT
@@ -78,6 +79,7 @@ def build_local_control_application(
         base_catalog=DEFAULT_SCRIPT_CATALOG if include_builtin_scripts else ScriptCatalog(()),
     )
     return LocalControlApplication(
+        run_history=SqliteRunHistoryStore(project_root / ".star" / "runs.sqlite3"),
         project_root=project_root,
         catalog=catalog_result.catalog,
         script_config_errors=catalog_result.script_config_errors,

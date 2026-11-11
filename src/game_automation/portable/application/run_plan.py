@@ -76,6 +76,13 @@ def run_script_plan(
             stderr=result.stderr,
         )
         item_results.append(item_result)
+        if result.finish_reason == "cancelled":
+            # 用户取消优先于普通失败的继续策略，整体保留本次取消及之前各项的记录。
+            return ScriptPlanResult(
+                exit_code=result.exit_code,
+                finish_reason="cancelled",
+                items=tuple(item_results),
+            )
         incomplete = result.exit_code != 0 or result.finish_reason != "completed"
         if incomplete and first_incomplete_reason == "completed":
             first_incomplete_reason = (

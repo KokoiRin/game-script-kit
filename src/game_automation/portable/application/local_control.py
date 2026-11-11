@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from game_automation.portable.application.config_script_loader import ScriptConfigError
+from game_automation.portable.application.run_history import RunHistoryStore
 from game_automation.portable.application.project_assets import (
     IMAGE_ASSET_SUFFIXES,
     PROJECT_ROOT,
@@ -38,7 +39,7 @@ from game_automation.portable.application.script_run import (
 )
 from game_automation.portable.domain import Script
 from game_automation.portable.engine.ports import ScreenStateReader
-from game_automation.portable.engine.run_events import ScriptRunEvent, format_script_run_event
+from game_automation.portable.engine.run_events import ScriptRunEvent, format_script_run_event, script_run_event_to_payload
 from game_automation.portable.scripts_manager import DEFAULT_SCRIPT_CATALOG
 from game_automation.portable.scripts_manager.catalog import ScriptCatalog, ScriptNotFoundError
 
@@ -83,12 +84,14 @@ class _CancellationFlag:
 
 
 class _ThreadSafeRunLog:
-    def __init__(self) -> None:
+    def __init__(self, history: RunHistoryStore | None = None, run_id: str = "") -> None:
         """初始化线程安全 stdout/stderr 缓冲。"""
         self._lock = threading.Lock()
         self._stdout = io.StringIO()
         self._stderr = io.StringIO()
         self._events: list[ScriptRunEvent] = []
+        self._history = history
+        self.run_id = run_id
 
     def stdout_writer(self):
         """返回用于重定向 stdout 的 writer。"""
@@ -107,16 +110,48 @@ class _ThreadSafeRunLog:
         with self._lock:
             self._events.append(event)
             self._stdout.write(f"{format_script_run_event(event)}\n")
+            self._persist("event", script_run_event_to_payload(event))
 
     def write_stdout(self, text: str) -> None:
         """追加一段 stdout 文本。"""
         with self._lock:
             self._stdout.write(text)
+            if text:
+                self._persist("stdout", text)
 
     def write_stderr(self, text: str) -> None:
         """追加一段 stderr 文本。"""
         with self._lock:
             self._stderr.write(text)
+            if text:
+                self._persist("stderr", text)
+
+    def record_stop_request(self) -> None:
+        """保存停止请求，使取消终态可与用户操作对应。"""
+        with self._lock:
+            self._persist("stop_requested", {"source": "console"})
+
+    def finish(self, exit_code: int, finish_reason: str) -> None:
+        """保存实际终态，落盘失败只发出警告而不覆盖执行结果。"""
+        with self._lock:
+            if self._history is not None:
+                try:
+                    self._history.finish(self.run_id, exit_code, finish_reason)
+                except OSError as exc:
+                    self._storage_failed(exc)
+
+    def _persist(self, kind: str, data: object) -> None:
+        """在持有日志锁时逐条保存，故障后保留内存输出和停止能力。"""
+        if self._history is not None:
+            try:
+                self._history.append(self.run_id, kind, data)
+            except OSError as exc:
+                self._storage_failed(exc)
+
+    def _storage_failed(self, exc: OSError) -> None:
+        """防止日志故障递归写日志，并明确提示后续记录可能缺失。"""
+        self._history = None
+        self._stderr.write(f"运行日志保存中断，后续记录可能缺失：{exc}\n")
 
     def snapshot(self) -> tuple[str, str]:
         """返回当前 stdout/stderr 文本快照。"""
@@ -158,10 +193,10 @@ class _StringRunLogger:
 
 
 class _BackgroundScriptRun:
-    def __init__(self) -> None:
+    def __init__(self, history: RunHistoryStore | None = None, run_id: str = "") -> None:
         """初始化后台脚本会话状态。"""
         self.cancellation = _CancellationFlag()
-        self.log = _ThreadSafeRunLog()
+        self.log = _ThreadSafeRunLog(history, run_id)
         self._lock = threading.Lock()
         self._running = True
         self._exit_code: int | None = None
@@ -169,6 +204,7 @@ class _BackgroundScriptRun:
 
     def finish(self, exit_code: int, finish_reason: str) -> None:
         """记录后台脚本结束状态。"""
+        self.log.finish(exit_code, finish_reason)
         with self._lock:
             self._running = False
             self._exit_code = exit_code
@@ -200,6 +236,7 @@ class LocalControlApplication:
         real_color_reader_factory: PixelColorReaderFactory | None = None,
         real_image_locator_factory: ScreenImageLocatorFactory | None = None,
         real_image_batch_locator_factory: ScreenImageBatchLocatorFactory | None = None,
+        run_history: RunHistoryStore | None = None,
     ) -> None:
         """注入脚本目录、项目路径和运行所需的外部能力工厂。"""
         self._catalog = catalog
@@ -211,6 +248,7 @@ class LocalControlApplication:
         self._real_image_batch_locator_factory = real_image_batch_locator_factory
         self._run_lock = threading.Lock()
         self._current_run: _BackgroundScriptRun | None = None
+        self._run_history = run_history
 
     @property
     def workspace_path(self) -> Path:
@@ -220,6 +258,21 @@ class LocalControlApplication:
     def list_scripts(self) -> tuple[str, ...]:
         """返回 UI 可展示的脚本名称列表。"""
         return self._catalog.list_names()
+
+    def list_run_history(self) -> tuple[dict[str, object], ...]:
+        """查询当前工作区的持久历史，只有本会话能确认仍在运行。"""
+        if self._run_history is None:
+            return ()
+        with self._run_lock:
+            current = self._current_run
+            active_id = current.log.run_id if current is not None and current.snapshot().running else None
+        return tuple({**item, "running": item["id"] == active_id} for item in self._run_history.list_runs())
+
+    def read_run_history(self, run_id: str) -> dict[str, object]:
+        """读取所选运行的完整日志，查询不影响当前脚本。"""
+        if self._run_history is None:
+            raise LookupError("运行记录不存在")
+        return self._run_history.read_run(run_id)
 
     def list_script_config_errors(self) -> tuple[ScriptConfigError, ...]:
         """返回文件脚本加载时被隔离的配置错误。"""
@@ -317,24 +370,25 @@ class LocalControlApplication:
                     events=current.events,
                 )
             try:
+                run_id = self._run_history.begin(name, dry_run) if self._run_history is not None else ""
+            except OSError as exc:
+                session = _BackgroundScriptRun()
+                session.log.write_stderr(f"无法建立运行日志，脚本尚未执行：{exc}\n")
+                session.finish(2, "setup_failed")
+                self._current_run = session
+                return session.snapshot()
+            session = _BackgroundScriptRun(self._run_history, run_id)
+            self._current_run = session
+            try:
                 script = self._script_with_shared_resources(self._catalog.get(name))
             except ScriptNotFoundError as exc:
-                return ScriptRunStatus(
-                    running=False,
-                    exit_code=1,
-                    stderr=str(exc),
-                    finish_reason="script_not_found",
-                )
+                session.log.write_stderr(str(exc))
+                session.finish(1, "script_not_found")
+                return session.snapshot()
             except (LookupError, ValueError) as exc:
-                return ScriptRunStatus(
-                    running=False,
-                    exit_code=2,
-                    stderr=f"script resource configuration failed: {exc}\n",
-                    finish_reason="configuration_failed",
-                )
-
-            session = _BackgroundScriptRun()
-            self._current_run = session
+                session.log.write_stderr(f"script resource configuration failed: {exc}\n")
+                session.finish(2, "configuration_failed")
+                return session.snapshot()
             thread = threading.Thread(
                 target=self._run_script_session,
                 args=(
@@ -362,6 +416,8 @@ class LocalControlApplication:
         with self._run_lock:
             if self._current_run is None:
                 return ScriptRunStatus(running=False, exit_code=0, stderr="no script is running\n")
+            if self._current_run.snapshot().running:
+                self._current_run.log.record_stop_request()
             self._current_run.cancellation.cancel()
             return self._current_run.snapshot()
 
@@ -375,24 +431,36 @@ class LocalControlApplication:
         session: _BackgroundScriptRun,
     ) -> None:
         """在后台线程中运行脚本并写入会话状态。"""
-        with redirect_stdout(session.log.stdout_writer()), redirect_stderr(session.log.stderr_writer()):
-            result = run_script(
-                script,
-                dry_run=dry_run,
-                dry_run_color=dry_run_color,
-                dry_run_images=dry_run_images,
-                dry_run_screen_state=dry_run_screen_state,
-                real_device_factory=self._real_device_factory,
-                real_color_reader_factory=self._real_color_reader_factory,
-                real_image_locator_factory=self._real_image_locator_factory,
-                real_screen_state_reader_factory=self.build_screen_state_reader,
-                cancellation_token=session.cancellation,
-                logger=session.log,
-                emit_step_events=True,
-            )
-        if result.error_message is not None:
-            session.log.write_stderr(f"{result.error_message}\n")
-        session.finish(result.exit_code, result.finish_reason)
+        exit_code, finish_reason = 1, "failed"
+        try:
+            with redirect_stdout(session.log.stdout_writer()), redirect_stderr(session.log.stderr_writer()):
+                result = run_script(
+                    script,
+                    dry_run=dry_run,
+                    dry_run_color=dry_run_color,
+                    dry_run_images=dry_run_images,
+                    dry_run_screen_state=dry_run_screen_state,
+                    real_device_factory=self._real_device_factory,
+                    real_color_reader_factory=self._real_color_reader_factory,
+                    real_image_locator_factory=self._real_image_locator_factory,
+                    real_screen_state_reader_factory=self.build_screen_state_reader,
+                    cancellation_token=session.cancellation,
+                    logger=session.log,
+                    emit_step_events=True,
+                )
+            if result.error_message is not None:
+                session.log.write_stderr(f"{result.error_message}\n")
+            exit_code, finish_reason = result.exit_code, result.finish_reason
+        except Exception as exc:
+            # 会话拥有线程生命周期；运行用例未归一化的异常也必须产生可查询的终态。
+            error = f"script run failed: {type(exc).__name__}: {exc}"
+            session.log.write_stderr(f"{error}\n")
+            session.log.log_event(ScriptRunEvent(
+                event_type="run_finished", status="failed",
+                details={"exit_code": "1", "error": error},
+            ))
+        finally:
+            session.finish(exit_code, finish_reason)
 
     def _image_asset_root(self) -> Path:
         """返回本地 UI 允许读取模板图片的项目内目录。"""

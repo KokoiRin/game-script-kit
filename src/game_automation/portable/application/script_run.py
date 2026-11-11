@@ -16,6 +16,7 @@ from game_automation.portable.adapters.dry_run import (
     DryRunScreenStateReader,
 )
 from game_automation.portable.application.ports import ApplicationActivator, ApplicationWindowController
+from game_automation.portable.application.script_dependencies import validate_script_point_references
 from game_automation.portable.domain import AreaWindow, Color, ImageMatch, ImageTemplate, Rect, Script
 from game_automation.portable.engine.ports import (
     CancellationToken,
@@ -71,6 +72,7 @@ def run_script(
             details={"script": script.name, "dry_run": str(dry_run)},
         )
     try:
+        validate_script_point_references(script)
         prepared_script = _prepare_target_environment(
             script,
             dry_run=dry_run,

@@ -43,6 +43,18 @@ cp scripts/paste.json ~/StarWorkspaces/my-tasks/scripts/
 
 浏览器打开 <http://127.0.0.1:8766/>，页面会显示当前工作区路径。一个服务绑定一个工作区；切换时启动对应服务。控制台提供脚本详情、模拟或真实运行、停止和运行记录，没有项目选择器；修改脚本后需重启服务。默认 UI 端口仍为 8765。
 
+控制台的每次运行自动保存到所选工作区的 `.star/runs.sqlite3`。展开“历史运行”可查看最近 50 次的开始/结束时间、模式、最后步骤、结束原因和日志，并下载该次完整 JSON。日志逐条提交，重启不覆盖旧记录；若缺少结束记录，会显示“尚无结束记录”，不据此推定成功或取消。起步就无法写日志时不执行脚本，中途保存失败会在当前输出中警告。日志不主动读取剪贴板内容或截屏。
+
+也可以从命令行查询同一工作区的控制台记录：
+
+```bash
+.venv/bin/star --workspace ~/StarWorkspaces/my-tasks history
+.venv/bin/star --workspace ~/StarWorkspaces/my-tasks history --json
+.venv/bin/star --workspace ~/StarWorkspaces/my-tasks history RUN_ID > run-log.json
+```
+
+当前持久保存范围是控制台启动的后台运行；CLI `run` / `run-plan` 仍输出到终端。全部历史留在本机工作区，不自动删除；超过 50 次的记录仍可按 ID 导出。存储取舍见 [ADR 0007](docs/adr/0007-persistent-run-history.md)。
+
 ## 运行与停止
 
 先模拟检查步骤，再执行真实操作：
@@ -61,7 +73,7 @@ cp scripts/paste.json ~/StarWorkspaces/my-tasks/scripts/
 .venv/bin/star run file-script-demo --dry-run --dry-run-screen-state 主页
 ```
 
-`--dry-run-script-images` 把当前脚本的图片依赖全部模拟为找到；这不能证明真实识图或任务完成。Run Plan 默认在首个未正常结束项后停止，`--continue-on-error` 可继续收集后续结果，其取消传播限制见当前状态。
+`--dry-run-script-images` 把当前脚本的图片依赖全部模拟为找到；这不能证明真实识图或任务完成。Run Plan 默认在首个未正常结束项后停止，`--continue-on-error` 可在普通失败或条件未满足后继续收集结果；用户取消始终终止计划，并保留取消结果。
 手动使用 `--dry-run-image assets/start.png` 时，相对路径基于所选工作区根；绝对路径保持原样。
 
 CLI 按 Ctrl+C 取消；控制台点击“停止”。取消在执行边界生效，正在进行的等待或平台调用可能延迟响应。`completed` 表示按所选分支与循环规则正常结束；`stopped_unmet_condition` 表示必要条件未满足。退出码 0 本身不证明业务任务完成。
@@ -95,7 +107,7 @@ CLI 可在真实运行前激活应用，并按标题绑定唯一的可见顶层�
 }
 ```
 
-用相同 `--workspace` 执行 `list`、`details 我的点击` 与 `run 我的点击 --dry-run`。图片路径相对该根的 `assets/`，状态条件使用其中的 `screen-states.json`。无效脚本单独报告，不阻塞其他有效脚本。
+用相同 `--workspace` 执行 `list`、`details 我的点击` 与 `run 我的点击 --dry-run`。图片路径相对该根的 `assets/`，状态条件使用其中的 `screen-states.json`。无效脚本单独报告，不阻塞其他有效脚本。详情标明命名点位是否已配置；运行前会检查所有分支中的点位引用，未知点位以 `configuration_failed` 结束，不发出输入动作。
 
 `repeat.times: null` 表示无限循环；`wait_until_image.timeout: null` 表示无限等待。`break_if_image` 退出当前层循环，`click.then_hotkeys` 在点击后连续发送组合键。当前没有通用重试、任务路由或子脚本调用；局部恢复仍在 [讨论稿](docs/design/local-recovery.md) 中。
 

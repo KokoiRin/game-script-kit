@@ -1,6 +1,6 @@
 """分析脚本详情中的外部依赖和运行前检查。
 
-本 module 负责从 Script 步骤树提取可展示依赖、结构化状态/图片依赖和 readiness；
+本 module 负责提取 Script 的点位、状态和图片依赖，校验点位引用并生成 readiness；
 它不生成步骤摘要、不运行脚本，也不处理 HTTP/UI 展示细节。
 """
 
@@ -31,6 +31,7 @@ from game_automation.portable.domain import (
 from game_automation.portable.domain.point_aliases import (
     UnknownImageNameError,
     UnknownImageSearchNameError,
+    UnknownPointNameError,
 )
 
 
@@ -44,6 +45,15 @@ class ScriptDependencyDetails:
     point_dependencies: tuple[str, ...] = ()
     image_dependencies: tuple[str, ...] = ()
     readiness: tuple[tuple[str, str, str], ...] = ()
+
+
+def validate_script_point_references(script: Script) -> None:
+    """在创建桌面能力前检查所有分支中的命名点位，拒绝无法解析的引用。"""
+    for name in _collect_point_dependencies(script.steps):
+        try:
+            script.resources.resolve_point(PointRef(name))
+        except UnknownPointNameError as exc:
+            raise ValueError(str(exc)) from exc
 
 
 def describe_script_dependencies(
@@ -93,6 +103,7 @@ def _describe_readiness(
     for dependency in dependencies:
         if dependency.startswith("状态: "):
             checks.append(_screen_state_readiness(dependency, state_names=state_names))
+    checks.extend(_point_readiness(name, resources) for name in _collect_point_dependencies(steps))
     checks.extend(
         _image_readiness(
             dependency,
@@ -372,6 +383,15 @@ def _screen_state_readiness(
     if state in state_names:
         return dependency, "ok", "状态已配置"
     return dependency, "missing", "状态未配置"
+
+
+def _point_readiness(name: str, resources: TargetCatalog) -> tuple[str, str, str]:
+    """复用领域解析检查点位别名，不读取桌面或推断坐标是否有效。"""
+    try:
+        resources.resolve_point(PointRef(name))
+    except UnknownPointNameError:
+        return f"点位: {name}", "missing", "点位未配置"
+    return f"点位: {name}", "ok", "点位已配置"
 
 
 def _image_readiness(

@@ -1,6 +1,6 @@
 # Star 当前实现快照
 
-快照日期：2026-10-18。本文供接手项目、讨论下一步或修改相关行为时快速定位。
+快照日期：2026-10-21。本文供接手项目、讨论下一步或修改相关行为时快速定位。
 它描述当前代码与已获得的证据；架构约束见 [architecture.md](architecture.md)，运行方法见 [README](../README.md)。
 实现变化后更新对应条目；缺口解决后删除旧问题，保留必要的验证证据。
 
@@ -38,6 +38,7 @@ JSON 文件按文件名排序加载，不递归读取子目录；脚本名来自
 | 本地 UI | 默认模拟；显示工作区路径，选择、运行、停止、日志、折叠详情与模拟设置 | 一个服务绑定一个根并在启动时保存 catalog；改脚本后需重启，刷新网页不足以更新 |
 
 UI 只允许一个后台脚本会话；运行中禁止切换和重复启动，服务端也拒绝第二次启动。
+控制台后台运行自动保存到当前工作区的 `.star/runs.sqlite3`：逐条保存带时区的输出、步骤事件、停止请求及实际终态。页面“历史运行”展示最近 50 次摘要与末尾 300 行，支持完整 JSON 下载；CLI `history [RUN_ID] [--json]` 可查询同一存储。更早记录仍可按 ID 导出，CLI `run` / `run-plan` 尚未接入持久保存。无终态记录保持 `unfinished`，不能据此认定完成、取消或崩溃；旧日志导入时未知的原时间留空。开始前无法写入时拒绝执行，中途写入失败保留实际执行结果与停止能力并警告。设计取舍见 [ADR 0007](adr/0007-persistent-run-history.md)。
 断网时 UI 自动重试状态查询；启动 POST 没收到结果时不会自动重发，避免重复执行。
 现有 UI 没有接入 CLI 的目标应用/窗口参数，也没有暂停、单步执行或从中断点恢复。
 入口代码见 [CLI](../src/game_automation/platform/local_desktop/entrypoints/cli.py)、[HTTP](../src/game_automation/platform/local_desktop/entrypoints/local_ui.py) 和 [页面交互](../src/game_automation/platform/local_desktop/entrypoints/ui_static/control.js)。
@@ -118,15 +119,18 @@ UI 自动把所选脚本解析出的图片依赖全部视为找到；CLI 通过�
 | `WaitUntil` 有限等待到期仍未满足 | `exit_code=0, stopped_unmet_condition` | 同样停止整个脚本；不是自动重试或继续 |
 | `break_if_image` 命中 | 退出对应层 Repeat，无独立脚本结束原因 | 循环后的步骤继续；外层中断仍能穿透嵌套循环 |
 | UI 用户停止被执行器观察到 | `exit_code=130, cancelled` | 当前脚本取消；已发生的输入不会回滚 |
-| 运行配置/初始化/动作失败 | 通常分别为 `configuration_failed/setup_failed/failed` | 返回错误原因；异常覆盖缺口见下节 |
-| Run Plan 默认遇到未完整执行项 | 保留首个未完成原因和首个非零退出码 | 停止后续脚本，即使该项退出码为 0 |
-| Run Plan 开启 `continue_on_error` | 当前实现对所有未完成项继续 | 取消也继续是已复现缺口，见下节 |
+| 运行配置/初始化/动作失败 | 通常分别为 `configuration_failed/setup_failed/failed` | 返回错误原因；后台未归一化异常以 `failed` 结束会话，允许再次启动 |
+| Run Plan 默认遇到未完整执行项 | 普通未完成项保留首个原因和首个非零退出码 | 停止后续脚本，即使该项退出码为 0；取消结果优先 |
+| Run Plan 开启 `continue_on_error` | 普通失败或条件未满足可继续 | 一旦返回 `cancelled`，立即结束计划并以该项取消结果汇总，保留此前逐项记录 |
 
 取消是协作式检查：步骤边界、真正点击前、图片等待轮询、每组连续按键前会检查。
 当前设备 `wait` 使用阻塞休眠；正在进行的等待/平台调用结束前，停止请求不保证立即生效。
 `click.then_hotkeys` 之间检查用户取消，但不再次检查循环图片 guard。
 实现见 [runner.py](../src/game_automation/portable/engine/runner.py) 与 [run_plan.py](../src/game_automation/portable/application/run_plan.py)。
 相关行为测试见 [test_runner.py](../tests/test_runner.py)、[test_repeat_break_image.py](../tests/test_repeat_break_image.py)、[test_run_plan.py](../tests/test_run_plan.py) 和 [test_local_control.py](../tests/test_local_control.py)。
+
+命名点位的详情检查与运行前校验都使用领域资源目录解析引用；运行前检查所有分支、循环与偏移目标中的点位，未知点位返回 `exit_code=2, configuration_failed`，不会先激活应用或创建输入设备。后台会话在异常路径也会清理运行状态、记录错误和终止事件；已归一化的完成、条件停止、取消等结果保持原意。
+详情仍保留现有 `exit_code=0` 契约，缺失依赖通过 readiness 展示；运行前已拒绝未知点位，尚无覆盖所有依赖的统一严格校验入口。
 
 ## 框架示例与本地业务资料
 
@@ -142,19 +146,9 @@ UI 自动把所选脚本解析出的图片依赖全部视为找到；CLI 通过�
 
 下面是待处理现状，解决后更新或删除；不能把这些问题固化为预期行为。
 
-**已在 2026-10-18 前轮通过纯 fake 复现，未写成本轮新增回归测试：**
-
-- 未定义 `PointRef`：后台线程因 `UnknownPointNameError` 退出，但会话仍为 `running=True`，无法正确反映结束。
-  路径是 `TargetCatalog.resolve_point` → runner → `run_script` 的异常覆盖之外 → `_run_script_session` 未执行 `session.finish`。
-  定位：[point_aliases.py](../src/game_automation/portable/domain/point_aliases.py)、`script_run.py`、[local_control.py](../src/game_automation/portable/application/local_control.py)。
-- Run Plan 开启 `continue_on_error`：第一项返回 `cancelled` 后仍调用下一项。
-  `run_script_plan` 当前仅按 `incomplete and not continue_on_error` 决定是否结束，没有独立的取消边界。
-  该复现验证用例层结果编排，不是 CLI 真实 Ctrl+C 或桌面停止验证。
-
 **静态代码核查所得，尚未独立复现：**
 
 - 所有脚本在描述/运行前都加载全局状态共享资源；无关状态模板损坏或缺失可能阻断纯按键脚本。
-- `details` 的 readiness 主要检查图片和状态名称，未覆盖点位别名；缺失依赖也不改变详情的 `exit_code=0`。
 - JSON 局部图片路径仅拼接 assets；状态配置却严格限制路径位于 assets，路径约束不一致。
 - loader 对多余字段通常不报错，部分可选字段拼写错误可能被忽略；缺少统一严格校验入口。
 
@@ -163,8 +157,10 @@ UI 自动把所选脚本解析出的图片依赖全部视为找到；CLI 通过�
 
 ## 验证记录
 
+- **2026-10-21 控制台持久日志**：完整测试 `522 passed`，`git diff --check` 与 JavaScript 语法检查通过。公开应用与真实 HTTP 测试覆盖逐次隔离、服务重建后读取、条件停止/配置错误/平台故障/取消、存储失败提示、完整下载及未知记录。真实控制台已核对旧快照导入、历史切换、模拟启动与停止、再次重启后读取；下载的 stdout/stderr 和 1811 条旧事件与抢救原件一致。本轮未真实运行聊天发送，日志中的按键事件不能替代消息送达证据。
+- **2026-10-19 运行控制修复**：先通过公开应用接口复现未知点位、设备初始化/动作意外异常导致会话不结束，以及继续策略覆盖取消；修复后完整测试 `509 passed`，`git diff --check` 通过。新增真实 HTTP 请求验证文件脚本的失败终态、错误与结束事件，以及失败后再次启动；输入设备由 fake 隔离。CLI 文件脚本检查确认缺点位在动作前以退出码 2 结束。本轮没有验证真实浏览器交互、桌面输入或游戏结果。
 - **2026-10-18 本轮自动化**：完整测试 `494 passed`；`git diff --check`、JavaScript 语法检查和 193 个本地文档链接/锚点检查通过。覆盖 CLI/HTTP 工作区隔离、状态 reader 装配、资源根与启动目录无关，以及显式图片模拟路径兼容。
 - **本轮迁移**：32 份原始任务文件按大小与 SHA256 校验一致；旧分支和完整 stash 保存到仓库外的自包含 Git bundle，`git bundle verify` 通过。未采纳实验没有合入主线。
 - **本轮浏览器证据**：控制台显示外部任务工作区的绝对路径，列表只含该根的四个脚本，初始仍为模拟模式；个人坐标脚本和粘贴计划已通过 CLI 模拟。
-- **同日前轮浏览器证据**：确认脚本选择、详情、图片/组合键模拟，以及条件未满足结果展示。前轮两项债务的纯 fake 复现本轮未重跑；近期推进建议见 [重启计划](restart-plan.md)。
+- **同日前轮浏览器证据**：确认脚本选择、详情、图片/组合键模拟，以及条件未满足结果展示；当时尚未重跑的两项运行控制债务已由 2026-10-19 回归覆盖。近期推进建议见 [重启计划](restart-plan.md)。
 - **真实游戏验证**：尚无本轮完整任务验收；模拟、测试和靶场结果均不替代真实游戏的完成证据。

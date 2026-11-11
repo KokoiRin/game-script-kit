@@ -3,6 +3,8 @@
 这些测试直接覆盖 portable run_script 的 interface，真实平台 adapter 通过工厂注入。
 """
 
+import pytest
+
 from game_automation.portable.application.script_run import run_script
 from game_automation.portable.application.ports import FocusedApplicationWindow
 from game_automation.portable.domain import (
@@ -13,7 +15,9 @@ from game_automation.portable.domain import (
     ImageMatch,
     ImageTemplate,
     ImageTarget,
+    If,
     Point,
+    PointRef,
     Rect,
     ScreenWindow,
     ScreenStateIs,
@@ -29,6 +33,31 @@ from game_automation.portable.scripts_manager import (
 
 
 IMAGE_TEMPLATE_PATH = "assets/start.png"
+
+
+@pytest.mark.parametrize("dry_run", [False, True])
+def test_unknown_point_is_rejected_before_environment_setup(dry_run) -> None:
+    """未选中分支也包含未知点位时，应返回配置失败，且不激活应用或创建输入设备。"""
+    prepared = []
+
+    def record_environment_setup():
+        """记录不应发生的应用激活或设备初始化。"""
+        prepared.append("setup")
+        return object()
+
+    script = Script("invalid-point", ScreenWindow(), (
+        If(ScreenStateIs("主页"), (Wait(0),), (Click(PointRef("missing")),)),
+    ))
+    result = run_script(
+        script, dry_run=dry_run, dry_run_screen_state="主页", target_application="unused",
+        real_device_factory=record_environment_setup,
+        real_application_activator_factory=record_environment_setup,
+    )
+
+    assert result.exit_code == 2
+    assert result.finish_reason == "configuration_failed"
+    assert "unknown point target: missing" in result.error_message
+    assert prepared == []
 
 
 class FakeRunLogger:

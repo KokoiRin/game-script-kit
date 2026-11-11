@@ -28,6 +28,67 @@ from game_automation.portable.scripts_manager.catalog import ScriptCatalog
 from game_automation.platform.local_desktop.entrypoints.local_ui import create_local_control_server
 
 
+def test_local_ui_history_survives_restart_and_downloads_full_log(tmp_path) -> None:
+    """真实装配在两次 HTTP 服务之间保留记录，且下载与详情内容一致。"""
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    (scripts / "wait.json").write_text('{"name":"history-test", "steps":[{"wait":0}]}')
+    for iteration in range(2):
+        server = create_local_control_server(host="127.0.0.1", port=0, project_root=tmp_path,
+                                             include_builtin_scripts=False)
+        thread = threading.Thread(target=lambda: server.serve_forever(poll_interval=0.01))
+        thread.start()
+        try:
+            if iteration == 0:
+                _request_json(server.server_address, "POST", "/api/run-script", {"name": "history-test", "dry_run": True})
+                assert _wait_for_script_run_over_http(server.server_address)["finish_reason"] == "completed"
+            history = _request_json(server.server_address, "GET", "/api/run-history")
+            assert len(history["runs"]) == 1
+            run_id = history["runs"][0]["id"]
+            assert history["runs"][0]["running"] is False
+            detail = _request_json(server.server_address, "GET", f"/api/run-history?id={run_id}")
+            assert detail["summary"]["name"] == "history-test"
+            assert any(r["kind"] == "stdout" and "wait" in r["data"] for r in detail["records"])
+            connection = http.client.HTTPConnection(*server.server_address, timeout=5)
+            try:
+                connection.request("GET", f"/api/run-history?id={run_id}&download=1")
+                response = connection.getresponse()
+                assert "attachment" in response.getheader("Content-Disposition")
+                assert json.loads(response.read()) == detail
+                connection.request("GET", "/api/run-history?id=..%2F..%2Foutside")
+                response = connection.getresponse()
+                assert response.status == 404
+                assert "不存在" in json.loads(response.read())["error"]
+            finally:
+                connection.close()
+        finally:
+            server.shutdown()
+            thread.join(timeout=2)
+            server.server_close()
+
+
+def test_local_ui_history_storage_failure_is_visible(tmp_path) -> None:
+    """损坏的存储返回明确错误，不能静默显示空历史。"""
+    log_dir = tmp_path / ".star"
+    log_dir.mkdir()
+    (log_dir / "runs.sqlite3").write_text("broken database")
+    server = create_local_control_server(host="127.0.0.1", port=0, project_root=tmp_path,
+                                         include_builtin_scripts=False)
+    thread = threading.Thread(target=lambda: server.serve_forever(poll_interval=0.01))
+    thread.start()
+    connection = http.client.HTTPConnection(*server.server_address, timeout=5)
+    try:
+        connection.request("GET", "/api/run-history")
+        response = connection.getresponse()
+        assert response.status == 503
+        assert "存储失败" in json.loads(response.read())["error"]
+    finally:
+        connection.close()
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+
 def test_local_ui_lists_scripts_over_http() -> None:
     """验证 UI HTTP 接口可以返回脚本列表。"""
     server = create_local_control_server(host="127.0.0.1", port=0)
@@ -309,6 +370,17 @@ def _request_text(address, method: str, path: str) -> str:
     return data
 
 
+def _wait_for_script_run_over_http(address) -> dict[str, object]:
+    """通过控制台实际轮询接口等待终态，不读取应用内部线程。"""
+    deadline = time.monotonic() + 2
+    while time.monotonic() < deadline:
+        status = _request_json(address, "GET", "/api/script-run")
+        if not status["running"]:
+            return status
+        time.sleep(0.01)
+    raise AssertionError("HTTP script status did not finish")
+
+
 class FakeControlApplication:
     """仅实现控制台保留的应用接口，避免调试接口被意外恢复。"""
 
@@ -556,3 +628,63 @@ def test_local_ui_workspace_uses_real_composition_for_catalog_details_and_dry_ru
     assert "click Point(x=0, y=0)" in status["stdout"]
     assert "hotkey command+v" in status["stdout"]
     assert status["stderr"] == ""
+
+
+@pytest.mark.parametrize("failure", ["unknown-point", "unexpected-action"])
+def test_local_ui_failure_status_allows_next_run_over_http(tmp_path, monkeypatch, failure) -> None:
+    """文件脚本缺点位或设备抛出意外异常时，真实 HTTP 终态应包含错误且允许再次运行。"""
+    from game_automation.platform.local_desktop import composition
+
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    (scripts / "broken.json").write_text(json.dumps({
+        "name": "broken",
+        "resources": {"points": {"button": {"x": 10, "y": 20}}},
+        "steps": [{"click": {"point": "missing" if failure == "unknown-point" else "button"}}],
+    }), encoding="utf-8")
+    (scripts / "valid.json").write_text(json.dumps({
+        "name": "valid", "steps": [{"wait": 0}],
+    }), encoding="utf-8")
+
+    class BrokenDevice:
+        def click(self, target):
+            """以本地 fake 代替设备，在动作边界制造异常，不操作桌面。"""
+            raise OSError("device disconnected")
+
+    monkeypatch.setattr(composition, "build_real_input_device", BrokenDevice)
+    server = create_local_control_server(
+        host="127.0.0.1", port=0, project_root=tmp_path, include_builtin_scripts=False,
+    )
+    thread = threading.Thread(target=lambda: server.serve_forever(poll_interval=0.01))
+    thread.start()
+    try:
+        address = server.server_address
+        details = _request_json(address, "GET", "/api/script-details?name=broken")
+        _request_json(address, "POST", "/api/run-script", {
+            "name": "broken", "dry_run": failure == "unknown-point",
+        })
+        failed = _wait_for_script_run_over_http(address)
+        _request_json(address, "POST", "/api/run-script", {"name": "valid", "dry_run": True})
+        restarted = _wait_for_script_run_over_http(address)
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+    assert not failed["running"]
+    if failure == "unknown-point":
+        assert details["readiness"] == [{"label": "点位: missing", "status": "missing", "message": "点位未配置"}]
+        assert failed["exit_code"] == 2
+        assert failed["finish_reason"] == "configuration_failed"
+        assert "unknown point target: missing" in failed["stderr"]
+    else:
+        assert failed["exit_code"] == 1
+        assert failed["finish_reason"] == "failed"
+        assert "OSError: device disconnected" in failed["stderr"]
+    assert failed["events"][-1]["type"] == "run_finished"
+    assert failed["events"][-1]["status"] == failed["finish_reason"]
+    assert restarted["running"] is False
+    assert restarted["exit_code"] == 0
+    assert restarted["finish_reason"] == "completed"
+    assert restarted["stderr"] == ""
+    assert "wait 0.0s" in restarted["stdout"]

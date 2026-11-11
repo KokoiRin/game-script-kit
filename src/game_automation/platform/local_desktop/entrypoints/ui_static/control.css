@@ -6,6 +6,12 @@
   font-synthesis: none;
 }
 * { box-sizing: border-box; }
+.history-toolbar { display: flex; align-items: end; gap: 12px; flex-wrap: wrap; padding: 0 18px; }
+.history-toolbar label { flex: 1; min-width: 180px; font-size: 12px; }
+.history-toolbar select { display: block; width: 100%; margin-top: 8px; }
+.history-toolbar a { font-size: 13px; color: #34745d; padding-bottom: 12px; }
+.history-hint { padding: 0 18px; color: #78827d; font-size: 12px; line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere; }
+#history-output { max-height: 400px; }
 body { margin: 0; min-height: 100vh; }
 main { max-width: 920px; margin: 0 auto; padding: 32px 28px 26px; }
 header, .brand, .control-heading, .output-heading, .mode-row { display: flex; align-items: center; }

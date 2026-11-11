@@ -19,6 +19,7 @@ from game_automation.portable.domain import (
     ImageSearchSpec,
     ImageTarget,
     ImageTemplate,
+    NamedPoint,
     NamedImage,
     NamedImageSearch,
     Point,
@@ -306,6 +307,25 @@ def test_local_control_describes_point_dependencies() -> None:
 
     assert details.dependencies == ("点位: 头像",)
     assert details.point_dependencies == ("头像",)
+
+
+@pytest.mark.parametrize("configured", [False, True])
+def test_local_control_checks_point_readiness(tmp_path, configured) -> None:
+    """详情应按资源目录标明嵌套偏移点位是否已配置，并将重复引用合并为一项检查。"""
+    points = (NamedPoint("头像", Point(10, 20)),) if configured else ()
+    script = Script(
+        "point-readiness", ScreenWindow(),
+        (Repeat(1, (Click(PointRef("头像").offset(x=5)), Click(PointRef("头像")))),),
+        resources=TargetCatalog(points=points),
+    )
+    app = LocalControlApplication(catalog=ScriptCatalog((script,)), project_root=tmp_path)
+
+    details = app.describe_script(script.name)
+
+    expected = ("点位: 头像", "ok", "点位已配置") if configured else (
+        "点位: 头像", "missing", "点位未配置",
+    )
+    assert details.readiness == (expected,)
 
 
 def test_local_control_describes_named_image_dependencies() -> None:
@@ -1024,6 +1044,76 @@ def test_local_control_runtime_failure_is_exposed_in_both_entry_modes() -> None:
     assert result.finish_reason == status.finish_reason == "failed"
     assert "input permission denied" in result.stderr
     assert "input permission denied" in status.stderr
+
+
+def test_local_control_unknown_point_finishes_without_actions_and_allows_restart(tmp_path) -> None:
+    """嵌套偏移目标引用未知点位时应在动作前结束为配置失败，随后仍能启动有效脚本。"""
+    invalid = Script(
+        "invalid-point", ScreenWindow(),
+        (Click(Point(10, 20)), Repeat(1, (Click(PointRef("missing").offset(x=5)),))),
+    )
+    valid = Script("valid", ScreenWindow(), (Wait(0),))
+    app = LocalControlApplication(catalog=ScriptCatalog((invalid, valid)), project_root=tmp_path)
+
+    app.start_named_script(invalid.name, dry_run=True)
+    failed = _wait_until_finished(app)
+
+    assert failed.exit_code == 2
+    assert failed.finish_reason == "configuration_failed"
+    assert "unknown point target: missing" in failed.stderr
+    assert "click Point" not in failed.stdout
+    assert failed.events[-1].event_type == "run_finished"
+    assert failed.events[-1].status == "configuration_failed"
+
+    app.start_named_script(valid.name, dry_run=True)
+    restarted = _wait_until_finished(app)
+    assert restarted.exit_code == 0
+    assert restarted.finish_reason == "completed"
+    assert restarted.stderr == ""
+
+
+@pytest.mark.parametrize("failure_at", ["setup", "action"])
+def test_local_control_unexpected_error_finishes_and_allows_restart(tmp_path, failure_at) -> None:
+    """设备初始化或动作抛出未归一化异常时，后台应报告失败、跳过后续动作且允许再次启动。"""
+    calls = []
+
+    class BrokenDevice:
+        def click(self, target):
+            """模拟动作调用抛出既有运行用例未捕获的异常。"""
+            raise OSError("device disconnected")
+
+        def wait(self, duration_seconds):
+            """记录不应继续执行的后续动作。"""
+            calls.append("wait")
+
+    def build_device():
+        """分别在外部能力初始化和动作阶段模拟同一连接故障。"""
+        if failure_at == "setup":
+            raise OSError("device disconnected")
+        return BrokenDevice()
+
+    broken = Script("broken", ScreenWindow(), (Click(Point(10, 20)), Wait(1)))
+    valid = Script("valid", ScreenWindow(), (Wait(0),))
+    app = LocalControlApplication(
+        catalog=ScriptCatalog((broken, valid)), project_root=tmp_path,
+        real_device_factory=build_device,
+    )
+
+    app.start_named_script(broken.name, dry_run=False)
+    failed = _wait_until_finished(app)
+
+    assert failed.exit_code == 1
+    assert failed.finish_reason == "failed"
+    assert "OSError: device disconnected" in failed.stderr
+    assert calls == []
+    assert failed.events[-1].event_type == "run_finished"
+    assert failed.events[-1].status == "failed"
+
+    app.start_named_script(valid.name, dry_run=True)
+    restarted = _wait_until_finished(app)
+    assert restarted.exit_code == 0
+    assert restarted.finish_reason == "completed"
+    assert restarted.stderr == ""
 
 
 def test_project_state_reader_reads_current_frame_each_time(tmp_path) -> None:

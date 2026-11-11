@@ -43,6 +43,18 @@
       <p class="notice" id="connection-error" role="alert" hidden></p>
       <pre id="output" tabindex="0" aria-label="脚本输出">还没有运行记录。</pre>
     </section>
+    <details class="script-details-panel" id="run-history-panel">
+      <summary>历史运行 · 自动保存</summary>
+      <p class="history-hint">最近 50 次运行。每次日志单独保存，重启后仍可查看；下载包含完整记录。</p>
+      <div class="history-toolbar">
+        <label for="history-select">选择记录<select id="history-select"><option value="">正在读取…</option></select></label>
+        <button class="secondary" id="refresh-history" type="button">刷新历史</button>
+        <a id="download-history" hidden>下载完整日志</a>
+      </div>
+      <p class="notice" id="history-error" role="alert" hidden></p>
+      <p class="history-hint" id="history-summary"></p>
+      <pre id="history-output" tabindex="0" aria-label="历史运行日志">暂无保存的运行记录。</pre>
+    </details>
     <details class="script-details-panel">
       <summary>脚本步骤与依赖</summary>
       <pre id="script-details">正在读取脚本详情…</pre>

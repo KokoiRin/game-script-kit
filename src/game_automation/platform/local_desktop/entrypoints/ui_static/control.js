@@ -16,6 +16,19 @@
   const connectionEl = document.querySelector("#connection-status");
   const connectionError = document.querySelector("#connection-error");
   const workspaceEl = document.querySelector("#workspace-path");
+  const historySelect = document.querySelector("#history-select");
+  const historySummary = document.querySelector("#history-summary");
+  const historyOutput = document.querySelector("#history-output");
+  const historyError = document.querySelector("#history-error");
+  const historyDownload = document.querySelector("#download-history");
+  const historyPanel = document.querySelector("#run-history-panel");
+  const reasons = {
+    completed: "脚本执行完成", stopped_unmet_condition: "条件未满足，已停止后续步骤",
+    cancelled: "已取消", timed_out: "等待超时", failed: "运行失败",
+    setup_failed: "运行环境不可用", configuration_failed: "配置错误",
+    script_not_found: "脚本不存在", idle: "脚本未运行",
+    unfinished: "尚无结束记录（运行中或服务曾退出）",
+  };
   let activeRun = false;
   let requestPending = false;
   let connectionLost = true;
@@ -26,6 +39,9 @@
   let activeMode = null;
   let pollTimer = null;
   let statusVersion = 0;
+  let historyVersion = 0;
+  let historyLoaded = false;
+  let historyListVersion = 0;
 
   async function request(path, body) {
     const controller = new AbortController();
@@ -38,8 +54,9 @@
         cache: "no-store",
         signal: controller.signal,
       });
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      return await response.json();
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
+      return result;
     } finally {
       clearTimeout(timeout);
     }
@@ -79,17 +96,6 @@
     if (started && started.details && started.details.dry_run !== undefined) {
       activeMode = started.details.dry_run === true || started.details.dry_run === "True";
     }
-    const reasons = {
-      completed: "脚本执行完成",
-      stopped_unmet_condition: "条件未满足，已停止后续步骤",
-      cancelled: "已取消",
-      timed_out: "等待超时",
-      failed: "运行失败",
-      setup_failed: "运行环境不可用",
-      configuration_failed: "配置错误",
-      script_not_found: "脚本不存在",
-      idle: "脚本未运行",
-    };
     if (activeRun) {
       statusEl.textContent = activeMode === null ? "脚本运行中…" : activeMode ? "模拟运行中…" : "真实运行中…";
     } else {
@@ -126,7 +132,9 @@
       connectionEl.textContent = "本地服务已连接";
       connectionEl.dataset.connected = "true";
       connectionError.hidden = true;
+      const wasRunning = activeRun;
       renderStatus(result);
+      if (!historyLoaded || (wasRunning && !activeRun)) await loadHistory();
       if (!scriptsLoaded) await loadScripts();
       else if (!currentDetails && !loadingDetails && scriptSelect.value) await loadScriptDetails();
     } catch (error) {
@@ -162,6 +170,81 @@
       await loadScriptDetails();
     }
     syncControls();
+  }
+
+  function historyTime(value) {
+    return value ? new Date(value).toLocaleString("zh-CN", {hour12: false}) : "原时间未知";
+  }
+
+  async function loadHistory() {
+    const version = ++historyListVersion;
+    try {
+      const result = await request("/api/run-history");
+      if (version !== historyListVersion) return;
+      const selected = historySelect.value;
+      historySelect.replaceChildren();
+      for (const item of result.runs || []) {
+        const option = document.createElement("option");
+        option.value = item.id;
+        const reason = item.running ? "运行中" : reasons[item.finish_reason] || item.finish_reason;
+        option.textContent = `${historyTime(item.started_at)} · ${item.name} · ${item.dry_run ? "模拟" : "真实"} · ${reason}`;
+        historySelect.append(option);
+      }
+      if ([...historySelect.options].some(option => option.value === selected)) historySelect.value = selected;
+      historyLoaded = true;
+      historyError.hidden = true;
+      if (historySelect.value && historyPanel.open) await loadHistoryRun();
+      else if (historySelect.value) historyDownload.hidden = true;
+      else {
+        historySelect.add(new Option("暂无保存的运行记录", ""));
+        historyOutput.textContent = "暂无保存的运行记录。";
+        historySummary.textContent = "";
+        historyDownload.hidden = true;
+      }
+    } catch (error) {
+      if (version !== historyListVersion) return;
+      historyError.textContent = `历史记录读取失败：${error.message}。可点击刷新重试。`;
+      historyError.hidden = false;
+    }
+  }
+
+  async function loadHistoryRun() {
+    const version = ++historyVersion;
+    const id = historySelect.value;
+    historyDownload.hidden = true;
+    if (!id) return;
+    historyOutput.textContent = "正在读取日志…";
+    try {
+      const result = await request(`/api/run-history?id=${encodeURIComponent(id)}`);
+      if (version !== historyVersion) return;
+      const item = result.summary;
+      historySummary.textContent = [
+        `结果：${reasons[item.finish_reason] || item.finish_reason} · 退出码 ${item.exit_code ?? "未知"}`,
+        `开始：${historyTime(item.started_at)} · 结束：${item.ended_at ? historyTime(item.ended_at) : item.source === "recovered" ? "原时间未知" : "尚未记录"}`,
+        item.source === "recovered" ? "从旧服务抢救的日志，原始时间未知。" : "",
+        item.last_step ? `最后步骤：${item.last_step}` : "",
+        item.error ? `提示与错误：${item.error.trim()}` : "",
+      ].filter(Boolean).join("\n");
+      const lines = (result.records || []).flatMap(record => {
+        const time = record.recorded_at ? historyTime(record.recorded_at) : "时间未知";
+        if (record.kind === "event") {
+          const e = record.data;
+          return [`[${time}] ${e.type} ${e.path || ""} ${e.step || ""} ${e.status || ""} ${JSON.stringify(e.details || {})}`];
+        }
+        return String(typeof record.data === "string" ? record.data : JSON.stringify(record.data))
+          .split("\n").filter(Boolean).map(line => `[${time}] ${record.kind}: ${line}`);
+      });
+      historyOutput.textContent = (lines.length > 300 ? "（显示最后 300 行，完整记录可下载）\n" : "") + lines.slice(-300).join("\n");
+      historyDownload.href = `/api/run-history?id=${encodeURIComponent(id)}&download=1`;
+      historyDownload.hidden = false;
+      historyError.hidden = true;
+    } catch (error) {
+      if (version !== historyVersion) return;
+      historyError.textContent = `日志读取失败：${error.message}`;
+      historyError.hidden = false;
+      historyOutput.textContent = "日志暂不可用。";
+      historySummary.textContent = "";
+    }
   }
 
   async function loadScriptDetails() {
@@ -222,6 +305,7 @@
       requestPending = false;
       syncControls();
       schedulePoll(100);
+      loadHistory();
     }
   }
 
@@ -263,6 +347,9 @@
   stopButton.addEventListener("click", stopScript);
   scriptSelect.addEventListener("change", loadScriptDetails);
   dryRun.addEventListener("change", syncControls);
+  historySelect.addEventListener("change", loadHistoryRun);
+  historyPanel.addEventListener("toggle", () => { if (historyPanel.open) loadHistoryRun(); });
+  document.querySelector("#refresh-history").addEventListener("click", loadHistory);
   syncControls();
   loadStateNames();
   pollStatus();

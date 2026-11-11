@@ -81,6 +81,17 @@ def create_local_control_server(
                 self._send_json({"states": list(control_app.list_screen_state_names())})
             elif path == "/api/script-run":
                 self._send_json(_status_to_payload(control_app.current_script_run()))
+            elif path == "/api/run-history":
+                query = parse_qs(parsed_url.query)
+                run_id = query.get("id", [""])[0]
+                try:
+                    payload = control_app.read_run_history(run_id) if run_id else {"runs": control_app.list_run_history()}
+                    filename = f"star-run-{payload['summary']['id']}.json" if run_id and query.get("download") == ["1"] else None
+                    self._send_json(payload, filename=filename)
+                except LookupError as exc:
+                    self._send_json({"error": str(exc)}, HTTPStatus.NOT_FOUND)
+                except OSError as exc:
+                    self._send_json({"error": str(exc)}, HTTPStatus.SERVICE_UNAVAILABLE)
             else:
                 self.send_error(HTTPStatus.NOT_FOUND)
 
@@ -118,12 +129,14 @@ def create_local_control_server(
                 raise ValueError("request body must be an object")
             return parsed
 
-        def _send_json(self, payload: dict[str, object], status: HTTPStatus = HTTPStatus.OK) -> None:
+        def _send_json(self, payload: dict[str, object], status: HTTPStatus = HTTPStatus.OK, *, filename: str | None = None) -> None:
             """发送不缓存的 JSON 响应。"""
             body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
             self.send_response(status)
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.send_header("Cache-Control", "no-store")
+            if filename is not None:
+                self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)

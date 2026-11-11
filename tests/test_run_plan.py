@@ -4,6 +4,8 @@
 也不绑定单个脚本 runner 的内部实现。
 """
 
+import pytest
+
 from game_automation.portable.application.run_plan import (
     ScriptPlanItem,
     ScriptPlanScriptResult,
@@ -95,6 +97,34 @@ def test_run_script_plan_stops_after_unmet_condition() -> None:
     assert [(item.script_name, item.finish_reason) for item in result.items] == [
         ("first", "stopped_unmet_condition")
     ]
+
+
+@pytest.mark.parametrize("continue_on_error,prior_failure", [(False, False), (True, False), (True, True)])
+@pytest.mark.parametrize("cancel_exit_code", [0, 130])
+def test_run_script_plan_cancellation_ends_plan(continue_on_error, prior_failure, cancel_exit_code) -> None:
+    """取消结果应终止计划并成为整体结果，不受继续策略、先前失败或退出码是否为零影响。"""
+    names = ("failed", "cancelled", "never-run") if prior_failure else ("cancelled", "never-run")
+    items = tuple(ScriptPlanItem(name, Script(name, ScreenWindow(), (Wait(0),))) for name in names)
+    calls = []
+
+    def run_item(item):
+        """返回已发生的普通失败或用户取消，并记录是否误启动了后续项。"""
+        calls.append(item.name)
+        if item.name == "failed":
+            return ScriptPlanScriptResult(1, "failed", stderr="earlier error")
+        if item.name == "cancelled":
+            return ScriptPlanScriptResult(cancel_exit_code, "cancelled", stdout="stopping", stderr="user cancelled")
+        return ScriptPlanScriptResult(0)
+
+    result = run_script_plan(items, run_item=run_item, continue_on_error=continue_on_error)
+
+    assert calls == list(names[:-1])
+    assert result.exit_code == cancel_exit_code
+    assert result.finish_reason == "cancelled"
+    assert [item.script_name for item in result.items] == calls
+    assert result.items[-1].finish_reason == "cancelled"
+    assert result.items[-1].stdout == "stopping"
+    assert result.items[-1].stderr == "user cancelled"
 
 
 def _record_success(script_name: str, calls: list[str]) -> ScriptPlanScriptResult:

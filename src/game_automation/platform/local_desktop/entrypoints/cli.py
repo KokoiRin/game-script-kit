@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import io
+import json
 import sys
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
@@ -50,6 +51,32 @@ def _run_list(args: argparse.Namespace) -> int:
     for name in catalog_result.catalog.list_names():
         print(name)
     _print_script_config_errors(catalog_result)
+    return 0
+
+
+def _run_history(args: argparse.Namespace) -> int:
+    """查询控制台持久历史，支持导出完整 JSON 供排查。"""
+    from game_automation.portable.adapters.sqlite_run_history import SqliteRunHistoryStore
+
+    store = SqliteRunHistoryStore(args.project_root / ".star" / "runs.sqlite3")
+    try:
+        result = store.read_run(args.run_id) if args.run_id else {"runs": store.list_runs()}
+    except (LookupError, OSError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    if args.json_output or args.run_id:
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+    elif not result["runs"]:
+        print("暂无保存的控制台运行记录。")
+    else:
+        for item in result["runs"]:
+            timestamp = item["started_at"] or "原时间未知"
+            mode = "模拟" if item["dry_run"] else "真实"
+            print(f"{item['id']}  {timestamp}  {mode}  {item['finish_reason']}  {item['name']}")
+            if item["last_step"]:
+                print(f"  最后步骤：{item['last_step']}")
+            if item["error"]:
+                print(f"  提示：{item['error'].strip()}")
     return 0
 
 
@@ -424,6 +451,9 @@ def main(argv: list[str] | None = None) -> int:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     subparsers.add_parser("list", help="List available scripts.")
+    history_parser = subparsers.add_parser("history", help="Read saved console run history.")
+    history_parser.add_argument("run_id", nargs="?", help="Run ID whose full log should be exported.")
+    history_parser.add_argument("--json", action="store_true", dest="json_output", help="Print JSON instead of the recent run summary.")
 
     details_parser = subparsers.add_parser("details", help="Show a named script's steps and dependencies.")
     details_parser.add_argument("name", help="Script name to inspect.")
@@ -525,6 +555,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "list":
         return _run_list(args)
+    elif args.command == "history":
+        return _run_history(args)
     elif args.command == "details":
         return _run_details(args)
     elif args.command == "run":

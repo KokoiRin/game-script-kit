@@ -19,6 +19,7 @@ ADR 保存重要设计取舍的状态、理由和代价。下表收录当前已�
 | [0004](0004-small-console.md) | accepted | 控制台聚焦脚本运行，删除外围调试工作台 | 本轮用户授权精简，工作区已实现 |
 | [0005](0005-repository-documentation.md) | accepted | 使用仓库内上下文与决策文档，移除 OpenSpec 目录并通过 Git 追溯 | 本轮用户明确确认 |
 | [0006](0006-local-task-workspaces.md) | accepted | 框架主仓与外部本地任务工作区分离 | 本轮用户确认并授权实施 |
+| [0007](0007-persistent-run-history.md) | accepted | 按工作区持久保存控制台运行记录 | 用户要求排查中断并补齐日志保存 |
 
 ## 如何新增
 
