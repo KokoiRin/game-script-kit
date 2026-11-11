@@ -201,6 +201,8 @@ def _parse_step(value: Any) -> Step:
         return _parse_repeat(payload)
     if step_type == "if_state":
         return _parse_if_state(payload)
+    if step_type == "if_image":
+        return _parse_if_image(payload)
     if step_type == "wait_until_state":
         return _parse_wait_until_state(payload)
     if step_type == "wait_until_image":
@@ -241,6 +243,7 @@ def _parse_repeat(value: Any) -> Repeat:
                else _int_value(value.get("times"), "repeat times")),
         steps=_parse_steps(value.get("steps")),
         break_if=_parse_image_exists_condition(value["break_if_image"]) if "break_if_image" in value else None,
+        max_seconds=_number_value(value["max_seconds"], "repeat max_seconds") if "max_seconds" in value else None,
     )
 
 
@@ -250,6 +253,17 @@ def _parse_if_state(value: Any) -> If:
         raise ValueError("if_state step must be an object")
     return If(
         condition=_parse_screen_state_condition(value),
+        then_steps=_parse_steps(value.get("then")),
+        else_steps=() if "else" not in value else _parse_steps(value.get("else")),
+    )
+
+
+def _parse_if_image(value: Any) -> If:
+    """把图片或命名搜索分支映射为既有If/ImageExists领域步骤。"""
+    if not isinstance(value, dict):
+        raise ValueError("if_image step must be an object")
+    return If(
+        condition=_parse_image_exists_condition(value),
         then_steps=_parse_steps(value.get("then")),
         else_steps=() if "else" not in value else _parse_steps(value.get("else")),
     )

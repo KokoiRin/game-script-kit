@@ -91,7 +91,7 @@ JSON 文件按文件名排序加载，不递归读取子目录；脚本名来自
 
 ## JSON 与 Python 的能力边界
 
-[JSON loader](../src/game_automation/portable/application/config_script_loader.py) 只接受以下 7 类步骤；每个步骤对象只能有一个步骤类型。
+[JSON loader](../src/game_automation/portable/application/config_script_loader.py) 只接受以下 8 类步骤；每个步骤对象只能有一个步骤类型。
 脚本要求非空 `name` 与非空 `steps`；`resources` 可省略。嵌套步骤仍使用同一语法。
 
 | 步骤 | 当前 JSON 能表达的内容 | 主要参数边界 |
@@ -99,8 +99,9 @@ JSON 文件按文件名排序加载，不递归读取子目录；脚本名来自
 | `wait` | 固定等待秒数 | 数字且不小于 0 |
 | `click` | 点位别名、图片别名或搜索别名；点击后连续组合键 | `offset` 可选；图片点击中心；`then_hotkeys` 为键列表的列表 |
 | `hotkey` | 依次按下并逆序释放一组按键 | 非空、无重复；字母、数字及有限功能键集合 |
-| `repeat` | 有限或无限重复；按图片条件中断当前层 | `times` 为正整数或显式 `null`；可选 `break_if_image` |
+| `repeat` | 有限或无限重复；按图片条件或经过时间中断当前层 | `times` 为正整数或显式 `null`；可选 `break_if_image`；`max_seconds` 为正的有限秒数 |
 | `if_state` | 按界面状态选择分支 | 非空 `then`；可选非空 `else`；可指定置信度 |
+| `if_image` | 按本次图片或命名搜索是否命中选择分支 | `search` 或 `image`；图片可带内联 `region`；可选 `min_confidence`；非空 `then`、可选非空 `else`，支持嵌套 |
 | `wait_until_state` | 等待指定状态 | `timeout` 与 `interval` 必填且大于 0；此语法不接受无限超时 |
 | `wait_until_image` | 等图片或命名搜索目标出现 | `timeout` 为正数或显式 `null`；`interval` 必填且大于 0 |
 
@@ -110,7 +111,7 @@ JSON 文件按文件名排序加载，不递归读取子目录；脚本名来自
 `click.image` 可带内联 region；复用命名区域时通过 `resources.searches` 组合。
 单纯图片搜索未声明置信度时默认 1.0；命名搜索可继承资源阈值，步骤显式阈值优先。
 
-Python 领域模型还有 `Drag`、`ColorIs`、一般的 `If(ImageExists(...))`、图片 anchor 和 `AreaWindow`，JSON 没有对应全部语法。
+JSON 的 `if_image` 映射为既有 `If(ImageExists(...))`，只判断当前画面，不隐式等待或重试。所有分支沿既有资源预校验、依赖摘要及 fake/dry-run 路径执行。Python 领域模型另有 `Drag`、`ColorIs`、图片 anchor 和 `AreaWindow`，JSON 没有对应全部语法。
 Python 内置脚本需要在 [catalog.py](../src/game_automation/portable/scripts_manager/catalog.py) 导入并注册，尚无用户 Python 文件自动发现。
 JSON 也没有变量、通用函数/脚本调用、文本输入、剪贴板赋值、通用重试或复合条件语法。
 看到 Python 示例或领域类型时，先确认 loader 分支，避免把它们当作 JSON 已支持能力。
@@ -226,3 +227,7 @@ UI 自动把所选脚本解析出的图片依赖全部视为找到；CLI 通过�
 - **2026-11-06 窗口观察优先级截断**：窗口组支持严格整数priority，默认0，同层全部检查，命中后跳过低层。一次截图和一次整窗数组转换共用；UI显示优先级、未检测及本轮实际检查/跳过数。保存现有状态新素材继承原优先级。旧脚本reader保持原行为；见[ADR 0011](adr/0011-priority-window-observation.md)。本轮聚焦74项测试通过，完整回归与实机结果由根验收记录。
 
 - **2026-11-07 多点状态识别**：完整回归 `695 passed`（46.51s），`git diff --check`、Swift编译和固定证书跨内容签名验证通过。已安装版本在外部工作区六种场景完成状态切换验证，用户也独立确认；每组8点全部通过才命中，允许整组共同偏移1截图像素，对话与主页按优先级截断。5Hz活动页一次实机采样取帧10.2ms、识别0.9ms、整轮11.0ms，近期120轮整轮p95为16.0ms；累计585轮包含21次画面暂停或尺寸失效，没有超频率预算。交互中的短时观测不证明长期无人值守稳定性。配置、原模板备份、逐次对照和设计审查保留在外部工作区 `evidence/2026-11-07-six-point-states/`，不提交游戏素材。
+
+## 2026-11-08 循环时间上限
+
+`Repeat.max_seconds`/JSON `repeat.max_seconds` 从进入循环开始按单调时钟计时，包含识图和输入耗时。达到次数、图片中断或时间上限中的任一条件即结束该层循环，后续步骤继续；到期事件为 `repeat_interrupted` 并显示时间上限原因。嵌套循环和无限图片等待消费最早外层期限；固定等待与轮询等待会裁短到剩余时间。输入前（含图片定位后、连续组合键之间）检查期限，不会在已观察到到期后启动下一次输入；正在进行的平台调用与必要释放不保证准点结束。用户取消保持优先。UI/CLI详情显示秒数，dry-run的模拟等待推进虚拟时钟，仍只验证固定假条件下的路径。

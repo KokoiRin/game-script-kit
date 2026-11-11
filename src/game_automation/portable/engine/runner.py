@@ -9,6 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from collections.abc import Callable
 from itertools import count
+from time import monotonic
 
 from game_automation.portable.domain import (
     Click,
@@ -27,6 +28,7 @@ from game_automation.portable.domain import (
     Wait,
     WaitUntil,
 )
+from game_automation.portable.engine.cancellation import ScriptCancelledError
 from game_automation.portable.engine.condition_evaluator import evaluate_condition
 from game_automation.portable.engine.image_query import locate_image, resolve_image_search
 from game_automation.portable.engine.ports import (
@@ -40,10 +42,6 @@ from game_automation.portable.engine.ports import (
 from game_automation.portable.engine.run_events import ScriptRunEvent, emit_script_run_event
 
 
-class ScriptCancelledError(RuntimeError):
-    """表示脚本运行被外部取消信号停止。"""
-
-
 class ScriptStoppedNormally(RuntimeError):
     """表示脚本因前置条件未满足而正常停止。"""
 
@@ -51,9 +49,10 @@ class ScriptStoppedNormally(RuntimeError):
 class _RepeatInterrupted(Exception):
     """携带所属循环标识，防止内层循环误吞外层的中断。"""
 
-    def __init__(self, owner: object) -> None:
-        """记录本次中断对应的循环作用域。"""
+    def __init__(self, owner: object, reason: str = "检测到中断图片，跳过本段剩余步骤") -> None:
+        """记录本次中断对应的循环作用域和可展示原因。"""
         self.owner = owner
+        self.reason = reason
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,6 +73,9 @@ class ScriptRunner:
     logger: RunLogger | None = None
     emit_step_events: bool = False
     _step_guard: Callable[[], None] | None = None
+    clock: Callable[[], float] = monotonic
+    _deadline: float | None = None
+    _deadline_owner: object | None = None
 
     def run(self, script: Script) -> ScriptExecutionResult:
         """按脚本步骤树顺序执行所有步骤并返回可观察结束原因。"""
@@ -199,7 +201,7 @@ class ScriptRunner:
             step_type="Wait",
             details={"duration": str(action.duration_seconds)},
         )
-        self.device.wait(action.duration_seconds)
+        self._wait(action.duration_seconds)
         self._emit_event(
             "wait_finished",
             step_path=step_path,
@@ -221,7 +223,13 @@ class ScriptRunner:
                                   resources=script.resources, logger=self.logger):
                 raise _RepeatInterrupted(owner)
 
-        runner = self if step.break_if is None else replace(self, _step_guard=check_break)
+        deadline, deadline_owner = self._deadline, self._deadline_owner
+        if step.max_seconds is not None:
+            local_deadline = self.clock() + step.max_seconds
+            if deadline is None or local_deadline < deadline:
+                deadline, deadline_owner = local_deadline, owner
+        runner = replace(self, _step_guard=self._step_guard if step.break_if is None else check_break,
+                         _deadline=deadline, _deadline_owner=deadline_owner)
         try:
             for iteration in (count(1) if step.times is None else range(1, step.times + 1)):
                 runner._raise_if_cancelled()
@@ -234,7 +242,7 @@ class ScriptRunner:
             if exc.owner is not owner:
                 raise
             self._emit_event("repeat_interrupted", step_path=step_path, step_type="Repeat",
-                             details={"reason": "检测到中断图片，跳过本段剩余步骤"})
+                             details={"reason": exc.reason})
 
     def _run_if(self, script: Script, step: If, step_path: str) -> None:
         """按条件结果递归执行 then 或 else 分支。"""
@@ -304,17 +312,31 @@ class ScriptRunner:
             wait_seconds = step.interval_seconds
             if step.timeout_seconds is not None:
                 wait_seconds = min(wait_seconds, step.timeout_seconds - elapsed_seconds)
-            self.device.wait(wait_seconds)
+            self._wait(wait_seconds)
             self._raise_if_cancelled(check_guard=False)
             elapsed_seconds += wait_seconds
             attempt += 1
+
+    def _wait(self, seconds: float) -> None:
+        """等待不超过最早循环期限，平台调用的必要清理仍由adapter拥有。"""
+        if self._deadline is not None:
+            seconds = min(seconds, max(0.0, self._deadline - self.clock()))
+        self.device.wait(seconds)
+
+    def _check_deadline(self) -> None:
+        """到期只中断拥有该期限的循环，不能被内层循环吞掉。"""
+        if self._deadline is not None and self.clock() >= self._deadline:
+            raise _RepeatInterrupted(self._deadline_owner, "已达到循环时间上限")
 
     def _raise_if_cancelled(self, *, check_guard: bool = True) -> None:
         """在脚本步骤边界发现取消信号时停止运行。"""
         if self.cancellation_token is not None and self.cancellation_token.is_cancelled():
             raise ScriptCancelledError("script run cancelled")
+        self._check_deadline()
         if check_guard and self._step_guard is not None:
             self._step_guard()
+            # 条件识别本身可能耗尽剩余时间，不能再发送当前动作。
+            self._check_deadline()
 
     def _resolve_click_target(self, script: Script, target: ClickTarget, *, step_path: str) -> Point:
         """把静态或图片点击目标解析成最终屏幕坐标。"""

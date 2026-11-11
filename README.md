@@ -144,6 +144,20 @@ mkdir -p ~/StarWorkspaces/my-tasks
 
 用相同 `--workspace` 执行 `list`、`details 我的点击` 与 `run 我的点击 --dry-run`。图片路径相对该根的 `assets/`，状态条件使用其中的 `screen-states.json`。无效脚本单独报告，不阻塞其他有效脚本。
 
+`if_image` 根据本次图片匹配选择分支，复用已登记的图片或搜索资源。下面是一个步骤片段，其中两个搜索名需先在 `resources.searches` 中定义：
+
+```json
+{"if_image": {
+  "search": "主按钮", "min_confidence": 0.9,
+  "then": [{"click": {"search": "主按钮"}}],
+  "else": [{"click": {"search": "备用按钮"}}]
+}}
+```
+
+也可使用 `image` 引用 `resources.images`，并提供内联 `region` 和 `min_confidence`。`then` 必须非空；`else` 可省略，提供时必须非空。分支可嵌套相同的步骤。此判断不等待图片出现，需要等待时使用 `wait_until_image`；所有分支的资源引用都会在执行前检查。
+
+`repeat.max_seconds` 可选，必须为正的有限秒数；从进入该循环起按单调时钟计算，识图耗时也计入，到期结束该层循环并继续后续步骤。嵌套循环受最早的外层期限约束；等待会裁短，输入前再次检查期限，已经进入的平台调用及清理可能稍晚返回。模拟运行以虚拟等待推进时间，无需实际等待数分钟。
+
 `repeat.times: null` 表示无限循环；`wait_until_image.timeout: null` 表示无限等待。`break_if_image` 退出当前层循环，`click.then_hotkeys` 在点击后连续发送组合键。当前没有通用重试、任务路由或子脚本调用；局部恢复仍在 [讨论稿](docs/design/local-recovery.md) 中。
 
 运行 `.venv/bin/star recorder` 可记录屏幕坐标与颜色；终端保持焦点，按 `1` 记录、`Q` 结束。它只输出素材，不创建任务脚本。

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from string import ascii_lowercase, digits
+from math import isfinite
 from typing import TypeAlias
 
 from game_automation.portable.domain.conditions import Condition
@@ -60,6 +61,7 @@ class Repeat:
     times: int | None
     steps: tuple["Step", ...]
     break_if: Condition | None = None
+    max_seconds: float | None = None
 
     def __post_init__(self) -> None:
         """校验有限次数为正且步骤非空，None 表示无限循环。"""
@@ -67,6 +69,11 @@ class Repeat:
             raise ValueError("repeat times must be greater than 0")
         if len(self.steps) == 0:
             raise ValueError("repeat requires at least one step")
+        if self.max_seconds is not None and (
+            type(self.max_seconds) not in (int, float)
+            or not isfinite(self.max_seconds) or self.max_seconds <= 0
+        ):
+            raise ValueError("repeat max_seconds must be positive finite seconds")
 
 
 @dataclass(frozen=True, slots=True)

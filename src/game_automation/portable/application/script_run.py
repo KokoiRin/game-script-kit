@@ -242,8 +242,10 @@ def _build_runner(
     """按脚本运行模式和端口需求组装 runner。"""
     requirements = inspect_script_requirements(script)
     if dry_run:
+        device = DryRunInputDevice()
         return ScriptRunner(
-            device=DryRunInputDevice(),
+            device=device,
+            clock=device.clock,
             color_reader=_build_dry_run_color_reader(
                 dry_run_color,
                 needs_color_reader=requirements.needs_color_reader,

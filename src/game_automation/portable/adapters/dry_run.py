@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Mapping
+from time import monotonic
 
 from game_automation.portable.domain import Color, ImageMatch, ImageTemplate, Point, Rect
 from game_automation.portable.engine.ports import (
@@ -20,6 +21,15 @@ from game_automation.portable.engine.ports import (
 
 
 class DryRunInputDevice(InputDevice):
+    def __init__(self) -> None:
+        """模拟等待推进虚拟时间，限时循环无需真的等待数分钟。"""
+        self._started = monotonic()
+        self._waited = 0.0
+
+    def clock(self) -> float:
+        """累计声明的等待和真实处理耗时，避免模拟无等待循环冻结时间。"""
+        return monotonic() - self._started + self._waited
+
     def hotkey(self, keys: tuple[str, ...]) -> None:
         """打印组合键，不触发键盘或读取剪贴板。"""
         print(f"hotkey {'+'.join(keys)}")
@@ -32,6 +42,7 @@ class DryRunInputDevice(InputDevice):
 
     def wait(self, duration_seconds: float) -> None:
         print(f"wait {duration_seconds}s")
+        self._waited += duration_seconds
 
 
 @dataclass(frozen=True, slots=True)

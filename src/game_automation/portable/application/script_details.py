@@ -158,6 +158,7 @@ def _describe_step(step: Step, *, indent: str) -> tuple[str, ...]:
     if isinstance(step, Repeat):
         return (
             f"{indent}Repeat {'无限' if step.times is None else str(step.times) + ' times'}"
+            + (f" max_seconds={step.max_seconds:g}" if step.max_seconds is not None else "")
             + (f" break_if={_describe_condition(step.break_if)}" if step.break_if is not None else ""),
             *_describe_steps(step.steps, indent=f"{indent}  "),
         )
