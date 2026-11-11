@@ -6,6 +6,10 @@
 from game_automation.portable.application.capture_errors import WindowCaptureError
 
 
+class WindowPresentationUnavailable(WindowCaptureError):
+    """固定身份仍存在，但当前展示几何或画面暂不适合操作。"""
+
+
 class BoundWindow:
     """固定窗口编号和标题，允许移动但拒绝替换与尺寸变化。"""
 
@@ -35,6 +39,14 @@ class BoundWindow:
         else:
             candidates = [item for item in candidates if item.get(q.kCGWindowNumber) == self.number
                           and item.get(q.kCGWindowName) == self.title]
+        if not candidates and self.number is not None:
+            rows = q.CGWindowListCopyWindowInfo(q.kCGWindowListOptionAll | q.kCGWindowListExcludeDesktopElements,
+                                              q.kCGNullWindowID) or ()
+            if any(item.get(q.kCGWindowOwnerPID) == pid
+                   and item.get(q.kCGWindowLayer) == 0
+                   and item.get(q.kCGWindowNumber) == self.number
+                   and item.get(q.kCGWindowName) == self.title for item in rows):
+                raise WindowPresentationUnavailable('目标窗口暂时不可见，等待原窗口恢复')
         if len(candidates) != 1:
             raise WindowCaptureError('目标窗口已关闭、不可见、标题已变化或几何不唯一，请停止观察并重新选择窗口')
         item = candidates[0]
@@ -42,7 +54,7 @@ class BoundWindow:
         if bounds is None or bounds[2:] != (self.window.rect.width, self.window.rect.height):
             rect = self.window.rect
             expected = (rect.left, rect.top, rect.width, rect.height)
-            raise WindowCaptureError(
+            raise WindowPresentationUnavailable(
                 f'目标窗口尺寸已变化，原窗口={expected}，当前窗口={bounds}，请恢复采集素材时的窗口尺寸'
             )
         if self.number is None:

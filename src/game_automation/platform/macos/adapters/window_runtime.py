@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+from enum import Enum, auto
 from pathlib import Path
 import threading
 import time
@@ -16,8 +17,8 @@ from game_automation.portable.application.window_state_rules import load_window_
 from game_automation.portable.domain import AreaWindow
 from game_automation.portable.engine.cancellation import ScriptCancelledError
 from game_automation.portable.preparation.models import DesktopWindow
-from game_automation.platform.macos.adapters.window_identity import BoundWindow, logical_bounds
-from game_automation.platform.macos.adapters.window_stream import WindowStreamSource
+from game_automation.platform.macos.adapters.window_identity import BoundWindow, WindowPresentationUnavailable, logical_bounds
+from game_automation.platform.macos.adapters.window_stream import WindowFramePending, WindowStreamSource
 
 
 class NativeRuntimeLease:
@@ -113,6 +114,21 @@ class MacOSRuntimeFactory:
 
 
 
+class _InputPhase(Enum):
+    """区分可重新定位的准备与不可重放的已尝试按下。"""
+    PREPARING = auto()
+    COMMITTED = auto()
+
+
+class _InputNotCommitted(WindowCaptureError):
+    """仅在尚未尝试按下时要求重新定位，永不跨越已发送输入。"""
+
+    def __init__(self, cause):
+        """保留平台暂态原因供会话恢复。"""
+        super().__init__(str(cause))
+        self.cause = cause
+
+
 class MacOSWindowSession:
     """统一固定窗口身份、输入后新帧门槛与唯一源所有权。"""
     capture_mode = 'window_stream'
@@ -130,6 +146,9 @@ class MacOSWindowSession:
         self.proof = None
         self._after_input = None
         self._after_sequence = 0
+        self._paused_at = None
+        self._paused_total = 0.0
+        self._input_phase = None
 
     def attach_source(self, source):
         """仅绑定本会话独占的源，禁止运行中替换。"""
@@ -149,15 +168,39 @@ class MacOSWindowSession:
         return RuntimePorts(AreaWindow(self.window.rect), device,
                             WindowColorReader(self) if requirements.needs_color_reader else None,
                             WindowImageLocator(self) if requirements.needs_image_locator else None,
-                            WindowStateReader(self) if requirements.needs_screen_state_reader else None)
+                            WindowStateReader(self) if requirements.needs_screen_state_reader else None,
+                            control=self if self.backend == 'macos-window-background' else None)
 
     def check_cancelled(self):
         """在每次系统边界与有界等待间保留取消优先。"""
         if self.cancellation is not None and self.cancellation.is_cancelled():
             raise ScriptCancelledError('script run cancelled')
 
-    def check_window(self):
-        """除固定编号、标题和尺寸外，也拒绝运行中移动窗口。"""
+    def task_time(self):
+        """只从任务预算扣除已识别的暂停，不改变系统事件时钟。"""
+        now = self._clock() if self._paused_at is None else self._paused_at
+        return now - self._paused_total
+
+    def execute_input(self, action):
+        """仅重做按下前的完整准备，提交后保留当前调用栈。"""
+        while True:
+            self.check_window()
+            self._input_phase = _InputPhase.PREPARING
+            try:
+                return action()
+            except _InputNotCommitted as exc:
+                cause = exc.cause
+            finally:
+                self._input_phase = None
+            self._recover(cause)
+
+    def commit_input(self):
+        """在系统按下调用之前标记提交，此后禁止重做准备回调。"""
+        if self._input_phase is _InputPhase.PREPARING:
+            self._input_phase = _InputPhase.COMMITTED
+
+    def _check_geometry(self):
+        """核对固定身份和完整原矩形，不读取或等待源画面。"""
         self.check_cancelled()
         if self._closed:
             raise WindowCaptureError('原生运行会话已经关闭')
@@ -167,10 +210,70 @@ class MacOSWindowSession:
         expected = (rect.left, rect.top, rect.width, rect.height)
         current = logical_bounds(item.get(q.kCGWindowBounds, {}))
         if current != expected:
-            raise WindowCaptureError(
-                f'运行中目标窗口位置已变化，原窗口={expected}，当前窗口={current}，请停止后重新运行'
+            advice = '请恢复原窗口' if self.backend == 'macos-window-background' else '请停止后重新运行'
+            raise WindowPresentationUnavailable(
+                f'运行中目标窗口位置已变化，原窗口={expected}，当前窗口={current}，{advice}'
             )
         return item
+
+    def _check_window_once(self):
+        """先核对完整矩形，后台另读轻量源证明并复核首帧超时。"""
+        item = self._check_geometry()
+        if self.backend == 'macos-window-background' and self._source is not None:
+            try:
+                proof = self._source.check_available()
+            except WindowFramePending:
+                self._check_geometry()
+                raise
+            if proof is None or not 0 <= self._clock() - proof.captured_at <= self._freshness:
+                raise WindowPresentationUnavailable('窗口流暂未提供有效新画面，等待恢复')
+        return item
+
+    def check_window(self):
+        """后台等待短暂展示变化，其他模式维持立即报告错误。"""
+        while True:
+            try:
+                return self._check_window_once()
+            except WindowPresentationUnavailable as exc:
+                self._presentation_unavailable(exc)
+
+    def _presentation_unavailable(self, cause):
+        """准备区退出后重新定位，其余调用在原位置等待恢复。"""
+        if self.backend != 'macos-window-background':
+            raise cause
+        self._begin_pause(cause)
+        if self._input_phase is _InputPhase.PREPARING:
+            raise _InputNotCommitted(cause) from cause
+        self._recover(cause)
+
+    def _begin_pause(self, cause):
+        """一次暂停只记录一个开始点并撤销已有视觉证明。"""
+        if self._paused_at is None:
+            self._paused_at = self._clock()
+            self.proof = None
+            if self.logger is not None:
+                self.logger.log(f'runtime paused backend={self.backend} reason={cause}')
+
+    def _recover(self, cause):
+        """保留唯一源，等原几何和恢复之后的源事件再继续。"""
+        self._begin_pause(cause)
+        while True:
+            self.check_cancelled()
+            try:
+                self._check_window_once()
+                restored_at = self._clock()
+                sequence = getattr(getattr(self._source, 'proof', None), 'sequence', 0)
+                with self._read_frame(after_time=restored_at, after_sequence=sequence):
+                    pass
+            except WindowPresentationUnavailable:
+                self._sleep(0.02)
+                continue
+            paused_seconds = self._clock() - self._paused_at
+            self._paused_total += paused_seconds
+            self._paused_at = None
+            if self.logger is not None:
+                self.logger.log(f'runtime resumed backend={self.backend} paused_seconds={paused_seconds:.3f}')
+            return
 
     def validate_point(self, point):
         """校验全局逻辑点必须在已绑定窗口内。"""
@@ -186,20 +289,29 @@ class MacOSWindowSession:
         self._after_input = self._clock()
 
     def screenshot(self):
-        """有界等待有效系统新帧，捕获前后均检查固定窗口。"""
+        """返回有效窗口帧，后台暂态只恢复当前读取而不重放步骤。"""
+        while True:
+            try:
+                return self._read_frame()
+            except WindowPresentationUnavailable as exc:
+                self._presentation_unavailable(exc)
+
+    def _read_frame(self, *, after_time=None, after_sequence=0):
+        """用真实时间有界等待新帧，并同时核对输入与恢复屏障。"""
         deadline = self._clock() + self._capture_timeout
         while True:
-            self.check_window()
+            self._check_window_once()
             image = self._source.screenshot()
             try:
-                self.check_window()
+                self._check_window_once()
                 if image.size != (self.rules.pixel_width, self.rules.pixel_height):
-                    raise WindowCaptureError('窗口截图像素尺寸与素材不符')
+                    raise WindowPresentationUnavailable('窗口截图像素尺寸与素材不符')
                 proof = getattr(self._source, 'proof', None)
                 now = self._clock()
                 fresh = proof is not None and 0 <= now - proof.captured_at <= self._freshness
                 after_input = self._after_input is None or (proof is not None and proof.sequence > self._after_sequence and proof.captured_at > self._after_input)
-                if fresh and after_input:
+                after_recovery = after_time is None or (proof is not None and proof.sequence > after_sequence and proof.captured_at > after_time)
+                if fresh and after_input and after_recovery:
                     self.proof = proof
                     self._after_input = None
                     return image
@@ -208,7 +320,8 @@ class MacOSWindowSession:
                 raise
             image.close()
             if self._clock() >= deadline:
-                raise WindowCaptureError('未获得输入之后的新窗口画面，或窗口流已过期；请检查前台游戏和截图权限')
+                error = (WindowPresentationUnavailable if self.backend == 'macos-window-background' else WindowCaptureError)
+                raise error('未获得输入之后的新窗口画面，或窗口流已过期；请检查游戏和截图权限')
             self.check_cancelled()
             self._sleep(0.02)
 

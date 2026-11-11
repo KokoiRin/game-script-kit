@@ -60,6 +60,10 @@ class Session:
         self.logger = SimpleNamespace(log=self.messages.append)
     def check_window(self):
         """模拟已有身份与取消校验。"""
+    def check_cancelled(self):
+        """默认没有取消请求。"""
+    def commit_input(self):
+        """投递边界由真实会话负责，此替身只记录外部事件。"""
     def validate_point(self, point):
         """仅允许固定窗口内部点。"""
         assert 100 <= point.x < 180 and 200 <= point.y < 260
@@ -99,12 +103,11 @@ def test_background_recipe_posts_only_to_pid_with_complete_fields():
     assert any('frontmost_pid=999' in message and 'background-pid-experiment' in message for message in session.messages)
 
 
-def test_foreground_game_is_rejected_without_posting():
-    """明确实验要求目标在后台，已前台时零事件。"""
+def test_foreground_game_uses_the_same_pid_transport():
+    """目标在前台时仍通过固定PID完成一次点击。"""
     q = Quartz()
-    with pytest.raises(RuntimeError, match='后台'):
-        device(Session(q), frontmost=42).click(Point(105, 206))
-    assert q.events == []
+    device(Session(q), frontmost=42).click(Point(105, 206))
+    assert [(pid, event['kind']) for pid, event in q.events] == [(42, 'move'), (42, 'down'), (42, 'up')]
 
 
 def test_down_post_failure_still_releases_and_invalidates_old_frame():
@@ -150,7 +153,7 @@ def test_cancelled_hold_releases_without_rechecking_cancellation():
         """收到按下后模拟协作取消。"""
         if any(event['kind'] == 'down' for _, event in q.events):
             raise ScriptCancelledError('cancelled')
-    session.check_window = check
+    session.check_cancelled = check
     with pytest.raises(ScriptCancelledError):
         device(session).click(Point(105, 206))
     assert [event['kind'] for _, event in q.events] == ['move', 'down', 'up']
@@ -166,7 +169,6 @@ def test_release_does_not_depend_on_frontmost_read_after_down():
         if any(event['kind'] == 'down' for _, event in q.events):
             raise RuntimeError('frontmost read failed')
         return 999
-    with pytest.raises(RuntimeError, match='frontmost read failed'):
-        device(session, frontmost=read_frontmost).click(Point(105, 206))
+    device(session, frontmost=read_frontmost).click(Point(105, 206))
     assert [event['kind'] for _, event in q.events] == ['move', 'down', 'up']
     assert session.finished == 1

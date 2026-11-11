@@ -6,7 +6,8 @@
 
 from __future__ import annotations
 
-from typing import Protocol
+from collections.abc import Callable
+from typing import Protocol, TypeVar
 
 from game_automation.portable.domain import (
     Color,
@@ -17,6 +18,21 @@ from game_automation.portable.domain import (
     Point,
     Rect,
 )
+
+
+_InputResult = TypeVar('_InputResult')
+
+
+class RuntimeControl(Protocol):
+    """提供有效任务时间与一次输入准备的安全恢复边界。"""
+
+    def task_time(self) -> float:
+        """返回扣除平台暂停区间的单调任务时间。"""
+        ...
+
+    def execute_input(self, action: Callable[[], _InputResult]) -> _InputResult:
+        """执行一次输入，平台只可重做尚未发送的准备工作。"""
+        ...
 
 
 class InputDevice(Protocol):

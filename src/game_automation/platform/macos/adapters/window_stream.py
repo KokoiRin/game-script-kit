@@ -13,7 +13,11 @@ from PIL import Image
 
 from game_automation.portable.application.capture_errors import WindowCaptureError
 from game_automation.portable.domain.screen_state import FrameProof
-from game_automation.platform.macos.adapters.window_identity import BoundWindow
+from game_automation.platform.macos.adapters.window_identity import BoundWindow, WindowPresentationUnavailable
+
+
+class WindowFramePending(WindowCaptureError):
+    """首帧尚未到达，需要调用方按当前窗口状态决定是否可恢复。"""
 
 
 @dataclass(frozen=True)
@@ -36,16 +40,17 @@ class LatestWindowFrame:
         self._last_time = -math.inf
         self._closed = False
         self._error = None
+        self._terminal_error = False
 
     def publish(self, kind, stamp, pixels=None):
         """新complete或带新源时间的idle可确认，缓存读取不能续期。"""
         with self._condition:
-            if self._closed:
+            if self._closed or self._terminal_error:
                 return
             if stamp is None or not math.isfinite(stamp) or stamp < 0:
                 if kind == 'complete':
                     self._pixels = self._proof = None
-                    self._error = '窗口流缺少有效源时间，请重新开始观察'
+                    self._error = WindowCaptureError('窗口流缺少有效源时间，请重新开始观察')
                     self._condition.notify_all()
                 return
             if stamp <= self._last_time:
@@ -60,12 +65,13 @@ class LatestWindowFrame:
             self._error = None
             self._condition.notify_all()
 
-    def invalidate(self, message):
+    def invalidate(self, message, *, terminal=False):
         """blank、暂停、系统错误撤销像素，idle不能恢复失效槽。"""
         with self._condition:
-            if not self._closed:
+            if not self._closed and not self._terminal_error:
                 self._pixels = self._proof = None
-                self._error = str(message)[:1024]
+                self._error = message if isinstance(message, WindowCaptureError) else WindowCaptureError(str(message)[:1024])
+                self._terminal_error = self._terminal_error or terminal
                 self._condition.notify_all()
 
     def take(self, timeout=2):
@@ -75,9 +81,9 @@ class LatestWindowFrame:
             if self._closed:
                 raise WindowCaptureError('窗口采集已停止')
             if self._error:
-                raise WindowCaptureError(self._error)
+                raise self._error
             if self._pixels is None:
-                raise WindowCaptureError('尚未收到窗口完整画面，请检查目标窗口与截图权限')
+                raise WindowFramePending('尚未收到窗口完整画面，请检查目标窗口与截图权限')
             return self._pixels, self._proof
 
     def close(self):
@@ -107,8 +113,8 @@ class WindowStreamSource:
         self._closed = False
         self.proof = None
 
-    def screenshot(self):
-        """复制最新独立RGB并绑定真实源证据，前后核对窗口。"""
+    def _take_pixels(self):
+        """核对窗口与像素槽，供轻量可用性检查和RGB读取共用。"""
         if self._closed:
             raise WindowCaptureError('窗口采集已停止')
         self._binding.check()
@@ -121,9 +127,24 @@ class WindowStreamSource:
             except Exception as exc:
                 self._startup_error = '窗口流启动失败：' + str(exc)[:1024]
                 raise WindowCaptureError(self._startup_error) from exc
-        pixels, proof = self._slot.take()
+        try:
+            pixels, proof = self._slot.take()
+        except WindowFramePending:
+            self._binding.check()
+            raise
         if (pixels.width, pixels.height) != self._pixel_size:
-            raise WindowCaptureError('窗口截图像素尺寸已变化，请恢复显示缩放或重新采集素材')
+            raise WindowPresentationUnavailable('窗口截图像素尺寸已变化，请恢复显示缩放或重新采集素材')
+        self._binding.check()
+        return pixels, proof
+
+    def check_available(self):
+        """读取同槽证明检查展示状态，不转换或复制RGB图像。"""
+        _, proof = self._take_pixels()
+        return proof
+
+    def screenshot(self):
+        """复制最新独立RGB并绑定真实源证据，前后核对窗口。"""
+        pixels, proof = self._take_pixels()
         image = Image.frombytes('RGBA', self._pixel_size, pixels.data, 'raw', 'BGRA', pixels.stride).convert('RGB')
         try:
             self._binding.check()
@@ -245,16 +266,18 @@ class NativeWindowStream:
                 elif status == 1:
                     self.slot.publish('idle', stamp)
                 else:
-                    self.slot.invalidate('窗口画面已暂停或不可用，正在等待新的完整画面')
+                    self.slot.invalidate(WindowPresentationUnavailable('窗口画面已暂停或不可用，正在等待新的完整画面'))
+        except WindowPresentationUnavailable as exc:
+            self.slot.invalidate(exc)
         except Exception as exc:
-            self.slot.invalidate('窗口流采集失败：' + str(exc))
+            self.slot.invalidate('窗口流采集失败：' + str(exc), terminal=True)
 
     def _copy_pixels(self, sample, meta):
         """核对surface的内容几何和比例，复制后立即释放系统缓冲。"""
         q, sc = self.q, self.sc
         image = self.cm.CMSampleBufferGetImageBuffer(sample)
         if image is None:
-            raise WindowCaptureError('系统未返回完整窗口像素')
+            raise WindowPresentationUnavailable('系统未返回完整窗口像素')
         w, h = q.CVPixelBufferGetWidth(image), q.CVPixelBufferGetHeight(image)
         raw = meta.get(sc.SCStreamFrameInfoContentRect)
         if hasattr(raw, 'rectValue'):
@@ -270,9 +293,9 @@ class NativeWindowStream:
         scale, factor = meta.get(sc.SCStreamFrameInfoContentScale), meta.get(sc.SCStreamFrameInfoScaleFactor)
         values = (*rect, scale, factor)
         if any(v is None or not math.isfinite(v) for v in values) or any(abs(a-b) > 1 for a,b in zip(rect, expected)):
-            raise WindowCaptureError('窗口流内容范围已变化，请恢复窗口尺寸')
+            raise WindowPresentationUnavailable('窗口流内容范围已变化，请恢复窗口尺寸')
         if abs(scale-1) > .001 or abs(factor-self.pixel_size[0]/logical.width) > .001 or abs(factor-self.pixel_size[1]/logical.height) > .001 or (w,h) != self.pixel_size:
-            raise WindowCaptureError('窗口流像素比例已变化，请恢复窗口尺寸与显示缩放')
+            raise WindowPresentationUnavailable('窗口流像素比例已变化，请恢复窗口尺寸与显示缩放')
         if q.CVPixelBufferGetPixelFormatType(image) != q.kCVPixelFormatType_32BGRA:
             raise WindowCaptureError('窗口流像素格式不受支持')
         if q.CVPixelBufferLockBaseAddress(image, q.kCVPixelBufferLock_ReadOnly):
@@ -323,7 +346,7 @@ def _sink_class(objc):
                 """系统失败立即使单槽失效，不能保留旧画面。"""
                 owner = self.owner
                 if owner is not None:
-                    owner.slot.invalidate('窗口流已停止：' + str(error))
+                    owner.slot.invalidate('窗口流已停止：' + str(error), terminal=True)
 
         _SINK_CLASS = StarWindowStreamSink
     return _SINK_CLASS

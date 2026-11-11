@@ -10,7 +10,7 @@ from typing import ContextManager, Protocol
 
 from game_automation.portable.domain.windows import Window
 from game_automation.portable.domain.script import ScriptTarget
-from game_automation.portable.engine.ports import CancellationToken, InputDevice, PixelColorReader, RunLogger, ScreenImageLocator, ScreenStateReader
+from game_automation.portable.engine.ports import CancellationToken, InputDevice, RuntimeControl, PixelColorReader, RunLogger, ScreenImageLocator, ScreenStateReader
 from game_automation.portable.engine.script_requirements import ScriptRequirements
 
 
@@ -22,6 +22,7 @@ class RuntimePorts:
     color_reader: PixelColorReader | None = None
     image_locator: ScreenImageLocator | None = None
     screen_state_reader: ScreenStateReader | None = None
+    control: RuntimeControl | None = None
 
 
 class RuntimeFactory(Protocol):

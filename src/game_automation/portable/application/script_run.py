@@ -9,6 +9,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from contextlib import ExitStack
+from time import monotonic
 
 from game_automation.portable.adapters.dry_run import (
     DryRunInputDevice,
@@ -27,6 +28,7 @@ from game_automation.portable.engine.ports import (
     RunLogger,
     ScreenImageLocator,
     ScreenStateReader,
+    RuntimeControl,
 )
 from game_automation.portable.engine.run_events import ScriptRunEvent, emit_script_run_event
 from game_automation.portable.engine.runner import ScriptCancelledError, ScriptRunner
@@ -75,6 +77,7 @@ def run_script(
             details={"script": script.name, "dry_run": str(dry_run)},
         )
     stack = ExitStack()
+    runtime_control = None
     stage = "setup"
     result = ScriptRunResult(1, "script run did not finish", "failed")
     try:
@@ -98,6 +101,7 @@ def run_script(
             ):
                 if needed and port is None:
                     raise RuntimeError(f"{script.target.backend} runtime did not supply required {name}")
+            runtime_control = ports.control
             prepared_script = replace(script, window=ports.window)
             real_device_factory = lambda: ports.device
             real_color_reader_factory = lambda: ports.color_reader
@@ -116,7 +120,8 @@ def run_script(
             real_color_reader_factory=real_color_reader_factory,
             real_image_locator_factory=real_image_locator_factory,
             real_screen_state_reader_factory=real_screen_state_reader_factory,
-            cancellation_token=cancellation_token, logger=logger, emit_step_events=emit_step_events)
+            cancellation_token=cancellation_token, logger=logger, emit_step_events=emit_step_events,
+            runtime_control=runtime_control)
         stage = "run"
         execution_result = runner.run(prepared_script)
         result = ScriptRunResult(0, finish_reason=execution_result.finish_reason)
@@ -212,6 +217,7 @@ def _build_runner(
     cancellation_token: CancellationToken | None,
     logger: RunLogger | None,
     emit_step_events: bool,
+    runtime_control: RuntimeControl | None = None,
 ) -> ScriptRunner:
     """按脚本运行模式和端口需求组装 runner。"""
     requirements = inspect_script_requirements(script)
@@ -242,6 +248,8 @@ def _build_runner(
         device = _CancellableInputDevice(device, cancellation_token)
     return ScriptRunner(
         device=device,
+        clock=monotonic if runtime_control is None else runtime_control.task_time,
+        runtime_control=runtime_control,
         color_reader=_build_real_color_reader(
             needs_color_reader=requirements.needs_color_reader,
             real_color_reader_factory=real_color_reader_factory,

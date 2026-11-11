@@ -38,6 +38,7 @@ from game_automation.portable.engine.ports import (
     RunLogger,
     ScreenImageLocator,
     ScreenStateReader,
+    RuntimeControl,
 )
 from game_automation.portable.engine.run_events import ScriptRunEvent, emit_script_run_event
 
@@ -76,6 +77,7 @@ class ScriptRunner:
     clock: Callable[[], float] = monotonic
     _deadline: float | None = None
     _deadline_owner: object | None = None
+    runtime_control: RuntimeControl | None = None
 
     def run(self, script: Script) -> ScriptExecutionResult:
         """按脚本步骤树顺序执行所有步骤并返回可观察结束原因。"""
@@ -158,15 +160,21 @@ class ScriptRunner:
 
     def _run_click(self, script: Script, action: Click, step_path: str) -> None:
         """解析脚本窗口内点击点并调用输入设备。"""
-        target = self._resolve_click_target(script, action.point, step_path=step_path)
-        self._raise_if_cancelled()
-        self._emit_event(
-            "click_resolved",
-            step_path=step_path,
-            step_type="Click",
-            details={"point": str(target)},
-        )
-        self.device.click(target)
+        def prepare_and_click():
+            """定位和守卫在同一未发送边界内，恢复后重新取证。"""
+            target = self._resolve_click_target(script, action.point, step_path=step_path)
+            self._raise_if_cancelled()
+            self._emit_event(
+                "click_resolved",
+                step_path=step_path,
+                step_type="Click",
+                details={"point": str(target)},
+            )
+            self.device.click(target)
+            return target
+
+        target = (prepare_and_click() if self.runtime_control is None
+                  else self.runtime_control.execute_input(prepare_and_click))
         self._emit_event(
             "click_performed",
             step_path=step_path,

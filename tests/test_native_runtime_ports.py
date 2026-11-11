@@ -289,3 +289,42 @@ def test_background_cli_and_control_read_window_rules(tmp_path):
     app = LocalControlApplication(catalog=ScriptCatalog((background,)), project_root=tmp_path)
     assert app.describe_script('native').exit_code == 0
     assert cli._describe_script(background, tmp_path).exit_code == 0
+
+
+def test_native_runtime_control_drives_click_preparation_and_repeat_budget():
+    """公开运行入口传递恢复边界和任务时钟，预算按有效时间结束。"""
+    import pytest
+    from game_automation.portable.domain import Repeat, Wait
+    class Control:
+        def __init__(self):
+            """保存有效时间和已经执行的点击准备次数。"""
+            self.now = 0.0
+            self.preparations = 0
+        def task_time(self):
+            """提供平台定义的有效时间。"""
+            return self.now
+        def execute_input(self, action):
+            """用公开输入边界包住定位和投递。"""
+            self.preparations += 1
+            return action()
+    control = Control()
+    class TimedFactory(Factory):
+        @contextmanager
+        def open(self, target, requirements, cancellation, logger):
+            """将同一个时间源和输入边界交给运行入口。"""
+            def wait(seconds):
+                """只推进有效时间，避免测试依赖墙上时间。"""
+                control.now += seconds
+            self.device.wait = wait
+            try:
+                yield RuntimePorts(AreaWindow(Rect(100, 200, 80, 60)), self.device, control=control)
+            finally:
+                self.closed = True
+    factory = TimedFactory()
+    timed = replace(script(), steps=(Repeat(None, (Click(Point(5, 6)), Wait(0.06)), max_seconds=0.1),))
+    result = run_script(timed, dry_run=False, real_runtime_factory=factory)
+    assert result.finish_reason == 'completed'
+    assert factory.closed
+    assert factory.device.clicks == [Point(105, 206), Point(105, 206)]
+    assert control.preparations == 2
+    assert control.now == pytest.approx(0.1)

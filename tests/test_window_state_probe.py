@@ -17,7 +17,7 @@ from game_automation.portable.preparation.models import DesktopWindow
 
 def quartz(windows):
     """提供可注入的系统窗口表。"""
-    return SimpleNamespace(kCGWindowListOptionOnScreenOnly=1, kCGWindowListExcludeDesktopElements=2,
+    return SimpleNamespace(kCGWindowListOptionAll=0, kCGWindowListOptionOnScreenOnly=1, kCGWindowListExcludeDesktopElements=2,
         kCGNullWindowID=0, kCGWindowOwnerPID='pid', kCGWindowLayer='layer', kCGWindowName='title',
         kCGWindowBounds='bounds', kCGWindowNumber='id', CGWindowListCopyWindowInfo=lambda *args: windows)
 
@@ -209,3 +209,24 @@ def test_window_size_error_reports_original_and_current_geometry(changed):
     assert '尺寸已变化' in message
     assert '原窗口=(20, 30, 80, 60)' in message
     assert f"当前窗口={(bounds['X'], bounds['Y'], bounds['Width'], bounds['Height'])}" in message
+
+
+def test_existing_offscreen_identity_is_temporary_but_replacement_is_terminal():
+    """用全部窗口核实固定身份，区分隐藏和真正被替换。"""
+    from game_automation.platform.macos.adapters.window_identity import BoundWindow, WindowPresentationUnavailable
+    from game_automation.portable.application.capture_errors import WindowCaptureError
+    windows = [{'pid':42, 'layer':0, 'title':'页面', 'bounds':{'X':0,'Y':0,'Width':80,'Height':60}, 'id':100}]
+    q = quartz(windows)
+    visible = [True]
+    def rows(options, window_id):
+        """不可见时仅全部窗口查询仍能找到原编号。"""
+        return windows if visible[0] or not options & q.kCGWindowListOptionOnScreenOnly else []
+    q.CGWindowListCopyWindowInfo = rows
+    binding = BoundWindow(DesktopWindow('42:1', 'App', '页面', Rect(0,0,80,60)), quartz=q)
+    visible[0] = False
+    with pytest.raises(WindowPresentationUnavailable):
+        binding.check()
+    windows[0]['id'] = 101
+    with pytest.raises(WindowCaptureError) as caught:
+        binding.check()
+    assert not isinstance(caught.value, WindowPresentationUnavailable)

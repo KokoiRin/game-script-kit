@@ -196,3 +196,91 @@ def test_stream_rejects_fixed_surface_that_hides_changed_content_geometry(change
         meta['rect']['Width'] = 20
     with pytest.raises(RuntimeError, match='范围|比例'):
         native._copy_pixels(None, meta)
+
+
+def test_availability_check_keeps_screenshot_pixels_and_proof_paired():
+    """轻量可用性读取不能把新证明绑定到旧RGB画面。"""
+    binding, driver = Binding(), Driver()
+    source = WindowStreamSource(binding.window, (4, 4), binding=binding, driver_factory=lambda: driver)
+    try:
+        with source.screenshot():
+            original = source.proof
+        driver.slot.publish('complete', original.captured_at + 1, pixels())
+        assert source.check_available().sequence > original.sequence
+        assert source.proof is original
+    finally:
+        source.close()
+
+
+def test_terminal_stop_cannot_be_revived_by_late_frames_or_pauses():
+    """真正停流后迟到complete和暂停事件均不能覆盖终止原因。"""
+    from game_automation.platform.macos.adapters.window_identity import WindowPresentationUnavailable
+    slot = LatestWindowFrame()
+    slot.publish('complete', 1, pixels())
+    slot.invalidate('stream stopped', terminal=True)
+    slot.publish('complete', 2, pixels())
+    slot.invalidate(WindowPresentationUnavailable('paused'))
+    with pytest.raises(RuntimeError, match='stream stopped'):
+        slot.take(0)
+
+
+def test_slot_preserves_temporary_presentation_error_type():
+    """暂态原因穿过采集槽保持类型，供会话恢复。"""
+    from game_automation.platform.macos.adapters.window_identity import WindowPresentationUnavailable
+    slot = LatestWindowFrame()
+    slot.invalidate(WindowPresentationUnavailable('paused'))
+    with pytest.raises(WindowPresentationUnavailable):
+        slot.take(0)
+    slot.publish('complete', 2, pixels())
+    assert slot.take(0)[1].captured_at == 2
+
+
+def test_first_frame_timeout_rechecks_window_before_reporting_failure():
+    """等首帧期间进入调度中心，超时后按当前几何报告可恢复暂态。"""
+    from game_automation.platform.macos.adapters.window_identity import WindowPresentationUnavailable
+    from game_automation.portable.application.capture_errors import WindowCaptureError
+    binding = Binding()
+    with pytest.raises(WindowCaptureError) as pending:
+        LatestWindowFrame().take(0)
+    class PausingDriver(Driver):
+        def start(self, binding, size, hz, slot):
+            """模拟首帧等待期间系统开始缩小窗口。"""
+            self.slot = slot
+            def wait_for_first_frame():
+                """在系统等待边界改变几何并报告尚无完整帧。"""
+                def changed():
+                    """原窗口身份保留，但当前展示尺寸缩小。"""
+                    raise WindowPresentationUnavailable('same window shrunk')
+                binding.check = changed
+                raise pending.value
+            slot.take = wait_for_first_frame
+    source = WindowStreamSource(binding.window, (4,4), binding=binding, driver_factory=PausingDriver)
+    try:
+        with pytest.raises(WindowPresentationUnavailable, match='shrunk'):
+            source.check_available()
+    finally:
+        source.close()
+
+
+def test_first_frame_timeout_on_stable_window_is_still_terminal():
+    """稳定窗口没有首帧仍报告采集失败，不能无限吞掉权限或源故障。"""
+    from game_automation.platform.macos.adapters.window_identity import WindowPresentationUnavailable
+    from game_automation.portable.application.capture_errors import WindowCaptureError
+    binding = Binding()
+    with pytest.raises(WindowCaptureError) as pending:
+        LatestWindowFrame().take(0)
+    class EmptyDriver(Driver):
+        def start(self, binding, size, hz, slot):
+            """让首帧等待有界结束，窗口保持稳定。"""
+            self.slot = slot
+            def timeout():
+                """报告无帧，不改变窗口身份或几何。"""
+                raise pending.value
+            slot.take = timeout
+    source = WindowStreamSource(binding.window, (4,4), binding=binding, driver_factory=EmptyDriver)
+    try:
+        with pytest.raises(WindowCaptureError) as caught:
+            source.check_available()
+        assert not isinstance(caught.value, WindowPresentationUnavailable)
+    finally:
+        source.close()

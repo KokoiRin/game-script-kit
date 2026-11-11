@@ -56,21 +56,17 @@ class MacOSBackgroundWindowInputDevice:
         frontmost = self._framework().NSWorkspace.sharedWorkspace().frontmostApplication()
         return None if frontmost is None else int(frontmost.processIdentifier())
 
-    def _require_background(self):
-        """确保本轮确实测试后台，已前台或无法核实前台均不发送。"""
+    def _require_ready(self):
+        """核对窗口可用性，前台PID只作为投递诊断。"""
         self.session.check_window()
         frontmost = self._frontmost_pid()
-        if frontmost is None:
-            raise RuntimeError('后台点击试验无法确认当前前台进程，已停止')
-        if frontmost == self.pid:
-            raise RuntimeError('后台点击试验要求目标保持后台；当前游戏已是前台，已停止')
         self._last_frontmost_pid = frontmost
         return frontmost
 
     def _mouse(self, kind, point, *, release=False):
         """构造完整单一路径事件，保留NSEvent自动填充的窗口字段。"""
         q, appkit = self.q, self._framework()
-        frontmost = self._last_frontmost_pid if release else self._require_background()
+        frontmost = self._last_frontmost_pid if release else self._require_ready()
         types = {q.kCGEventMouseMoved:appkit.NSEventTypeMouseMoved,
                  q.kCGEventLeftMouseDown:appkit.NSEventTypeLeftMouseDown,
                  q.kCGEventLeftMouseUp:appkit.NSEventTypeLeftMouseUp}
@@ -99,20 +95,21 @@ class MacOSBackgroundWindowInputDevice:
                        f'frontmost_pid={frontmost} frontmost_evidence={"cached-release" if release else "checked"} window_id={self.session.binding.number} kind={kind} '
                        f'global_point={point} window_local={local} subtype=3 flags=0x100000 private_window_location=True')
         if not release:
-            self._require_background()
+            self._require_ready()
         if kind == q.kCGEventLeftMouseDown:
+            self.session.commit_input()
             self._held = True
         q.CGEventPostToPid(self.pid, event)
 
     def click(self, target):
         """后台投递primer、按下和50ms后配对释放，并撤销旧视觉证明。"""
         self.session.validate_point(target)
-        self._require_background()
+        self._require_ready()
         try:
             self._mouse(self.q.kCGEventMouseMoved, target)
             try:
                 self._mouse(self.q.kCGEventLeftMouseDown, target)
-                self.wait(0.05)
+                self._hold_mouse(0.05)
             finally:
                 if self._held:
                     try:
@@ -121,16 +118,25 @@ class MacOSBackgroundWindowInputDevice:
                         self._held = False
         finally:
             self.session.input_finished()
-        self._require_background()
 
-    def wait(self, duration_seconds):
-        """等待时只检查窗口与取消，不请求前台。"""
-        if not math.isfinite(duration_seconds) or duration_seconds < 0:
-            raise ValueError('wait duration must be finite and nonnegative')
+    def _hold_mouse(self, duration_seconds):
+        """按住使用系统时间，只检查取消，保证及时进入释放路径。"""
         deadline = self._clock() + duration_seconds
         while True:
-            self.session.check_window()
+            self.session.check_cancelled()
             remaining = deadline - self._clock()
+            if remaining <= 0:
+                return
+            self._sleep(min(0.02, remaining))
+
+    def wait(self, duration_seconds):
+        """以有效任务时间等待，展示暂停和取消由会话管理。"""
+        if not math.isfinite(duration_seconds) or duration_seconds < 0:
+            raise ValueError('wait duration must be finite and nonnegative')
+        deadline = self.session.task_time() + duration_seconds
+        while True:
+            self.session.check_window()
+            remaining = deadline - self.session.task_time()
             if remaining <= 0:
                 return
             self._sleep(min(0.02, remaining))
