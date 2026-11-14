@@ -1,15 +1,12 @@
-"""聚合导出 macOS 专用 adapter。
+"""聚合导出 macOS 应用激活 adapter。
 
-本 module 只提供 macOS 输入 adapter 的便捷 import surface；它不执行脚本，
-也不处理命令行模式选择。
+本模块为素材准备装配提供应用激活接口，具体窗口运行能力由对应模块提供。
 """
 
 from game_automation.platform.macos.adapters.application_activation import (
     MacOSApplicationActivator,
 )
-from game_automation.platform.macos.adapters.pointer_device import MacOSPointerDevice
 
 __all__ = [
     "MacOSApplicationActivator",
-    "MacOSPointerDevice",
 ]

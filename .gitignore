@@ -30,7 +30,6 @@ scripts/*
 !scripts/wait-until-screen-state-demo.py
 assets/*
 !assets/start.png
-!assets/screen-states.json
 resources/xqtd/
 
 .DS_Store
