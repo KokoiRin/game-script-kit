@@ -1,7 +1,7 @@
-"""表达脚本运行过程中的结构化事件。
+"""表达任务运行过程中的结构化事件。
 
-本 module 只定义 engine/application 之间共享的运行事件和值到文本/JSON 的转换；
-它不执行脚本、不访问平台 adapter，也不处理 HTTP 或 UI 渲染。
+本 module 只定义 engine/application 之间共享的运行事件和值到文本的转换；
+它不执行任务、不访问平台 adapter，也不处理 UI 渲染。
 """
 
 from __future__ import annotations
@@ -10,8 +10,8 @@ from dataclasses import dataclass, field
 
 
 @dataclass(frozen=True, slots=True)
-class ScriptRunEvent:
-    """记录脚本运行中的一个可观察事件。"""
+class TaskRunEvent:
+    """记录任务运行中的一个可观察事件。"""
 
     event_type: str
     step_path: str = ""
@@ -20,20 +20,20 @@ class ScriptRunEvent:
     details: dict[str, str] = field(default_factory=dict)
 
 
-def emit_script_run_event(logger, event: ScriptRunEvent) -> None:
-    """把结构化事件交给 logger，旧 logger 自动退化为文本日志。"""
+def emit_task_run_event(logger, event: TaskRunEvent) -> None:
+    """把结构化事件交给 logger，没有结构化接口时退化为文本日志。"""
     if logger is None:
         return
     log_event = getattr(logger, "log_event", None)
     if log_event is not None:
         log_event(event)
         return
-    logger.log(format_script_run_event(event))
+    logger.log(format_task_run_event(event))
 
 
-def format_script_run_event(event: ScriptRunEvent) -> str:
+def format_task_run_event(event: TaskRunEvent) -> str:
     """把运行事件格式化为当前 UI 日志区可直接展示的一行文本。"""
-    parts = [f"script event type={event.event_type}"]
+    parts = [f"task event type={event.event_type}"]
     if event.step_path:
         parts.append(f"path={event.step_path}")
     if event.step_type:
@@ -44,8 +44,8 @@ def format_script_run_event(event: ScriptRunEvent) -> str:
     return " ".join(parts)
 
 
-def script_run_event_to_payload(event: ScriptRunEvent) -> dict[str, object]:
-    """把运行事件转换成 HTTP adapter 可 JSON 序列化的 payload。"""
+def task_run_event_to_payload(event: TaskRunEvent) -> dict[str, object]:
+    """把运行事件转换成入口可序列化的 payload。"""
     return {
         "type": event.event_type,
         "path": event.step_path,

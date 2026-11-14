@@ -27,7 +27,7 @@ from game_automation.portable.application.window_state_rules import (
     load_window_state_rules,
 )
 from game_automation.portable.domain import AreaWindow
-from game_automation.portable.engine.cancellation import ScriptCancelledError
+from game_automation.portable.engine.cancellation import TaskCancelledError
 from game_automation.portable.preparation.models import DesktopWindow
 
 
@@ -253,7 +253,7 @@ class MacOSWindowSession:
     def check_cancelled(self):
         """在每次系统边界与有界等待间保留取消优先。"""
         if self.cancellation is not None and self.cancellation.is_cancelled():
-            raise ScriptCancelledError("script run cancelled")
+            raise TaskCancelledError("task run cancelled")
 
     def task_time(self):
         """只从任务预算扣除已识别的暂停，不改变系统事件时钟。"""

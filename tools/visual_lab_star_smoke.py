@@ -15,7 +15,7 @@ from typing import Any
 from urllib.request import Request, urlopen
 
 from game_automation.platform.local_desktop.composition import (
-    run_script_on_local_desktop,
+    run_task_on_local_desktop,
 )
 from game_automation.portable.application.function_task_loader import (
     parse_function_task_source,
@@ -35,15 +35,14 @@ def main(argv: list[str] | None = None) -> int:
         "--url", default="http://127.0.0.1:8770", help="Running visual lab URL."
     )
     parser.add_argument(
-        "--target-app",
-        default="Safari",
-        help="Application Star activates before operating the visual lab.",
+        "--workspace",
+        required=True,
+        help="Workspace whose window-states.json matches the lab window.",
     )
-    parser.add_argument(
-        "--target-window-title",
-        default="Star 视觉自动化靶场",
-        help="Top-level window title Star raises and binds before the smoke run.",
-    )
+    parser.add_argument("--application", default="Safari")
+    parser.add_argument("--window-title", default="Star 视觉自动化靶场")
+    parser.add_argument("--width", type=int, required=True)
+    parser.add_argument("--height", type=int, required=True)
     parser.add_argument(
         "--min-confidence",
         type=float,
@@ -70,11 +69,16 @@ def main(argv: list[str] | None = None) -> int:
             f"Visual lab smoke starts in {args.start_delay:g}s; keep the lab browser visible."
         )
         time.sleep(args.start_delay)
-    result = run_script_on_local_desktop(
-        _build_smoke_task(min_confidence=args.min_confidence),
+    result = run_task_on_local_desktop(
+        _build_smoke_task(
+            min_confidence=args.min_confidence,
+            application=args.application,
+            window_title=args.window_title,
+            width=args.width,
+            height=args.height,
+        ),
         dry_run=False,
-        target_application=args.target_app,
-        target_window_title=args.target_window_title,
+        project_root=Path(args.workspace),
     )
     truth = _get_json(args.url, "/api/state")
     events = _get_json(args.url, "/api/events")["events"]
@@ -89,11 +93,25 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
-def _build_smoke_task(*, min_confidence: float) -> FunctionTask:
-    """构造直接识图点击并等待完成标识的 Python 任务。"""
+def _build_smoke_task(
+    *,
+    min_confidence: float,
+    application: str,
+    window_title: str,
+    width: int,
+    height: int,
+) -> FunctionTask:
+    """构造绑定原生窗口的识图点击任务。"""
     names = ("open-tasks", "target-task", "confirm-task", "completed")
     metadata = {
         "name": "visual-lab-real-smoke",
+        "target": {
+            "application": application,
+            "window_title": window_title,
+            "width": width,
+            "height": height,
+            "backend": "macos-window",
+        },
         "resources": {
             "images": {name: str(LAB_IMAGE_ROOT / f"{name}.png") for name in names},
             "searches": {

@@ -22,20 +22,20 @@
 
 1. 明确起始画面、前置条件、动作、可观察的完成标志和停止条件。
 2. 选定仓库外的任务工作区，准备其中的 `assets/` 模板图片；固定点位可由坐标记录器辅助获取。
-3. Agent 在该根创建 `scripts/*.py`，声明 `TASK` 并实现 `run(ctx)`；桌面后端的状态条件使用同根 `assets/screen-states.json`，显式原生后端使用 `assets/window-states.json`。
+3. Agent 在该根创建 `scripts/*.py`，声明 `TASK` 并实现 `run(ctx)`；状态、共享搜索和窗口尺寸使用同根 `assets/window-states.json`。真实运行的 `target.backend` 只能是 `macos-window` 或 `macos-window-background`。
 4. 通过全局 `--workspace PATH` 使用 `list` 列出脚本、报告坏文件，使用 `details` 展示入口与声明依赖。
 5. 模拟运行检查一组固定假条件下的执行路径；随后在真实目标中核对操作和任务结果。
 6. 根据真实失败点修改脚本或资源，再分别报告自动化验证与真实任务验证。
 
-[项目脚本装配](../src/game_automation/portable/application/project_scripts.py) 读取所选根 `scripts/` 顶层的 Python 任务文件，无参数时使用仓库根的通用示例。
-工作区按文件名排序加载任务。名称来自 `TASK.name`，与文件名可以不同。遗留 JSON 任务显示迁移提示。Python 辅助文件可使用以下划线开头的名称，任务通过相对导入复用。
+[项目任务装配](../src/game_automation/portable/application/project_tasks.py) 读取所选根 `scripts/` 顶层的 Python 任务文件，无参数时使用仓库根的通用示例。
+工作区按文件名排序加载任务。名称来自 `TASK.name`，与文件名可以不同。非 Python 文件被忽略。Python 辅助文件可使用以下划线开头的名称，任务通过相对导入复用。
 单个文件格式错误或名称重复会被隔离，其他有效脚本继续可用。
 `star --workspace PATH list/details/run/run-plan/ui` 选择已存在的目录，参数放在子命令之前。路径解析与入口传递见 [CLI](../src/game_automation/platform/local_desktop/entrypoints/cli.py)，同根资源约定见 [project_assets.py](../src/game_automation/portable/application/project_assets.py) 和 [ADR 0006](adr/0006-local-task-workspaces.md)。
 
 | 入口 | 可用控制 | 生命周期与边界 |
 | --- | --- | --- |
 | CLI `list/details/run` | 查列表、查依赖、单任务运行；CLI 默认真实运行，需显式选择模拟 | 每次调用重新发现 Python 元信息 |
-| CLI `run-plan` | 按顺序运行多个已有脚本，选择停止或继续策略 | 每项开始前重新激活并绑定所选窗口 |
+| CLI `run-plan` | 按顺序运行多个已有任务，选择停止或继续策略 | 每项使用自己的原生窗口目标；dry-run 不打开窗口 |
 | CLI `recorder` | 打印鼠标屏幕坐标和颜色；终端保持焦点，按 `1` 记录、`Q` 结束 | 只打印结果，不创建 JSON 或模板 |
 | 原生壳 `ui` / `star-desktop` | 工作区选择、素材准备、脚本详情、模拟/真实运行、停止和诊断 | macOS 13+；后台单实例，工作区切换先回收旧进程；本机原生基础验证已完成，新增能力以验证记录为准 |
 | `prepare` | 打开同一原生壳的素材准备入口 | 要求显式工作区；不启动 HTTP；仅进入执行功能时加载 catalog |
@@ -43,7 +43,7 @@
 原生协议只允许一个后台脚本会话；运行中拒绝新的素材操作、工作区切换和重复启动。
 平台初始化或执行抛出普通异常时，用例返回失败原因；后台会话还有独立兜底，记录结束状态。普通执行失败完成资源回收后可重新运行；原生停流失败则保留进程级故障租约，后台重启前不能建立新的原生会话。
 原生会话通过标准管道请求与后台通信。超时或异常退出显示诊断并回收进程，不自动重放动作。关闭窗口、Command+Q 与信号退出共用关闭路径；后台收到 shutdown、EOF 或 SIGTERM 时取消并等待线程，释放临时帧和工作区锁。
-原生运行页可按脚本文件的target声明激活并绑定目标窗口；没有暂停、单步执行或从中断点恢复。
+原生运行页按任务 `target` 打开原生窗口会话；没有暂停、单步执行或从中断点恢复。未声明原生后端的真实运行直接失败。
 入口代码见 [CLI](../src/game_automation/platform/local_desktop/entrypoints/cli.py)、[后台协议](../src/game_automation/platform/local_desktop/entrypoints/desktop_backend.py) 和 [原生会话](../native/StarDesktop/Sources/StarDesktop/Session.swift)。
 
 ## 素材准备与执行隔离
@@ -54,14 +54,14 @@
 - 当前服务只保留一帧，新捕获会使旧帧失效；旧 ID 返回冲突，捕获失败也不能继续操作旧帧。
 - 名称只作为 assets 下的 PNG 文件名；拒绝越界裁图、路径名称及已有文件覆盖。点位和资源片段由原生界面展示；普通模板保存不写脚本，专用“保存状态素材”入口登记下述窗口观察规则。
 - 准备和模板匹配复用 `screen_capture.py` 的像素比例转换；显式原生运行的图像来自独立窗口流。真实准备截图限主屏幕内的 macOS 窗口，超出范围报错；窗口必须保持可见且无遮挡，同进程重复标题需先消除歧义。
-- 准备选窗不会改变脚本运行目标。文件脚本可通过 `target` 声明目标；默认桌面后端保留原 CLI 目标参数，显式 `macos-window` 使用脚本声明且拒绝 CLI 覆盖。实时识别使用当前所选窗口启动独立只读观察会话，不复用准备帧；观察 UI 缓存不驱动动作。原生脚本通过独立运行会话复用窗口规则，实时识别后由既有 runner 执行动作；截图回放尚未接入。
+- 准备选窗不会改变任务运行目标。任务通过 `target` 声明原生窗口；真实运行不接受命令行覆盖，也不再提供屏幕绝对坐标路径。实时识别使用当前所选窗口启动独立只读观察会话，不复用准备帧；观察 UI 缓存不驱动动作。任务通过独立运行会话复用窗口规则；截图回放尚未接入。
 
 ## 实时窗口状态识别
 
 - 窗口规则支持 `method: "points"` 固定多点颜色特征，按截图原始像素取色并允许有界整组平移，全部点通过才命中。纯多点不加载CV或整图数组；UI显示通过点数。格式、排序及参考PNG兼容边界见 [ADR 0011 多点补充](adr/0011-priority-window-observation.md#2026-11-07-多点匹配补充)。配置由Agent维护，准备UI仍登记模板。
 
 - 素材准备页支持填写状态名、阈值与搜索范围，保存模板并登记窗口规则。搜索范围由截图像素换算为窗口内逻辑坐标，模板保留原像素。
-- 规则保存在所选工作区的 `assets/window-states.json`，包含逻辑窗口尺寸及完整截图像素尺寸。旧 `screen-states.json` 的屏幕坐标语义不变。
+- 规则保存在所选工作区的 `assets/window-states.json`，包含逻辑窗口尺寸及完整截图像素尺寸。这是唯一的状态与共享搜索文件。
 - 实时识别页支持每秒 1、2 或 5 次检测，默认每秒 2 次及连续两帧确认。展示当前状态、本帧候选、每项匹配分数与位置、耗时、时效及有界状态历史。
 - macOS14+实时观察使用低频ScreenCaptureKit单窗流，采集频率跟随所选1/2/5Hz，默认2Hz。工作线程启动，独立串行队列只复制最新像素；每轮素材共用同一张窗口画面，不激活应用或发送输入。窗口编号、逻辑尺寸和像素尺寸变化后，不静默接管或缩放模板。
 - 源时间及独立事件序号参与新鲜度和连续确认；重复缓存不续期也不增加确认。有效idle仅证明系统确认画面未变化。停止等待系统与回调屏障，回收失败保留停止中并由宿主监督；见[ADR 0010](adr/0010-window-stream-observation.md)。
@@ -109,12 +109,11 @@
 | 图片 | `resources.images` 的名称到文件路径 | 路径相对所选根的 `assets/`，允许子目录；loader 本身不检查文件存在 |
 | 区域 | `resources.regions` 的命名矩形 | 必须有正宽高；用于搜索范围 |
 | 搜索 | `resources.searches` 组合图片、区域、置信度 | 通过上下文查询和点击时引用名称 |
-| 桌面脚本状态 | `assets/screen-states.json` 的 groups/searches | 顺序代表优先级，首次命中停止；每次状态读取重新加载配置并识别当前画面 |
-| 原生脚本状态 | `assets/window-states.json` 的窗口模板/多点规则 | 每轮运行加载规则并绑定尺寸；同一运行源按规则优先级截断，输入后必须获取新系统画面 |
-| 共享资源 | 状态配置提供的 regions/searches | 仅当被引用的搜索或区域不能由局部资源解析时加载；局部同名资源覆盖共享资源 |
+| 任务状态 | `assets/window-states.json` 的窗口模板/多点规则 | 每轮运行加载规则并绑定尺寸；同一运行源按规则优先级截断，输入后必须获取新系统画面 |
+| 共享资源 | 同一份窗口规则中的 regions/searches | 仅当被引用的搜索或区域不能由局部资源解析时加载；局部同名资源覆盖共享资源 |
 
-共享资源装配见 [script_resources.py](../src/game_automation/portable/application/script_resources.py)，桌面状态读取见 [screen_state_reader.py](../src/game_automation/portable/application/screen_state_reader.py)，原生状态读取复用 [window_state_probe.py](../src/game_automation/platform/macos/adapters/window_state_probe.py)。
-默认桌面后端的纯按键、固定点位和资源自足图片脚本，不因无关状态模板缺失或状态 JSON 损坏而阻断；真实状态读取按每次最新配置校验。显式原生会话需要窗口规则的逻辑/像素尺寸，即使本轮不读取状态也会先校验这份配置。需要共享搜索时仍解析对应的共享配置并报告错误。
+共享资源装配见 [task_resources.py](../src/game_automation/portable/application/task_resources.py)，状态读取复用 [window_state_probe.py](../src/game_automation/platform/macos/adapters/window_state_probe.py)。
+原生会话需要窗口规则的逻辑/像素尺寸，即使本轮不读取状态也会先校验这份配置。需要共享搜索时解析同一份配置并报告错误。dry-run 的状态是调用方给出的固定名称，不读取该文件。
 
 `details` 的 readiness 覆盖点位、图片和状态；发现 `missing` 时返回退出码 2，CLI/UI 仍展示入口和依赖检查，`unknown` 不作为已确认缺失。
 单脚本运行在激活目标应用和创建设备前校验声明的点位、图片、搜索和区域别名，未知引用返回 `2/configuration_failed`，不会先执行前序动作。该校验不要求模拟模板文件存在，也不代替真实识图或业务验收。
@@ -122,14 +121,12 @@
 状态配置与共享资源均读取所选工作区的 `assets/`，不回退到主仓。默认桌面 reader 缺少状态配置时，保留按该根 `assets/` 顶层图片文件名推断状态名称的兼容路径；显式原生 reader 要求窗口规则，不采用此回退。
 候选配置自己的阈值优先于状态读取参数；状态读取默认阈值为 0.8。
 
-- 未声明 `target` 的任务初始使用 `ScreenWindow`，默认点位和搜索区域是屏幕绝对坐标。
-- CLI 指定目标窗口后，脚本点位和显式搜索 region 按窗口左上角偏移；默认图片搜索限制在该窗口内。
-- 目标窗口在每个脚本开始时读取一次；单脚本中途移动窗口不会自动重新绑定。
-- 全局状态 reader 尚不接收窗口，状态区域仍使用屏幕绝对坐标，不随目标窗口移动。
-- 文件脚本可声明target应用、窗口标题及预期逻辑尺寸；CLI和原生真实运行均在开始时激活并绑定当前窗口，尺寸不符时在输入设备创建前失败。未声明目标时使用屏幕坐标。显式CLI目标参数优先于文件声明，保持原覆盖行为。
+- 点位和搜索区域相对任务声明的原生窗口。dry-run 没有活动窗口时按作者写下的坐标原样传递，不映射到屏幕。
+- 真实运行在会话开始时绑定唯一可见窗口；运行中窗口移动或尺寸变化会失败，不在中途改绑。
+- 未声明 `macos-window` 或 `macos-window-background` 的真实运行在打开设备前失败。没有命令行目标覆盖。
 - adapter 处理截图像素与鼠标坐标的比例换算；模板没有自动缩放匹配，界面缩放/主题变化仍可能影响识别。
 
-坐标规则见 [windows.py](../src/game_automation/portable/domain/windows.py)，窗口准备见 [script_run.py](../src/game_automation/portable/application/script_run.py)，匹配实现见 [image_matching.py](../src/game_automation/platform/desktop/adapters/image_matching.py)。
+坐标规则见 [windows.py](../src/game_automation/portable/domain/windows.py)，运行装配见 [task_run.py](../src/game_automation/portable/application/task_run.py)，窗口内匹配实现见 [image_matching.py](../src/game_automation/platform/desktop/adapters/image_matching.py)。
 
 ## 模拟运行能证明什么
 
@@ -144,7 +141,7 @@ UI 自动把所选脚本解析出的图片依赖全部视为找到；CLI 通过�
 - 无限循环配合模拟等待仍会持续快速运行和产生日志，模拟不保证自动结束。
 - 模拟匹配位置来自假矩形，不能验证真实点击点、模板质量、目标应用响应或业务完成。
 
-实现见 [dry_run.py](../src/game_automation/portable/adapters/dry_run.py) 与 `script_run.py` 的 `_build_dry_run_*`。
+实现见 [dry_run.py](../src/game_automation/portable/adapters/dry_run.py) 与 `task_run.py` 的 dry-run 端口装配。
 这组限制是当前替身的能力边界，未来可调整；流程预览和可迁移的模拟场景尚未实现。
 
 ## 停止与完成语义
@@ -187,10 +184,12 @@ UI 自动把所选脚本解析出的图片依赖全部视为找到；CLI 通过�
 - 任务局部图片路径仅拼接 assets；状态配置却严格限制路径位于 assets，路径约束不一致。
 - loader 对多余字段通常不报错，部分可选字段拼写错误可能被忽略；缺少统一严格校验入口。
 
-校验实现见 [script_dependencies.py](../src/game_automation/portable/application/script_dependencies.py)；当前测试覆盖并不消除上述遗漏。
+校验实现见 [task_dependencies.py](../src/game_automation/portable/application/task_dependencies.py)；当前测试覆盖并不消除上述遗漏。
 函数任务通过普通 Python 异常处理组织局部恢复。历史步骤树恢复方案已随旧格式退役，进一步自动恢复需由具体任务证据驱动。
 
 ## 验证记录
+
+- **2026-11-14 单一原生窗口运行**。真实运行不再接受 `desktop` 后端、命令行选窗或 `screen-states.json`。dry-run 仍可不打开窗口。本环境 `pytest` 为 `730 passed, 12 skipped`，`ruff check`、`ruff format --check` 与 `git diff --check` 通过。未做真实游戏输入或 Swift 界面操作。
 
 - **2026-11-14 窄版运行页与 Ruff 整理**。脚本运行和实时识别共用约 520×820 点的侧边窗口，素材准备页按当前屏幕范围恢复宽布局。实际 Star 界面验证了运行页的分行控件、长路径换行，以及准备页展开后返回运行页收窄。完整回归 `803 passed`，Ruff 检查、格式检查与 `git diff --check` 通过，11 个通用示例通过 CLI 模拟运行。规范整理显式保留 Quartz 桥接登记与 pytest fixture 注册，并覆盖桥接加载顺序。任务输入与画面验证使用替身，本轮界面操作限定在 Star。
 
@@ -221,14 +220,14 @@ UI 自动把所选脚本解析出的图片依赖全部视为找到；CLI 通过�
 
 - **2026-11-07 多点状态识别**：完整回归 `695 passed`（46.51s），`git diff --check`、Swift编译和固定证书跨内容签名验证通过。已安装版本在外部工作区六种场景完成状态切换验证，用户也独立确认；每组8点全部通过才命中，允许整组共同偏移1截图像素，对话与主页按优先级截断。5Hz活动页一次实机采样取帧10.2ms、识别0.9ms、整轮11.0ms，近期120轮整轮p95为16.0ms；累计585轮包含21次画面暂停或尺寸失效，没有超频率预算。交互中的短时观测不证明长期无人值守稳定性。配置、原模板备份、逐次对照和设计审查保留在外部工作区 `evidence/2026-11-07-six-point-states/`，不提交游戏素材。
 
-## 文件脚本绑定目标窗口
+## 任务绑定目标窗口
 
-可选顶层 `target` 需要 `application`、`window_title`、`width`、`height`，允许额外的 `backend`。前两项是非空文本，尺寸是正整数逻辑尺寸；未知字段和 backend 拼写错误会拒绝。允许的 backend 为 `desktop`、`macos-window` 和显式试验 `macos-window-background`。默认 `desktop` 复用既有激活与选窗并转换本轮 `AreaWindow`，旧截图与状态 reader 行为保留；模拟运行不调用真实选窗。
+顶层 `target` 需要 `application`、`window_title`、`width`、`height` 和 `backend`。前两项是非空文本，尺寸是正整数逻辑尺寸；未知字段和 backend 拼写错误会拒绝。允许的 backend 只有 `macos-window` 和显式试验 `macos-window-background`。真实运行缺少该声明时失败。模拟运行不调用真实选窗。单一路径见 [ADR 0016](adr/0016-native-window-only-runtime.md)。
 
 显式 `backend: "macos-window"` 为一次运行打开独立 `RuntimePorts` 会话：固定唯一窗口的 PID、CG ID、标题和矩形，截图、取色、模板、多点状态与原生前台输入共用该窗口。状态读取复用 `assets/window-states.json` 的优先级/多点；不用观察 UI 的缓存。输入后必须等新的源序号和更晚的系统时间；旧帧、窗口移动/变形/替换会失败，窗口移动或尺寸变化错误显示原窗口和当前窗口的完整逻辑矩形，不在运行时更换截图源或输入 transport。输入固定采用 `foreground-session` 原生会话投递；实际发送前确认绑定进程是前台，按下前确认点位最上层可见窗口仍为绑定 CG ID，仅精确排除公开系统光标层，其他可见浮层遮挡明确失败。运行结束关闭唯一窗口流；停流失败显示 `cleanup_failed` 并阻断新的原生会话，需重启后台；Run Plan 即使设置继续普通错误，也在清理失败后强制停止。取消优先且保留清理错误。该路径要求已有窗口尺寸/像素配置，不支持后台交互，不承诺跨 Space 或锁屏。PID 投递五轮短探针未完成活动页切换，当前前台 transport 的真实验收另行记录。完整边界见 [ADR 0012](adr/0012-native-script-runtime.md)。
 
 
-显式 `backend: "macos-window-background"` 是隔离的后台点击试验，复用同一窗口会话/SCK/视觉/进程租约，状态配置仍为 `window-states.json`；不进入旧桌面 backend。只支持 click/wait，不请求前台、不全局投递、不移动真实指针。游戏进入前台后仍使用原 PID 点击方式。同一窗口短暂不可见、矩形或采集展示变化时暂停输入，等待原始矩形与新源画面恢复后继续。恢复前重新准备尚未发送的点击，已尝试按下的点击只完成释放。暂停时间从普通等待与循环时间预算扣除，恢复等待期间可停止。固定身份丢失和系统停流等终止故障继续报错。使用完整 PID recipe 及私有 `CGEventSetWindowLocation`，符号缺失即失败；已验证私有符号可绑定及 fake 边界；Star 自有 port 的本机同桌面游戏单次“主页→活动”探针通过，新源画面确认活动页，独立30秒采样的前台进程和真实指针未变。此证据不代表其他应用或长期后台流程已验收。前台输入实现保留。依赖与边界见 [ADR 0012](adr/0012-native-script-runtime.md#显式后台点击试验)。
+显式 `backend: "macos-window-background"` 是隔离的后台点击试验，复用同一窗口会话/SCK/视觉/进程租约，状态配置仍为 `window-states.json`，不使用屏幕绝对坐标。只支持 click/wait，不请求前台、不全局投递、不移动真实指针。游戏进入前台后仍使用原 PID 点击方式。同一窗口短暂不可见、矩形或采集展示变化时暂停输入，等待原始矩形与新源画面恢复后继续。恢复前重新准备尚未发送的点击，已尝试按下的点击只完成释放。暂停时间从普通等待与循环时间预算扣除，恢复等待期间可停止。固定身份丢失和系统停流等终止故障继续报错。使用完整 PID recipe 及私有 `CGEventSetWindowLocation`，符号缺失即失败；已验证私有符号可绑定及 fake 边界；Star 自有 port 的本机同桌面游戏单次“主页→活动”探针通过，新源画面确认活动页，独立30秒采样的前台进程和真实指针未变。此证据不代表其他应用或长期后台流程已验收。前台输入实现保留。依赖与边界见 [ADR 0012](adr/0012-native-script-runtime.md#显式后台点击试验)。
 
 ### 2026-11-11 后台连续运行验收
 

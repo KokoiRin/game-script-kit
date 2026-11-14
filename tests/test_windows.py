@@ -2,14 +2,14 @@
 
 import pytest
 
-from game_automation.portable.domain import AreaWindow, Point, Rect, ScreenWindow
+from game_automation.portable.domain import AreaWindow, Point, Rect, UnboundWindow
 
 
 def test_screen_window_returns_point_unchanged() -> None:
     """验证屏幕窗口直接使用屏幕坐标。"""
     point = Point(10, 20)
 
-    assert ScreenWindow().resolve(point) == point
+    assert UnboundWindow().resolve(point) == point
 
 
 def test_area_window_offsets_point_by_rect_origin() -> None:
@@ -30,8 +30,8 @@ def test_screen_window_preserves_image_search_region() -> None:
     """验证屏幕窗口保持整屏默认和显式屏幕搜索区域。"""
     region = Rect(10, 20, 30, 40)
 
-    assert ScreenWindow().resolve_region(None) is None
-    assert ScreenWindow().resolve_region(region) == region
+    assert UnboundWindow().resolve_region(None) is None
+    assert UnboundWindow().resolve_region(region) == region
 
 
 def test_area_window_uses_itself_as_default_image_search_region() -> None:

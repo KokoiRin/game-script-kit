@@ -267,7 +267,7 @@ def test_cancel_is_a_termination_signal_outside_ordinary_exception_recovery():
     """取消穿过普通异常处理，并保留高于期限的优先级。"""
     world = World()
     context = make_context(world)
-    with pytest.raises(BaseException, match="script run cancelled") as caught:
+    with pytest.raises(BaseException, match="task run cancelled") as caught:
         with context.deadline(1):
             world.now = 2
             world.cancelled = True
@@ -349,7 +349,7 @@ def test_cancel_during_device_wait_stops_before_following_input():
 
     world = CancellingWorld()
     context = make_context(world)
-    with pytest.raises(BaseException, match="script run cancelled"):
+    with pytest.raises(BaseException, match="task run cancelled"):
         context.wait(1)
         context.hotkey("enter")
     assert world.actions == [("wait", 1)]

@@ -22,13 +22,13 @@ from game_automation.portable.domain import (
     RegionRef,
     TargetCatalog,
 )
-from game_automation.portable.domain.task import ScriptTarget
+from game_automation.portable.domain.task import TaskTarget
 
 
-def parse_script_resources(value: Any, *, asset_root: Path) -> TargetCatalog:
+def parse_task_resources(value: Any, *, asset_root: Path) -> TargetCatalog:
     """解析 TASK 中的局部资源声明。"""
     if not isinstance(value, dict):
-        raise ValueError("script resources must be an object")
+        raise ValueError("task resources must be an object")
     return TargetCatalog(
         points=_parse_points(value.get("points", {})),
         images=_parse_images(value.get("images", {}), asset_root=asset_root),
@@ -40,7 +40,7 @@ def parse_script_resources(value: Any, *, asset_root: Path) -> TargetCatalog:
 def _parse_points(value: Any) -> tuple[NamedPoint, ...]:
     """解析命名点位表。"""
     if not isinstance(value, dict):
-        raise ValueError("script resources points must be an object")
+        raise ValueError("task resources points must be an object")
     return tuple(
         NamedPoint(str(name), _parse_point(point_value, field=f"point resource {name}"))
         for name, point_value in value.items()
@@ -50,7 +50,7 @@ def _parse_points(value: Any) -> tuple[NamedPoint, ...]:
 def _parse_images(value: Any, *, asset_root: Path) -> tuple[NamedImage, ...]:
     """解析命名图片表。"""
     if not isinstance(value, dict):
-        raise ValueError("script resources images must be an object")
+        raise ValueError("task resources images must be an object")
     return tuple(
         NamedImage(
             str(name),
@@ -65,7 +65,7 @@ def _parse_images(value: Any, *, asset_root: Path) -> tuple[NamedImage, ...]:
 def _parse_regions(value: Any) -> tuple[NamedRegion, ...]:
     """解析命名区域表。"""
     if not isinstance(value, dict):
-        raise ValueError("script resources regions must be an object")
+        raise ValueError("task resources regions must be an object")
     return tuple(
         NamedRegion(
             str(name), _parse_rect(region_value, field=f"region resource {name}")
@@ -77,7 +77,7 @@ def _parse_regions(value: Any) -> tuple[NamedRegion, ...]:
 def _parse_searches(value: Any) -> tuple[NamedImageSearch, ...]:
     """解析命名图片搜索表。"""
     if not isinstance(value, dict):
-        raise ValueError("script resources searches must be an object")
+        raise ValueError("task resources searches must be an object")
     searches = []
     for name, search_value in value.items():
         if not isinstance(search_value, dict):
@@ -167,21 +167,21 @@ def _int_value(value: Any, field: str) -> int:
     return value
 
 
-def parse_script_target(value: Any) -> ScriptTarget | None:
-    """解析 TASK 中的可选目标窗口声明。"""
+def parse_task_target(value: Any) -> TaskTarget | None:
+    """解析 TASK 中的可选原生窗口目标。"""
     if value is None:
         return None
     if not isinstance(value, dict):
-        raise ValueError("script target must be an object")
-    required = {"application", "window_title", "width", "height"}
-    if value.keys() - (required | {"backend"}) or not required <= value.keys():
+        raise ValueError("task target must be an object")
+    required = {"application", "window_title", "width", "height", "backend"}
+    if set(value) != required:
         raise ValueError(
-            "script target requires application, window_title, width, height and optional backend"
+            "task target requires application, window_title, width, height and backend"
         )
-    return ScriptTarget(
+    return TaskTarget(
         value["application"],
         value["window_title"],
         value["width"],
         value["height"],
-        backend=value.get("backend", "desktop"),
+        backend=value["backend"],
     )

@@ -138,7 +138,7 @@ from pathlib import Path
 from game_automation.platform.local_desktop.entrypoints.desktop_backend import DesktopBackend
 from game_automation.platform.local_desktop.preparation_composition import build_preparation_service
 build_preparation_service(Path('/tmp'))
-for suffix in ('engine.runner', 'application.script_run', 'application.local_control', 'scripts_manager.catalog'):
+for suffix in ('engine.runner', 'application.task_run', 'application.local_control', 'application.task_catalog'):
     name = 'game_automation.portable.' + suffix
     assert name not in sys.modules, name
 assert 'pyautogui' not in sys.modules

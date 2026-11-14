@@ -11,19 +11,19 @@ from threading import Event, Thread
 import pytest
 
 from game_automation.portable.application.runtime_ports import RuntimePorts
-from game_automation.portable.application.script_run import run_script
+from game_automation.portable.application.task_run import run_task
 from game_automation.portable.domain import (
     AreaWindow,
     NamedPoint,
     Point,
     Rect,
-    ScreenWindow,
     TargetCatalog,
+    UnboundWindow,
 )
 from game_automation.portable.domain.task import (
     FunctionTask,
-    ScriptTarget,
     TaskRequirements,
+    TaskTarget,
 )
 
 
@@ -69,7 +69,7 @@ def run(ctx):
     helper.write_text('def count():\n    """返回动作次数。"""\n    return 3\n')
     modules_before = {name for name in sys.modules if name.startswith("_star_task_")}
 
-    result = run_script(task, dry_run=True)
+    result = run_task(task, dry_run=True)
 
     assert result.finish_reason == "completed"
     assert capsys.readouterr().out.count("wait") == 2
@@ -98,7 +98,7 @@ def run(ctx):
 def test_function_failure_restores_existing_trace(tmp_path, source, expected):
     """任务失败保持原有 tracing，并归一化为可再次启动的结果。"""
     previous = sys.gettrace()
-    result = run_script(
+    result = run_task(
         function_task(tmp_path, source), dry_run=True, cancellation_token=Token()
     )
 
@@ -114,7 +114,7 @@ def test_keyboard_interrupt_finishes_as_cancelled(tmp_path):
         'def run(ctx):\n    """模拟终端中断。"""\n    raise KeyboardInterrupt\n',
     )
 
-    result = run_script(task, dry_run=True)
+    result = run_task(task, dry_run=True)
 
     assert (result.exit_code, result.finish_reason) == (130, "cancelled")
 
@@ -132,7 +132,7 @@ def test_function_source_keeps_its_own_python_annotation_semantics(tmp_path):
         '    assert helper.__annotations__["value"] is int\n',
     )
 
-    result = run_script(task, dry_run=True)
+    result = run_task(task, dry_run=True)
 
     assert result.finish_reason == "completed"
 
@@ -164,7 +164,7 @@ def test_user_stop_cancels_python_without_action_calls(tmp_path, source):
 
     def execute():
         """在与应用相同的后台线程中运行任务。"""
-        results.append(run_script(task, dry_run=True, cancellation_token=token))
+        results.append(run_task(task, dry_run=True, cancellation_token=token))
 
     worker = Thread(target=execute, daemon=True)
     worker.start()
@@ -219,13 +219,13 @@ def test_native_function_helpers_share_one_runtime_and_window(tmp_path):
         '    """组合多个函数并共用窗口会话。"""\n'
         "    for _ in range(2):\n"
         "        click_once(ctx)\n",
-        target=ScriptTarget("Fake", "Fake window", 400, 300, "macos-window-background"),
+        target=TaskTarget("Fake", "Fake window", 400, 300, "macos-window-background"),
         resources=TargetCatalog(points=(NamedPoint("button", Point(10, 20)),)),
         requires=TaskRequirements(points=("button",)),
     )
     factory = Factory()
 
-    result = run_script(task, dry_run=False, real_runtime_factory=factory)
+    result = run_task(task, dry_run=False, real_runtime_factory=factory)
 
     assert result.finish_reason == "completed"
     assert (factory.opened, factory.closed) == (1, 1)
@@ -242,7 +242,7 @@ def test_execution_and_cleanup_failures_are_both_reported(tmp_path):
         def open(self, target, requirements, cancellation, logger):
             """模拟源码执行后窗口流关闭失败。"""
             try:
-                yield RuntimePorts(ScreenWindow(), object())
+                yield RuntimePorts(UnboundWindow(), object())
             finally:
                 raise RuntimeError("stream shutdown failed")
 
@@ -251,12 +251,10 @@ def test_execution_and_cleanup_failures_are_both_reported(tmp_path):
         "def run(ctx):\n"
         '    """模拟任务执行失败。"""\n'
         '    raise RuntimeError("business input failed")\n',
-        target=ScriptTarget("Fake", "Fake window", 400, 300, "macos-window-background"),
+        target=TaskTarget("Fake", "Fake window", 400, 300, "macos-window-background"),
     )
 
-    result = run_script(
-        task, dry_run=False, real_runtime_factory=FailingCleanupFactory()
-    )
+    result = run_task(task, dry_run=False, real_runtime_factory=FailingCleanupFactory())
 
     assert result.finish_reason == "cleanup_failed"
     assert "business input failed" in result.error_message

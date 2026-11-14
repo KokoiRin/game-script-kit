@@ -5,7 +5,7 @@
 """
 
 
-class ScriptCancelledError(RuntimeError):
+class TaskCancelledError(RuntimeError):
     """表示平台运行被外部取消信号停止。"""
 
 

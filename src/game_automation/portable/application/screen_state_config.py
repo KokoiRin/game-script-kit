@@ -1,7 +1,7 @@
-"""读取本地界面状态识别配置。
+"""解析窗口规则里的状态组、搜索和区域。
 
-本 module 负责把 assets/screen-states.json 转换成状态探测候选；它不执行图片
-匹配、不截图，也不创建平台 adapter。
+本 module 把 window-states.json 的 groups 转成探测候选和共享资源；它不执行图片
+匹配、不截图，也不创建平台 adapter。它不读取 screen-states.json。
 """
 
 from __future__ import annotations

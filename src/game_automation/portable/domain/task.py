@@ -10,34 +10,34 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from game_automation.portable.domain.point_aliases import TargetCatalog
-from game_automation.portable.domain.windows import ScreenWindow, Window
+from game_automation.portable.domain.windows import UnboundWindow, Window
 
 
 @dataclass(frozen=True, slots=True)
-class ScriptTarget:
-    """声明一次运行绑定的应用、窗口、逻辑尺寸及输入后端。"""
+class TaskTarget:
+    """声明一次真实运行绑定的应用、窗口、逻辑尺寸及原生后端。"""
 
     application: str
     window_title: str
     width: int
     height: int
-    backend: str = "desktop"
+    backend: str
 
     def __post_init__(self) -> None:
-        """校验目标身份、固定布局尺寸和显式支持的后端。"""
-        if self.backend != "desktop" and not self.uses_native_window:
+        """校验目标身份、固定布局尺寸和仅支持的原生窗口后端。"""
+        if not self.uses_native_window:
             raise ValueError(
-                "target backend must be desktop, macos-window or macos-window-background"
+                "target backend must be macos-window or macos-window-background"
             )
         if any(
             not isinstance(value, str) or not value.strip()
             for value in (self.application, self.window_title)
         ):
-            raise ValueError("script target requires application and window_title")
+            raise ValueError("task target requires application and window_title")
         if any(
             type(value) is not int or value <= 0 for value in (self.width, self.height)
         ):
-            raise ValueError("script target width and height must be positive integers")
+            raise ValueError("task target width and height must be positive integers")
 
     @property
     def uses_native_window(self) -> bool:
@@ -73,9 +73,9 @@ class FunctionTask:
     name: str
     source_path: Path
     source: str
-    window: Window = field(default_factory=ScreenWindow)
+    window: Window = field(default_factory=UnboundWindow)
     resources: TargetCatalog = field(default_factory=TargetCatalog)
-    target: ScriptTarget | None = None
+    target: TaskTarget | None = None
     requires: TaskRequirements = field(default_factory=TaskRequirements)
 
     def __post_init__(self) -> None:

@@ -31,7 +31,7 @@ from game_automation.portable.domain import (
     ImageTemplate,
     Rect,
 )
-from game_automation.portable.engine.cancellation import ScriptCancelledError
+from game_automation.portable.engine.cancellation import TaskCancelledError
 from game_automation.portable.engine.ports import RunLogger, ScreenImageLocator
 
 
@@ -88,7 +88,7 @@ class PyAutoGuiScreenImageLocator(ScreenImageLocator):
             return match
         except Exception as exc:
             if isinstance(
-                exc, (WindowCaptureError, ScriptCancelledError)
+                exc, (WindowCaptureError, TaskCancelledError)
             ) or _is_setup_error(exc):
                 raise exc
             raise RuntimeError(
@@ -242,7 +242,7 @@ class PyAutoGuiScreenImageLocator(ScreenImageLocator):
             return batch_results
         except Exception as exc:
             if isinstance(
-                exc, (WindowCaptureError, ScriptCancelledError)
+                exc, (WindowCaptureError, TaskCancelledError)
             ) or _is_setup_error(exc):
                 raise exc
             raise RuntimeError(

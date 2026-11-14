@@ -10,7 +10,7 @@ from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from typing import Protocol
 
-from game_automation.portable.domain.task import ScriptTarget
+from game_automation.portable.domain.task import TaskTarget
 from game_automation.portable.domain.windows import Window
 from game_automation.portable.engine.ports import (
     CancellationToken,
@@ -21,7 +21,7 @@ from game_automation.portable.engine.ports import (
     ScreenImageLocator,
     ScreenStateReader,
 )
-from game_automation.portable.engine.script_requirements import ScriptRequirements
+from game_automation.portable.engine.runtime_requirements import RuntimeRequirements
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,8 +39,8 @@ class RuntimePorts:
 class RuntimeFactory(Protocol):
     def open(
         self,
-        target: ScriptTarget,
-        requirements: ScriptRequirements,
+        target: TaskTarget,
+        requirements: RuntimeRequirements,
         cancellation: CancellationToken | None,
         logger: RunLogger | None,
     ) -> AbstractContextManager[RuntimePorts]:

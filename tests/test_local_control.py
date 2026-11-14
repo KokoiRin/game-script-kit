@@ -6,18 +6,18 @@
 
 import json
 import time
+from contextlib import contextmanager
 
 import pytest
 
 from game_automation.portable.application.local_control import (
     LocalControlApplication,
 )
-from game_automation.portable.application.screen_state_reader import (
-    ProjectScreenStateReader,
-)
+from game_automation.portable.application.runtime_ports import RuntimePorts
+from game_automation.portable.application.task_catalog import TaskCatalog
 from game_automation.portable.application.task_discovery import TaskLoadError
 from game_automation.portable.domain import (
-    ImageBatchMatchResult,
+    AreaWindow,
     ImageMatch,
     ImageRef,
     ImageSearchSpec,
@@ -29,13 +29,33 @@ from game_automation.portable.domain import (
     Point,
     Rect,
     RegionRef,
-    ScreenWindow,
     TargetCatalog,
+    UnboundWindow,
 )
-from game_automation.portable.domain.task import FunctionTask, TaskRequirements
+from game_automation.portable.domain.task import (
+    FunctionTask,
+    TaskRequirements,
+    TaskTarget,
+)
 from game_automation.portable.engine.ports import InputDevice
-from game_automation.portable.scripts_manager.catalog import ScriptCatalog
 from tests.support.function_tasks import function_task
+
+
+def _native_target() -> TaskTarget:
+    """给出测试用的显式原生窗口目标。"""
+    return TaskTarget("Example", "Window", 100, 100, backend="macos-window")
+
+
+def _native_factory(device, **ports):
+    """用替身设备打开原生会话，不接触桌面。"""
+
+    class Factory:
+        @contextmanager
+        def open(self, target, requirements, cancellation, logger):
+            """返回固定窗口和注入的端口。"""
+            yield RuntimePorts(AreaWindow(Rect(0, 0, 100, 100)), device, **ports)
+
+    return Factory()
 
 
 def test_local_control_runs_named_script_and_captures_dry_run_output() -> None:
@@ -43,11 +63,11 @@ def test_local_control_runs_named_script_and_captures_dry_run_output() -> None:
     script = function_task(
         "sample",
         "ctx.click(Point(100, 200))\nctx.wait(0.25)",
-        window=ScreenWindow(),
+        window=UnboundWindow(),
     )
-    app = LocalControlApplication(catalog=ScriptCatalog((script,)))
+    app = LocalControlApplication(catalog=TaskCatalog((script,)))
 
-    result = app.run_named_script("sample", dry_run=True)
+    result = app.run_named_task("sample", dry_run=True)
 
     assert result.exit_code == 0
     assert result.stderr == ""
@@ -65,12 +85,12 @@ def test_local_control_runs_state_script_with_dry_run_screen_state() -> None:
         "    ctx.click(Point(100, 200))\n"
         "else:\n"
         "    ctx.wait(0.5)",
-        window=ScreenWindow(),
+        window=UnboundWindow(),
         requires=TaskRequirements(states=("主页",)),
     )
-    app = LocalControlApplication(catalog=ScriptCatalog((script,)))
+    app = LocalControlApplication(catalog=TaskCatalog((script,)))
 
-    result = app.run_named_script(
+    result = app.run_named_task(
         "state-branch",
         dry_run=True,
         dry_run_screen_state="主页",
@@ -86,12 +106,12 @@ def test_local_control_runs_image_script_with_dry_run_images() -> None:
     script = function_task(
         "image-click",
         "ctx.click(ImageTarget(ImageTemplate('assets/start.png')))",
-        window=ScreenWindow(),
+        window=UnboundWindow(),
         templates=(ImageTemplate("assets/start.png"),),
     )
-    app = LocalControlApplication(catalog=ScriptCatalog((script,)))
+    app = LocalControlApplication(catalog=TaskCatalog((script,)))
 
-    result = app.run_named_script(
+    result = app.run_named_task(
         "image-click",
         dry_run=True,
         dry_run_images=("assets/start.png",),
@@ -108,15 +128,15 @@ def test_local_control_runs_named_image_script_with_dry_run_images() -> None:
     script = function_task(
         "named-image-click",
         "ctx.click(ImageTarget(ImageRef('离开')))",
-        window=ScreenWindow(),
+        window=UnboundWindow(),
         resources=TargetCatalog(
             images=(NamedImage("离开", ImageTemplate("assets/离开.png")),)
         ),
         requires=TaskRequirements(images=("离开",)),
     )
-    app = LocalControlApplication(catalog=ScriptCatalog((script,)))
+    app = LocalControlApplication(catalog=TaskCatalog((script,)))
 
-    result = app.run_named_script(
+    result = app.run_named_task(
         "named-image-click",
         dry_run=True,
         dry_run_images=("assets/离开.png",),
@@ -133,7 +153,7 @@ def test_local_control_runs_named_image_search_script_with_dry_run_images() -> N
     script = function_task(
         "named-search-click",
         "ctx.click(ImageTarget(SearchRef('离开按钮')))",
-        window=ScreenWindow(),
+        window=UnboundWindow(),
         resources=TargetCatalog(
             images=(NamedImage("离开", ImageTemplate("assets/离开.png")),),
             searches=(
@@ -144,9 +164,9 @@ def test_local_control_runs_named_image_search_script_with_dry_run_images() -> N
         ),
         requires=TaskRequirements(searches=("离开按钮",)),
     )
-    app = LocalControlApplication(catalog=ScriptCatalog((script,)))
+    app = LocalControlApplication(catalog=TaskCatalog((script,)))
 
-    result = app.run_named_script(
+    result = app.run_named_task(
         "named-search-click",
         dry_run=True,
         dry_run_images=("assets/离开.png",),
@@ -165,7 +185,7 @@ def test_local_control_runs_screen_state_search_ref_script_with_dry_run_images(
     assets = tmp_path / "assets"
     assets.mkdir()
     (assets / "离开.png").write_bytes(b"fake")
-    (assets / "screen-states.json").write_text(
+    (assets / "window-states.json").write_text(
         json.dumps(
             {
                 "groups": [
@@ -188,14 +208,12 @@ def test_local_control_runs_screen_state_search_ref_script_with_dry_run_images(
     script = function_task(
         "shared-search-click",
         "ctx.click(ImageTarget(SearchRef('离开按钮')))",
-        window=ScreenWindow(),
+        window=UnboundWindow(),
         requires=TaskRequirements(searches=("离开按钮",)),
     )
-    app = LocalControlApplication(
-        catalog=ScriptCatalog((script,)), project_root=tmp_path
-    )
+    app = LocalControlApplication(catalog=TaskCatalog((script,)), project_root=tmp_path)
 
-    result = app.run_named_script(
+    result = app.run_named_task(
         "shared-search-click",
         dry_run=True,
         dry_run_images=(str(assets / "离开.png"),),
@@ -214,7 +232,7 @@ def test_local_control_describes_state_script_dependencies(tmp_path) -> None:
     assets = tmp_path / "assets"
     assets.mkdir()
     (assets / "start.png").write_bytes(b"fake")
-    (assets / "screen-states.json").write_text(
+    (assets / "window-states.json").write_text(
         json.dumps(
             {
                 "groups": [
@@ -234,15 +252,13 @@ def test_local_control_describes_state_script_dependencies(tmp_path) -> None:
         "    ctx.click(ImageTarget(ImageTemplate('assets/start.png')))\n"
         "else:\n"
         "    ctx.wait(0.5)",
-        window=ScreenWindow(),
+        window=UnboundWindow(),
         requires=TaskRequirements(states=("主页",)),
         templates=(ImageTemplate("assets/start.png"),),
     )
-    app = LocalControlApplication(
-        catalog=ScriptCatalog((script,)), project_root=tmp_path
-    )
+    app = LocalControlApplication(catalog=TaskCatalog((script,)), project_root=tmp_path)
 
-    details = app.describe_script("state-branch")
+    details = app.describe_task("state-branch")
 
     assert details.exit_code == 0
     assert details.name == "state-branch"
@@ -259,7 +275,7 @@ def test_local_control_describes_declared_states(tmp_path) -> None:
     assets = tmp_path / "assets"
     assets.mkdir()
     (assets / "home.png").write_bytes(b"fake")
-    (assets / "screen-states.json").write_text(
+    (assets / "window-states.json").write_text(
         json.dumps(
             {
                 "groups": [
@@ -277,14 +293,12 @@ def test_local_control_describes_declared_states(tmp_path) -> None:
         "state-wait",
         "ctx.wait_for(lambda: ctx.state(min_confidence=0.8) == '主页', timeout=1, interval=0.5)\n"
         "ctx.click(Point(100, 200))",
-        window=ScreenWindow(),
+        window=UnboundWindow(),
         requires=TaskRequirements(states=("主页",)),
     )
-    app = LocalControlApplication(
-        catalog=ScriptCatalog((script,)), project_root=tmp_path
-    )
+    app = LocalControlApplication(catalog=TaskCatalog((script,)), project_root=tmp_path)
 
-    details = app.describe_script("state-wait")
+    details = app.describe_task("state-wait")
 
     assert details.exit_code == 0
     assert details.state_dependencies == ("主页",)
@@ -298,12 +312,12 @@ def test_local_control_describes_point_dependencies() -> None:
         "for _ in range(2):\n"
         "    ctx.click(PointRef('头像'))\n"
         "    ctx.click(Point(100, 200))",
-        window=ScreenWindow(),
+        window=UnboundWindow(),
         requires=TaskRequirements(points=("头像",)),
     )
-    app = LocalControlApplication(catalog=ScriptCatalog((script,)))
+    app = LocalControlApplication(catalog=TaskCatalog((script,)))
 
-    details = app.describe_script("point-alias-script")
+    details = app.describe_task("point-alias-script")
 
     assert details.dependencies == ("点位: 头像",)
     assert details.point_dependencies == ("头像",)
@@ -316,18 +330,18 @@ def test_point_readiness_and_background_result_agree(tmp_path, defined) -> None:
         "point-check",
         "for _ in range(1):\n"
         "    ctx.click(OffsetTarget(PointRef('button'), Point(5, 0)))",
-        window=ScreenWindow(),
+        window=UnboundWindow(),
         resources=TargetCatalog(
             points=(NamedPoint("button", Point(10, 20)),) if defined else ()
         ),
         requires=TaskRequirements(points=("button",)),
     )
-    valid = function_task("valid", "ctx.wait(0)", window=ScreenWindow())
+    valid = function_task("valid", "ctx.wait(0)", window=UnboundWindow())
     app = LocalControlApplication(
-        catalog=ScriptCatalog((script, valid)), project_root=tmp_path
+        catalog=TaskCatalog((script, valid)), project_root=tmp_path
     )
 
-    details = app.describe_script(script.name)
+    details = app.describe_task(script.name)
     assert details.exit_code == (0 if defined else 2)
     assert details.readiness == (
         (
@@ -337,12 +351,12 @@ def test_point_readiness_and_background_result_agree(tmp_path, defined) -> None:
         ),
     )
 
-    app.start_named_script(script.name, dry_run=True)
+    app.start_named_task(script.name, dry_run=True)
     status = _wait_until_finished(app)
     assert (status.exit_code, status.finish_reason) == (
         (0, "completed") if defined else (2, "configuration_failed")
     )
-    app.start_named_script(valid.name, dry_run=True)
+    app.start_named_task(valid.name, dry_run=True)
     assert _wait_until_finished(app).finish_reason == "completed"
 
 
@@ -352,7 +366,7 @@ def test_local_control_describes_named_image_dependencies() -> None:
         "named-image-branch",
         "if ctx.find(ImageRef('离开'), min_confidence=None) is not None:\n"
         "    ctx.click(ImageTarget(ImageRef('重来')))",
-        window=ScreenWindow(),
+        window=UnboundWindow(),
         resources=TargetCatalog(
             images=(
                 NamedImage("离开", ImageTemplate("assets/离开.png")),
@@ -361,9 +375,9 @@ def test_local_control_describes_named_image_dependencies() -> None:
         ),
         requires=TaskRequirements(images=("离开", "重来")),
     )
-    app = LocalControlApplication(catalog=ScriptCatalog((script,)))
+    app = LocalControlApplication(catalog=TaskCatalog((script,)))
 
-    details = app.describe_script("named-image-branch")
+    details = app.describe_task("named-image-branch")
 
     assert details.image_dependencies == ("assets/离开.png", "assets/重来.png")
 
@@ -374,7 +388,7 @@ def test_local_control_describes_named_image_search_dependencies() -> None:
         "named-search-branch",
         "if ctx.find(SearchRef('离开按钮'), min_confidence=None) is not None:\n"
         "    ctx.click(ImageTarget(SearchRef('离开按钮')))",
-        window=ScreenWindow(),
+        window=UnboundWindow(),
         resources=TargetCatalog(
             images=(NamedImage("离开", ImageTemplate("assets/离开.png")),),
             searches=(
@@ -385,9 +399,9 @@ def test_local_control_describes_named_image_search_dependencies() -> None:
         ),
         requires=TaskRequirements(searches=("离开按钮",)),
     )
-    app = LocalControlApplication(catalog=ScriptCatalog((script,)))
+    app = LocalControlApplication(catalog=TaskCatalog((script,)))
 
-    details = app.describe_script("named-search-branch")
+    details = app.describe_task("named-search-branch")
 
     assert details.dependencies == (
         '图片: ImageRef("离开")',
@@ -401,7 +415,7 @@ def test_local_control_describes_screen_state_search_ref_dependencies(tmp_path) 
     assets = tmp_path / "assets"
     assets.mkdir()
     (assets / "离开.png").write_bytes(b"fake")
-    (assets / "screen-states.json").write_text(
+    (assets / "window-states.json").write_text(
         json.dumps(
             {
                 "groups": [
@@ -418,14 +432,12 @@ def test_local_control_describes_screen_state_search_ref_dependencies(tmp_path) 
     script = function_task(
         "shared-search-details",
         "ctx.click(ImageTarget(SearchRef('离开按钮')))",
-        window=ScreenWindow(),
+        window=UnboundWindow(),
         requires=TaskRequirements(searches=("离开按钮",)),
     )
-    app = LocalControlApplication(
-        catalog=ScriptCatalog((script,)), project_root=tmp_path
-    )
+    app = LocalControlApplication(catalog=TaskCatalog((script,)), project_root=tmp_path)
 
-    details = app.describe_script("shared-search-details")
+    details = app.describe_task("shared-search-details")
 
     assert details.exit_code == 0
     assert details.image_dependencies == (str(assets / "离开.png"),)
@@ -446,7 +458,7 @@ def test_local_control_script_resources_override_screen_state_search_ref(
     assets.mkdir()
     (assets / "配置.png").write_bytes(b"fake")
     (assets / "脚本.png").write_bytes(b"fake")
-    (assets / "screen-states.json").write_text(
+    (assets / "window-states.json").write_text(
         json.dumps(
             {
                 "groups": [
@@ -463,7 +475,7 @@ def test_local_control_script_resources_override_screen_state_search_ref(
     script = function_task(
         "local-search-override",
         "ctx.click(ImageTarget(SearchRef('离开按钮')))",
-        window=ScreenWindow(),
+        window=UnboundWindow(),
         resources=TargetCatalog(
             searches=(
                 NamedImageSearch(
@@ -473,11 +485,9 @@ def test_local_control_script_resources_override_screen_state_search_ref(
         ),
         requires=TaskRequirements(searches=("离开按钮",)),
     )
-    app = LocalControlApplication(
-        catalog=ScriptCatalog((script,)), project_root=tmp_path
-    )
+    app = LocalControlApplication(catalog=TaskCatalog((script,)), project_root=tmp_path)
 
-    details = app.describe_script("local-search-override")
+    details = app.describe_task("local-search-override")
 
     assert details.image_dependencies == ("assets/脚本.png",)
 
@@ -500,7 +510,7 @@ def test_self_contained_scripts_ignore_unrelated_broken_state_config(
     assets.mkdir()
     image_path = str(assets / "local.png")
     (assets / "local.png").write_bytes(b"fake")
-    (assets / "screen-states.json").write_text(config, encoding="utf-8")
+    (assets / "window-states.json").write_text(config, encoding="utf-8")
     resources = TargetCatalog(
         points=(NamedPoint("button", Point(10, 20)),),
         images=(NamedImage("local", ImageTemplate(image_path)),),
@@ -524,34 +534,28 @@ def test_self_contained_scripts_ignore_unrelated_broken_state_config(
         resources=resources,
         requires=TaskRequirements(states=("主页",) if kind == "state" else ()),
     )
-    app = LocalControlApplication(
-        catalog=ScriptCatalog((script,)), project_root=tmp_path
-    )
+    app = LocalControlApplication(catalog=TaskCatalog((script,)), project_root=tmp_path)
 
-    assert app.describe_script(script.name).exit_code == 0
-    result = app.run_named_script(
-        script.name, dry_run=True, dry_run_images=(image_path,)
-    )
+    assert app.describe_task(script.name).exit_code == 0
+    result = app.run_named_task(script.name, dry_run=True, dry_run_images=(image_path,))
     assert (result.exit_code, result.finish_reason) == (0, "completed")
-    app.start_named_script(script.name, dry_run=True, dry_run_images=(image_path,))
+    app.start_named_task(script.name, dry_run=True, dry_run_images=(image_path,))
     assert _wait_until_finished(app).finish_reason == "completed"
 
 
 def test_shared_search_still_reports_broken_required_config(tmp_path) -> None:
     """实际依赖共享搜索时仍须报告配置错误，不能把坏配置当作图片未命中。"""
     (tmp_path / "assets").mkdir()
-    (tmp_path / "assets" / "screen-states.json").write_text("{")
+    (tmp_path / "assets" / "window-states.json").write_text("{")
     script = function_task(
         "shared",
         "ctx.click(ImageTarget(SearchRef('shared')))",
-        window=ScreenWindow(),
+        window=UnboundWindow(),
         requires=TaskRequirements(searches=("shared",)),
     )
-    app = LocalControlApplication(
-        catalog=ScriptCatalog((script,)), project_root=tmp_path
-    )
+    app = LocalControlApplication(catalog=TaskCatalog((script,)), project_root=tmp_path)
 
-    result = app.run_named_script(script.name, dry_run=True)
+    result = app.run_named_task(script.name, dry_run=True)
 
     assert (result.exit_code, result.finish_reason) == (2, "configuration_failed")
     assert "invalid screen state config json" in result.stderr
@@ -565,17 +569,15 @@ def test_local_control_checks_named_image_readiness(tmp_path) -> None:
     script = function_task(
         "named-image-ready",
         "ctx.click(ImageTarget(ImageRef('离开')))",
-        window=ScreenWindow(),
+        window=UnboundWindow(),
         resources=TargetCatalog(
             images=(NamedImage("离开", ImageTemplate("assets/离开.png")),)
         ),
         requires=TaskRequirements(images=("离开",)),
     )
-    app = LocalControlApplication(
-        catalog=ScriptCatalog((script,)), project_root=tmp_path
-    )
+    app = LocalControlApplication(catalog=TaskCatalog((script,)), project_root=tmp_path)
 
-    details = app.describe_script("named-image-ready")
+    details = app.describe_task("named-image-ready")
 
     assert details.readiness == (
         (
@@ -594,7 +596,7 @@ def test_local_control_checks_named_image_search_readiness(tmp_path) -> None:
     script = function_task(
         "named-search-ready",
         "ctx.click(ImageTarget(SearchRef('离开按钮')))",
-        window=ScreenWindow(),
+        window=UnboundWindow(),
         resources=TargetCatalog(
             images=(NamedImage("离开", ImageTemplate("assets/离开.png")),),
             searches=(
@@ -605,11 +607,9 @@ def test_local_control_checks_named_image_search_readiness(tmp_path) -> None:
         ),
         requires=TaskRequirements(searches=("离开按钮",)),
     )
-    app = LocalControlApplication(
-        catalog=ScriptCatalog((script,)), project_root=tmp_path
-    )
+    app = LocalControlApplication(catalog=TaskCatalog((script,)), project_root=tmp_path)
 
-    details = app.describe_script("named-search-ready")
+    details = app.describe_task("named-search-ready")
 
     assert details.readiness == (
         (
@@ -631,17 +631,15 @@ def test_local_control_reports_missing_named_image_file(tmp_path) -> None:
     script = function_task(
         "named-image-missing-file",
         "ctx.click(ImageTarget(ImageRef('离开')))",
-        window=ScreenWindow(),
+        window=UnboundWindow(),
         resources=TargetCatalog(
             images=(NamedImage("离开", ImageTemplate("assets/离开.png")),)
         ),
         requires=TaskRequirements(images=("离开",)),
     )
-    app = LocalControlApplication(
-        catalog=ScriptCatalog((script,)), project_root=tmp_path
-    )
+    app = LocalControlApplication(catalog=TaskCatalog((script,)), project_root=tmp_path)
 
-    details = app.describe_script("named-image-missing-file")
+    details = app.describe_task("named-image-missing-file")
 
     assert details.readiness == (
         (
@@ -657,12 +655,12 @@ def test_local_control_ignores_unknown_named_image_dependency() -> None:
     script = function_task(
         "unknown-named-image",
         "ctx.click(ImageTarget(ImageRef('缺失')))",
-        window=ScreenWindow(),
+        window=UnboundWindow(),
         requires=TaskRequirements(images=("缺失",)),
     )
-    app = LocalControlApplication(catalog=ScriptCatalog((script,)))
+    app = LocalControlApplication(catalog=TaskCatalog((script,)))
 
-    details = app.describe_script("unknown-named-image")
+    details = app.describe_task("unknown-named-image")
 
     assert details.image_dependencies == ()
 
@@ -672,12 +670,12 @@ def test_local_control_reports_unknown_named_image_readiness() -> None:
     script = function_task(
         "unknown-named-image",
         "ctx.click(ImageTarget(ImageRef('缺失')))",
-        window=ScreenWindow(),
+        window=UnboundWindow(),
         requires=TaskRequirements(images=("缺失",)),
     )
-    app = LocalControlApplication(catalog=ScriptCatalog((script,)))
+    app = LocalControlApplication(catalog=TaskCatalog((script,)))
 
-    details = app.describe_script("unknown-named-image")
+    details = app.describe_task("unknown-named-image")
 
     assert details.readiness == (
         ('图片: ImageRef("缺失")', "missing", "命名图片未配置"),
@@ -689,12 +687,12 @@ def test_local_control_reports_unknown_named_image_search_readiness() -> None:
     script = function_task(
         "unknown-named-search",
         "ctx.click(ImageTarget(SearchRef('缺失搜索')))",
-        window=ScreenWindow(),
+        window=UnboundWindow(),
         requires=TaskRequirements(searches=("缺失搜索",)),
     )
-    app = LocalControlApplication(catalog=ScriptCatalog((script,)))
+    app = LocalControlApplication(catalog=TaskCatalog((script,)))
 
-    details = app.describe_script("unknown-named-search")
+    details = app.describe_task("unknown-named-search")
 
     assert details.readiness == (
         ('图片: SearchRef("缺失搜索")', "missing", "命名搜索未配置"),
@@ -709,15 +707,13 @@ def test_local_control_describes_missing_script_dependencies(tmp_path) -> None:
         "    ctx.click(ImageTarget(ImageTemplate('assets/start.png')))\n"
         "else:\n"
         "    ctx.wait(0.5)",
-        window=ScreenWindow(),
+        window=UnboundWindow(),
         requires=TaskRequirements(states=("主页",)),
         templates=(ImageTemplate("assets/start.png"),),
     )
-    app = LocalControlApplication(
-        catalog=ScriptCatalog((script,)), project_root=tmp_path
-    )
+    app = LocalControlApplication(catalog=TaskCatalog((script,)), project_root=tmp_path)
 
-    details = app.describe_script("state-branch")
+    details = app.describe_task("state-branch")
 
     assert details.readiness == (
         ("状态: 主页", "unknown", "状态配置不可用，无法确认"),
@@ -731,11 +727,9 @@ def test_local_control_describes_missing_script_dependencies(tmp_path) -> None:
 
 def test_local_control_describes_unknown_script() -> None:
     """验证未知脚本详情请求返回清晰错误。"""
-    app = LocalControlApplication(
-        catalog=ScriptCatalog((_build_state_branch_script(),))
-    )
+    app = LocalControlApplication(catalog=TaskCatalog((_build_state_branch_script(),)))
 
-    details = app.describe_script("missing")
+    details = app.describe_task("missing")
 
     assert details.exit_code == 1
     assert details.name == "missing"
@@ -744,7 +738,7 @@ def test_local_control_describes_unknown_script() -> None:
     assert details.state_dependencies == ()
     assert details.image_dependencies == ()
     assert details.readiness == ()
-    assert details.stderr == "unknown script: missing"
+    assert details.stderr == "unknown task: missing"
 
 
 def test_local_control_background_state_script_uses_dry_run_screen_state() -> None:
@@ -755,12 +749,12 @@ def test_local_control_background_state_script_uses_dry_run_screen_state() -> No
         "    ctx.click(Point(100, 200))\n"
         "else:\n"
         "    ctx.wait(0.5)",
-        window=ScreenWindow(),
+        window=UnboundWindow(),
         requires=TaskRequirements(states=("主页",)),
     )
-    app = LocalControlApplication(catalog=ScriptCatalog((script,)))
+    app = LocalControlApplication(catalog=TaskCatalog((script,)))
 
-    app.start_named_script(
+    app.start_named_task(
         "state-branch",
         dry_run=True,
         dry_run_screen_state="主页",
@@ -770,10 +764,10 @@ def test_local_control_background_state_script_uses_dry_run_screen_state() -> No
     assert final.exit_code == 0
     assert final.finish_reason == "completed"
     assert final.stderr == ""
-    assert "script event type=run_started" in final.stdout
+    assert "task event type=run_started" in final.stdout
     assert "step=Observe status=succeeded" in final.stdout
     assert "click Point(x=100, y=200)" in final.stdout
-    assert "script event type=run_finished status=completed exit_code=0" in final.stdout
+    assert "task event type=run_finished status=completed exit_code=0" in final.stdout
     assert [event.event_type for event in final.events][:2] == [
         "run_started",
         "step_started",
@@ -785,7 +779,7 @@ def test_local_control_background_run_uses_screen_state_search_ref(tmp_path) -> 
     assets = tmp_path / "assets"
     assets.mkdir()
     (assets / "离开.png").write_bytes(b"fake")
-    (assets / "screen-states.json").write_text(
+    (assets / "window-states.json").write_text(
         json.dumps(
             {
                 "groups": [
@@ -808,14 +802,12 @@ def test_local_control_background_run_uses_screen_state_search_ref(tmp_path) -> 
     script = function_task(
         "shared-search-background",
         "ctx.click(ImageTarget(SearchRef('离开按钮')))",
-        window=ScreenWindow(),
+        window=UnboundWindow(),
         requires=TaskRequirements(searches=("离开按钮",)),
     )
-    app = LocalControlApplication(
-        catalog=ScriptCatalog((script,)), project_root=tmp_path
-    )
+    app = LocalControlApplication(catalog=TaskCatalog((script,)), project_root=tmp_path)
 
-    app.start_named_script(
+    app.start_named_task(
         "shared-search-background",
         dry_run=True,
         dry_run_images=(str(assets / "离开.png"),),
@@ -835,7 +827,8 @@ def test_local_control_can_stop_background_script_run() -> None:
     script = function_task(
         "long-loop",
         "for _ in range(1000):\n    ctx.wait(0.01)",
-        window=ScreenWindow(),
+        window=UnboundWindow(),
+        target=_native_target(),
     )
 
     class SlowDevice(InputDevice):
@@ -852,21 +845,21 @@ def test_local_control_can_stop_background_script_run() -> None:
             time.sleep(duration_seconds)
 
     app = LocalControlApplication(
-        catalog=ScriptCatalog((script,)),
-        real_device_factory=SlowDevice,
+        catalog=TaskCatalog((script,)),
+        real_runtime_factory=_native_factory(SlowDevice()),
     )
 
-    started = app.start_named_script("long-loop", dry_run=False)
+    started = app.start_named_task("long-loop", dry_run=False)
     assert started.running is True
 
-    stopped = app.stop_running_script()
+    stopped = app.stop_running_task()
     assert stopped.running is True
 
     final = _wait_until_finished(app)
     assert final.running is False
     assert final.exit_code == 130
     assert final.finish_reason == "cancelled"
-    assert "script run cancelled" in final.stderr
+    assert "task run cancelled" in final.stderr
 
 
 def test_local_control_rejects_second_background_script_while_running() -> None:
@@ -874,7 +867,8 @@ def test_local_control_rejects_second_background_script_while_running() -> None:
     script = function_task(
         "long-loop",
         "for _ in range(1000):\n    ctx.wait(0.01)",
-        window=ScreenWindow(),
+        window=UnboundWindow(),
+        target=_native_target(),
     )
 
     class SlowDevice(InputDevice):
@@ -891,18 +885,18 @@ def test_local_control_rejects_second_background_script_while_running() -> None:
             time.sleep(duration_seconds)
 
     app = LocalControlApplication(
-        catalog=ScriptCatalog((script,)),
-        real_device_factory=SlowDevice,
+        catalog=TaskCatalog((script,)),
+        real_runtime_factory=_native_factory(SlowDevice()),
     )
 
-    app.start_named_script("long-loop", dry_run=False)
-    duplicate = app.start_named_script("long-loop", dry_run=False)
-    app.stop_running_script()
+    app.start_named_task("long-loop", dry_run=False)
+    duplicate = app.start_named_task("long-loop", dry_run=False)
+    app.stop_running_task()
 
     final = _wait_until_finished(app)
     assert duplicate.running is True
     assert duplicate.finish_reason == "running"
-    assert "script is already running" in duplicate.stderr
+    assert "task is already running" in duplicate.stderr
     assert final.exit_code == 130
     assert final.finish_reason == "cancelled"
 
@@ -912,8 +906,9 @@ def test_local_control_background_status_includes_image_match_logs() -> None:
     script = function_task(
         "image-loop",
         "ctx.wait_for(lambda: ctx.find(ImageTemplate('assets/start.png'), min_confidence=0.8) is not None, timeout=1, interval=0.1)",
-        window=ScreenWindow(),
+        window=UnboundWindow(),
         templates=(ImageTemplate("assets/start.png"),),
+        target=_native_target(),
     )
 
     class FakeDevice(InputDevice):
@@ -934,12 +929,13 @@ def test_local_control_background_status_includes_image_match_logs() -> None:
             return ImageMatch(Rect(10, 20, 30, 40), confidence=0.91)
 
     app = LocalControlApplication(
-        catalog=ScriptCatalog((script,)),
-        real_device_factory=FakeDevice,
-        real_image_locator_factory=FakeImageLocator,
+        catalog=TaskCatalog((script,)),
+        real_runtime_factory=_native_factory(
+            FakeDevice(), image_locator=FakeImageLocator()
+        ),
     )
 
-    app.start_named_script("image-loop", dry_run=False)
+    app.start_named_task("image-loop", dry_run=False)
     final = _wait_until_finished(app)
 
     assert final.exit_code == 0
@@ -955,7 +951,7 @@ def test_local_control_runs_script_with_screen_state_condition(tmp_path) -> None
     assets = tmp_path / "assets"
     assets.mkdir()
     (assets / "主页.png").write_bytes(b"fake")
-    (assets / "screen-states.json").write_text(
+    (assets / "window-states.json").write_text(
         json.dumps(
             {
                 "regions": {
@@ -979,15 +975,15 @@ def test_local_control_runs_script_with_screen_state_condition(tmp_path) -> None
         encoding="utf-8",
     )
     clicks = []
-    batch_requests = []
     script = function_task(
         "state-aware",
         "if ctx.state(min_confidence=0.8) == '主页':\n"
         "    ctx.click(Point(100, 200))\n"
         "else:\n"
         "    ctx.wait(0.5)",
-        window=ScreenWindow(),
+        window=UnboundWindow(),
         requires=TaskRequirements(states=("主页",)),
+        target=_native_target(),
     )
 
     class FakeDevice(InputDevice):
@@ -1003,34 +999,28 @@ def test_local_control_runs_script_with_screen_state_condition(tmp_path) -> None
         def wait(self, duration_seconds: float) -> None:
             """状态命中后不会等待。"""
 
-    class FakeBatchLocator:
-        def locate_requests(self, requests, *, logger=None, stop_on_first_match=False):
-            """记录状态探测请求并返回主页命中。"""
-            batch_requests.append((requests, stop_on_first_match))
-            return (
-                ImageBatchMatchResult(
-                    requests[0].template,
-                    ImageMatch(Rect(10, 20, 30, 40), confidence=0.91),
-                    elapsed_ms=4.0,
-                ),
-            )
+    class FakeStateReader:
+        def read_current_state(self, *, min_confidence=0.8, logger=None):
+            """返回原生会话提供的固定状态。"""
+            if logger is not None:
+                logger.log(
+                    "screen state probe round current_state=主页 elapsed_ms=1.00"
+                )
+            return "主页"
 
     app = LocalControlApplication(
-        catalog=ScriptCatalog((script,)),
+        catalog=TaskCatalog((script,)),
         project_root=tmp_path,
-        real_device_factory=FakeDevice,
-        real_image_batch_locator_factory=FakeBatchLocator,
+        real_runtime_factory=_native_factory(
+            FakeDevice(), screen_state_reader=FakeStateReader()
+        ),
     )
 
-    result = app.run_named_script("state-aware", dry_run=False)
+    result = app.run_named_task("state-aware", dry_run=False)
 
     assert result.exit_code == 0
     assert result.stderr == ""
     assert clicks == [Point(100, 200)]
-    assert len(batch_requests) == 1
-    requests, stop_on_first_match = batch_requests[0]
-    assert stop_on_first_match is True
-    assert requests[0].region == Rect(10, 20, 120, 40)
     assert "screen state probe round current_state=主页" in result.stdout
 
 
@@ -1038,7 +1028,7 @@ def test_local_control_lists_screen_state_names_from_config(tmp_path) -> None:
     """验证 UI 用例按配置顺序列出界面状态并去重。"""
     assets = tmp_path / "assets"
     assets.mkdir()
-    (assets / "screen-states.json").write_text(
+    (assets / "window-states.json").write_text(
         """
         {
           "groups": [
@@ -1053,7 +1043,7 @@ def test_local_control_lists_screen_state_names_from_config(tmp_path) -> None:
 
     app = LocalControlApplication(project_root=tmp_path)
 
-    assert app.list_screen_state_names() == ("主页", "人物")
+    assert app.list_window_state_names() == ("主页", "人物")
 
 
 def test_local_control_lists_no_screen_state_names_without_config(tmp_path) -> None:
@@ -1061,24 +1051,24 @@ def test_local_control_lists_no_screen_state_names_without_config(tmp_path) -> N
     (tmp_path / "assets").mkdir()
     app = LocalControlApplication(project_root=tmp_path)
 
-    assert app.list_screen_state_names() == ()
+    assert app.list_window_state_names() == ()
 
 
 def test_local_control_lists_no_screen_state_names_for_invalid_config(tmp_path) -> None:
     """验证非法状态配置不会阻断 UI 初始化。"""
     assets = tmp_path / "assets"
     assets.mkdir()
-    (assets / "screen-states.json").write_text('{"groups": "bad"}', encoding="utf-8")
+    (assets / "window-states.json").write_text('{"groups": "bad"}', encoding="utf-8")
     app = LocalControlApplication(project_root=tmp_path)
 
-    assert app.list_screen_state_names() == ()
+    assert app.list_window_state_names() == ()
 
 
 def _wait_until_finished(app: LocalControlApplication):
     """轮询等待后台脚本结束，避免测试绑定具体线程调度。"""
     deadline = time.monotonic() + 2
     while time.monotonic() < deadline:
-        status = app.current_script_run()
+        status = app.current_task_run()
         if not status.running:
             return status
         time.sleep(0.01)
@@ -1102,14 +1092,23 @@ def test_background_unexpected_failure_finishes_and_allows_next_run(
             raise OSError("device disconnected")
         return FailingDevice()
 
-    script = function_task("sample", "ctx.wait(0)", window=ScreenWindow())
-    app = LocalControlApplication(
-        catalog=ScriptCatalog((script,)),
-        project_root=tmp_path,
-        real_device_factory=build_device,
+    script = function_task(
+        "sample", "ctx.wait(0)", window=UnboundWindow(), target=_native_target()
     )
 
-    app.start_named_script(script.name, dry_run=False)
+    class Factory:
+        @contextmanager
+        def open(self, target, requirements, cancellation, logger):
+            """在会话打开时创建或拒绝设备。"""
+            yield RuntimePorts(AreaWindow(Rect(0, 0, 100, 100)), build_device())
+
+    app = LocalControlApplication(
+        catalog=TaskCatalog((script,)),
+        project_root=tmp_path,
+        real_runtime_factory=Factory(),
+    )
+
+    app.start_named_task(script.name, dry_run=False)
     status = _wait_until_finished(app)
 
     assert status.exit_code == 1
@@ -1120,7 +1119,7 @@ def test_background_unexpected_failure_finishes_and_allows_next_run(
     assert status.events[-1].event_type == "run_finished"
     assert status.events[-1].status == status.finish_reason
 
-    app.start_named_script(script.name, dry_run=True)
+    app.start_named_task(script.name, dry_run=True)
     assert _wait_until_finished(app).finish_reason == "completed"
 
 
@@ -1134,13 +1133,11 @@ def test_background_session_finishes_when_run_use_case_raises(
         """模拟运行用例自身发生意外错误。"""
         raise ValueError("unexpected run error")
 
-    monkeypatch.setattr(local_control, "run_script", broken_run)
-    script = function_task("sample", "ctx.wait(0)", window=ScreenWindow())
-    app = LocalControlApplication(
-        catalog=ScriptCatalog((script,)), project_root=tmp_path
-    )
+    monkeypatch.setattr(local_control, "run_task", broken_run)
+    script = function_task("sample", "ctx.wait(0)", window=UnboundWindow())
+    app = LocalControlApplication(catalog=TaskCatalog((script,)), project_root=tmp_path)
 
-    app.start_named_script(script.name, dry_run=True)
+    app.start_named_task(script.name, dry_run=True)
     status = _wait_until_finished(app)
 
     assert (status.exit_code, status.finish_reason) == (1, "failed")
@@ -1160,17 +1157,19 @@ def test_stopping_a_long_wait_joins_the_background_thread(tmp_path) -> None:
             entered.set()
             time.sleep(duration_seconds)
 
-    script = function_task("long-wait", "ctx.wait(60)", window=ScreenWindow())
-    app = LocalControlApplication(
-        catalog=ScriptCatalog((script,)),
-        project_root=tmp_path,
-        real_device_factory=WaitingDevice,
+    script = function_task(
+        "long-wait", "ctx.wait(60)", window=UnboundWindow(), target=_native_target()
     )
-    app.start_named_script(script.name, dry_run=False)
+    app = LocalControlApplication(
+        catalog=TaskCatalog((script,)),
+        project_root=tmp_path,
+        real_runtime_factory=_native_factory(WaitingDevice()),
+    )
+    app.start_named_task(script.name, dry_run=False)
     assert entered.wait(1)
-    app.stop_running_script()
-    assert app.wait_for_script_stop(timeout=1)
-    assert app.current_script_run().finish_reason == "cancelled"
+    app.stop_running_task()
+    assert app.wait_for_task_stop(timeout=1)
+    assert app.current_task_run().finish_reason == "cancelled"
 
 
 def test_long_run_keeps_recent_logs_and_events_bounded(tmp_path) -> None:
@@ -1178,14 +1177,12 @@ def test_long_run_keeps_recent_logs_and_events_bounded(tmp_path) -> None:
     script = function_task(
         "many-steps",
         "for _ in range(3000):\n    ctx.wait(0)",
-        window=ScreenWindow(),
+        window=UnboundWindow(),
     )
-    app = LocalControlApplication(
-        catalog=ScriptCatalog((script,)), project_root=tmp_path
-    )
-    app.start_named_script(script.name, dry_run=True)
-    assert app.wait_for_script_stop(timeout=3)
-    status = app.current_script_run()
+    app = LocalControlApplication(catalog=TaskCatalog((script,)), project_root=tmp_path)
+    app.start_named_task(script.name, dry_run=True)
+    assert app.wait_for_task_stop(timeout=3)
+    status = app.current_task_run()
     assert len(status.stdout) <= 262144
     assert len(status.events) <= 2048
     assert status.events[-1].event_type == "run_finished"
@@ -1197,7 +1194,7 @@ def _write_home_state_config(project_root) -> None:
     assets = project_root / "assets"
     assets.mkdir()
     (assets / "主页.png").write_bytes(b"fake")
-    (assets / "screen-states.json").write_text(
+    (assets / "window-states.json").write_text(
         json.dumps(
             {
                 "groups": [
@@ -1221,35 +1218,35 @@ def _build_state_branch_script() -> FunctionTask:
         "    ctx.click(Point(100, 200))\n"
         "else:\n"
         "    ctx.wait(0.5)",
-        window=ScreenWindow(),
+        window=UnboundWindow(),
         requires=TaskRequirements(states=("主页",)),
     )
 
 
 def test_local_control_lists_scripts_and_isolated_config_errors() -> None:
     """脚本列表与坏配置报告保留供入口展示，坏文件不阻断好脚本。"""
-    script = function_task("sample", "ctx.wait(0)", window=ScreenWindow())
+    script = function_task("sample", "ctx.wait(0)", window=UnboundWindow())
     error = TaskLoadError("bad.json", "steps must not be empty")
     app = LocalControlApplication(
-        catalog=ScriptCatalog((script,)),
-        script_config_errors=(error,),
+        catalog=TaskCatalog((script,)),
+        task_config_errors=(error,),
     )
 
-    assert app.list_scripts() == ("sample",)
-    assert app.list_script_config_errors() == (error,)
-    assert app.run_named_script("sample", dry_run=True).finish_reason == "completed"
+    assert app.list_tasks() == ("sample",)
+    assert app.list_task_config_errors() == (error,)
+    assert app.run_named_task("sample", dry_run=True).finish_reason == "completed"
 
 
 def test_local_control_unknown_script_has_explicit_finish_reason() -> None:
     """同步和后台入口均把未知脚本作为未启动的错误结果返回。"""
-    app = LocalControlApplication(catalog=ScriptCatalog(()))
+    app = LocalControlApplication(catalog=TaskCatalog(()))
 
-    result = app.run_named_script("missing", dry_run=True)
-    status = app.start_named_script("missing", dry_run=True)
+    result = app.run_named_task("missing", dry_run=True)
+    status = app.start_named_task("missing", dry_run=True)
 
     assert result.exit_code == status.exit_code == 1
-    assert result.finish_reason == status.finish_reason == "script_not_found"
-    assert "unknown script: missing" in result.stderr
+    assert result.finish_reason == status.finish_reason == "task_not_found"
+    assert "unknown task: missing" in result.stderr
     assert not status.running
 
 
@@ -1259,13 +1256,13 @@ def test_local_control_unmet_condition_is_not_reported_as_completed() -> None:
         "wait-for-image",
         "ctx.wait_for(lambda: ctx.find(ImageTemplate('missing.png'), min_confidence=None) is not None, timeout=0.1, interval=0.1)\n"
         "ctx.click(Point(10, 20))",
-        window=ScreenWindow(),
+        window=UnboundWindow(),
         templates=(ImageTemplate("missing.png"),),
     )
-    app = LocalControlApplication(catalog=ScriptCatalog((script,)))
+    app = LocalControlApplication(catalog=TaskCatalog((script,)))
 
-    result = app.run_named_script(script.name, dry_run=True)
-    app.start_named_script(script.name, dry_run=True)
+    result = app.run_named_task(script.name, dry_run=True)
+    app.start_named_task(script.name, dry_run=True)
     status = _wait_until_finished(app)
 
     assert result.exit_code == status.exit_code == 1
@@ -1276,7 +1273,12 @@ def test_local_control_unmet_condition_is_not_reported_as_completed() -> None:
 
 def test_local_control_runtime_failure_is_exposed_in_both_entry_modes() -> None:
     """真实设备动作失败时，同步与后台结果都明确失败并包含原始原因。"""
-    script = function_task("failing", "ctx.click(Point(10, 20))", window=ScreenWindow())
+    script = function_task(
+        "failing",
+        "ctx.click(Point(10, 20))",
+        window=UnboundWindow(),
+        target=_native_target(),
+    )
 
     class FailingDevice:
         def click(self, target):
@@ -1284,12 +1286,12 @@ def test_local_control_runtime_failure_is_exposed_in_both_entry_modes() -> None:
             raise RuntimeError("input permission denied")
 
     app = LocalControlApplication(
-        catalog=ScriptCatalog((script,)),
-        real_device_factory=FailingDevice,
+        catalog=TaskCatalog((script,)),
+        real_runtime_factory=_native_factory(FailingDevice()),
     )
 
-    result = app.run_named_script(script.name, dry_run=False)
-    app.start_named_script(script.name, dry_run=False)
+    result = app.run_named_task(script.name, dry_run=False)
+    app.start_named_task(script.name, dry_run=False)
     status = _wait_until_finished(app)
 
     assert result.exit_code == status.exit_code == 1
@@ -1298,114 +1300,46 @@ def test_local_control_runtime_failure_is_exposed_in_both_entry_modes() -> None:
     assert "input permission denied" in status.stderr
 
 
-def test_project_state_reader_reads_current_frame_each_time(tmp_path) -> None:
-    """状态读取每次识别当前画面，上一轮主页命中不会掩盖随后的消失。"""
-    _write_home_state_config(tmp_path)
-    matches = iter((ImageMatch(Rect(0, 0, 20, 20), 0.9), None))
-
-    class ChangingLocator:
-        def locate(self, template, *, region=None, min_confidence=1.0, logger=None):
-            """依次返回主页出现与消失的画面。"""
-            return next(matches)
-
-    locator = ChangingLocator()
-    reader = ProjectScreenStateReader(
-        project_root=tmp_path,
-        real_image_locator_factory=lambda: locator,
-    )
-
-    assert reader.read_current_state() == "主页"
-    assert reader.read_current_state() == "未知"
-
-
-def test_project_state_reader_reloads_configuration_each_time(tmp_path) -> None:
-    """运行中的状态配置更名后，下一次读取立即采用新状态名称。"""
-    _write_home_state_config(tmp_path)
-
-    class MatchingLocator:
-        def locate(self, template, *, region=None, min_confidence=1.0, logger=None):
-            """始终命中相同模板，使状态名称只来自当前配置。"""
-            return ImageMatch(Rect(0, 0, 20, 20), 0.9)
-
-    reader = ProjectScreenStateReader(
-        project_root=tmp_path,
-        real_image_locator_factory=MatchingLocator,
-    )
-    assert reader.read_current_state() == "主页"
-    config_path = tmp_path / "assets" / "screen-states.json"
-    config = json.loads(config_path.read_text())
-    config["groups"][0]["state"] = "新主页"
-    config_path.write_text(json.dumps(config))
-
-    assert reader.read_current_state() == "新主页"
-
-
-def test_project_state_reader_without_config_preserves_template_name_fallback(
-    tmp_path,
-) -> None:
-    """未建立状态配置的旧项目仍可按 assets 模板文件名识别状态。"""
-    assets = tmp_path / "assets"
-    assets.mkdir()
-    (assets / "主页.png").write_bytes(b"fake")
-
-    class MatchingLocator:
-        def locate(self, template, *, region=None, min_confidence=1.0, logger=None):
-            """命中模板文件名对应的状态。"""
-            return ImageMatch(Rect(0, 0, 20, 20), 0.9)
-
-    reader = ProjectScreenStateReader(
-        project_root=tmp_path,
-        real_image_locator_factory=MatchingLocator,
-    )
-
-    assert reader.read_current_state() == "主页"
-
-
 def test_local_control_live_invalid_state_config_finishes_with_failure(
     tmp_path,
 ) -> None:
     """等待期间状态配置损坏时返回失败结果，不让后台会话永远停在运行中。"""
     _write_home_state_config(tmp_path)
-    config_path = tmp_path / "assets" / "screen-states.json"
+    config_path = tmp_path / "assets" / "window-states.json"
     original_config = config_path.read_text()
     script = function_task(
         "state-wait",
         "ctx.wait_for(lambda: ctx.state(min_confidence=0.8) == '主页', timeout=1, interval=0.1)",
-        window=ScreenWindow(),
+        window=UnboundWindow(),
         requires=TaskRequirements(states=("主页",)),
+        target=_native_target(),
     )
 
-    class MutatingDevice:
+    class IdleDevice:
         def wait(self, duration_seconds):
-            """模拟用户在等待两次识别之间保存了非法配置。"""
-            config_path.write_text("{")
+            """状态读取在等待前失败，设备不会被调用。"""
 
-    class MissingLocator:
-        def locate(self, template, *, region=None, min_confidence=1.0, logger=None):
-            """初次读取不命中，进入等待后再读取配置。"""
-            return None
+    class BrokenReader:
+        def read_current_state(self, *, min_confidence=0.8, logger=None):
+            """模拟窗口规则在运行中无法读取。"""
+            raise RuntimeError("window state configuration failed")
 
     app = LocalControlApplication(
-        catalog=ScriptCatalog((script,)),
+        catalog=TaskCatalog((script,)),
         project_root=tmp_path,
-        real_device_factory=MutatingDevice,
-        real_image_locator_factory=MissingLocator,
+        real_runtime_factory=_native_factory(
+            IdleDevice(), screen_state_reader=BrokenReader()
+        ),
     )
 
-    result = app.run_named_script(script.name, dry_run=False)
+    result = app.run_named_task(script.name, dry_run=False)
     assert result.exit_code == 1
     assert result.finish_reason == "failed"
-    assert "screen state configuration failed" in result.stderr
+    assert "window state configuration failed" in result.stderr
 
     config_path.write_text(original_config)
-    app.start_named_script(script.name, dry_run=False)
+    app.start_named_task(script.name, dry_run=False)
     status = _wait_until_finished(app)
     assert status.exit_code == 1
     assert status.finish_reason == "failed"
-    assert "screen state configuration failed" in status.stderr
-
-
-def test_project_state_reader_reports_missing_locator() -> None:
-    """未装配识图能力时，状态读取明确报告配置缺失而非伪造未知。"""
-    with pytest.raises(RuntimeError, match="image locator is required"):
-        ProjectScreenStateReader().read_current_state()
+    assert "window state configuration failed" in status.stderr

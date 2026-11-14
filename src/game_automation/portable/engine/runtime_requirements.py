@@ -13,7 +13,7 @@ from game_automation.portable.domain.task_analysis import analyze_task
 
 
 @dataclass(frozen=True, slots=True)
-class ScriptRequirements:
+class RuntimeRequirements:
     """声明运行前必须提供的可选设备能力。"""
 
     needs_color_reader: bool = False
@@ -21,10 +21,10 @@ class ScriptRequirements:
     needs_screen_state_reader: bool = False
 
 
-def inspect_script_requirements(script: FunctionTask) -> ScriptRequirements:
+def inspect_runtime_requirements(task: FunctionTask) -> RuntimeRequirements:
     """从共同静态事实读取所需端口。"""
-    analysis = analyze_task(script)
-    return ScriptRequirements(
+    analysis = analyze_task(task)
+    return RuntimeRequirements(
         needs_color_reader=analysis.uses_colors,
         needs_image_locator=bool(analysis.image_sources),
         needs_screen_state_reader=bool(analysis.state_names),

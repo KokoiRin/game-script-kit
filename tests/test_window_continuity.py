@@ -20,7 +20,7 @@ from game_automation.portable.domain import (
     Rect,
 )
 from game_automation.portable.domain.screen_state import FrameProof
-from game_automation.portable.engine.cancellation import ScriptCancelledError
+from game_automation.portable.engine.cancellation import TaskCancelledError
 from game_automation.portable.preparation.models import DesktopWindow
 from game_automation.task import TaskContext
 from tests.support.function_tasks import function_task
@@ -130,7 +130,7 @@ def test_cancel_while_waiting_preserves_owned_source_cleanup():
     session, binding, source, clock, _ = setup()
     binding.bounds["Width"] = 81
     session.cancellation = SimpleNamespace(is_cancelled=lambda: clock() >= 10.1)
-    with pytest.raises(ScriptCancelledError):
+    with pytest.raises(TaskCancelledError):
         session.check_window()
     session.close()
     assert source.closed

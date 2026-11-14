@@ -1,7 +1,7 @@
 """本机桌面平台的 use case 装配。
 
-本 module 负责把 portable application 用例接到当前桌面平台 adapter；它是迁移
-平台时优先替换的 composition 点，不解释脚本步骤。
+本 module 负责把 portable application 用例接到原生窗口运行时；它是迁移
+平台时优先替换的 composition 点，不解释任务步骤。真实运行不装配屏幕绝对坐标设备。
 """
 
 from __future__ import annotations
@@ -9,130 +9,47 @@ from __future__ import annotations
 from pathlib import Path
 
 from game_automation.portable.application.local_control import LocalControlApplication
-from game_automation.portable.application.ports import (
-    ApplicationActivator,
-    ApplicationWindowController,
-)
 from game_automation.portable.application.project_assets import PROJECT_ROOT
-from game_automation.portable.application.project_scripts import (
-    load_project_script_catalog_result,
+from game_automation.portable.application.project_tasks import (
+    load_project_task_catalog_result,
 )
-from game_automation.portable.application.screen_state_reader import (
-    ProjectScreenStateReader,
-)
-from game_automation.portable.application.script_run import ScriptRunResult, run_script
+from game_automation.portable.application.task_run import TaskRunResult, run_task
 from game_automation.portable.domain.task import FunctionTask
-from game_automation.portable.engine.ports import (
-    InputDevice,
-    PixelColorReader,
-    ScreenImageBatchLocator,
-    ScreenImageLocator,
-    ScreenStateReader,
-)
 
 
-def run_script_on_local_desktop(
-    script: FunctionTask,
+def run_task_on_local_desktop(
+    task: FunctionTask,
     *,
     dry_run: bool,
     dry_run_color: str = "#000000",
     dry_run_images: tuple[str, ...] = (),
     dry_run_screen_state: str = "未知",
-    target_application: str | None = None,
-    target_window_title: str | None = None,
     project_root: Path = PROJECT_ROOT,
-) -> ScriptRunResult:
-    """用本机桌面 adapter 运行脚本。"""
-    return run_script(
-        script,
+) -> TaskRunResult:
+    """用原生窗口运行时或 dry-run 替身运行任务。"""
+    return run_task(
+        task,
         dry_run=dry_run,
         dry_run_color=dry_run_color,
         dry_run_images=dry_run_images,
         dry_run_screen_state=dry_run_screen_state,
-        target_application=target_application,
-        target_window_title=target_window_title,
-        real_application_activator_factory=build_real_application_activator,
-        real_application_window_controller_factory=build_real_application_window_controller,
-        real_runtime_factory=build_native_runtime_factory(project_root),
-        real_device_factory=build_real_input_device,
-        real_color_reader_factory=build_real_color_reader,
-        real_image_locator_factory=build_real_screen_image_locator,
-        real_screen_state_reader_factory=lambda: build_real_screen_state_reader(
-            project_root=project_root
-        ),
+        real_runtime_factory=None
+        if dry_run
+        else build_native_runtime_factory(project_root),
     )
-
-
-def build_real_application_activator() -> ApplicationActivator:
-    """延迟创建 macOS 应用激活 adapter，避免普通运行触发平台能力。"""
-    from game_automation.platform.macos.adapters import MacOSApplicationActivator
-
-    return MacOSApplicationActivator()
-
-
-def build_real_application_window_controller() -> ApplicationWindowController:
-    """延迟创建 macOS 窗口控制 adapter，避免普通运行触发辅助功能依赖。"""
-    from game_automation.platform.macos.adapters import MacOSApplicationWindowController
-
-    return MacOSApplicationWindowController()
 
 
 def build_local_control_application(
     *,
     project_root: Path = PROJECT_ROOT,
 ) -> LocalControlApplication:
-    """创建已接入本机桌面 adapter 的本地控制应用用例。"""
-    catalog_result = load_project_script_catalog_result(project_root)
+    """创建已接入原生窗口运行时的本地控制应用用例。"""
+    catalog_result = load_project_task_catalog_result(project_root)
     return LocalControlApplication(
         project_root=project_root,
         catalog=catalog_result.catalog,
-        script_config_errors=catalog_result.script_config_errors,
+        task_config_errors=catalog_result.task_config_errors,
         real_runtime_factory=build_native_runtime_factory(project_root),
-        real_device_factory=build_real_input_device,
-        real_color_reader_factory=build_real_color_reader,
-        real_image_locator_factory=build_real_screen_image_locator,
-        real_image_batch_locator_factory=build_real_screen_image_batch_locator,
-        real_application_activator_factory=build_real_application_activator,
-        real_application_window_controller_factory=build_real_application_window_controller,
-    )
-
-
-def build_real_input_device() -> InputDevice:
-    """延迟创建真实输入 adapter，避免导入入口模块时触发平台依赖。"""
-    from game_automation.platform.macos.adapters import MacOSPointerDevice
-
-    return MacOSPointerDevice()
-
-
-def build_real_color_reader() -> PixelColorReader:
-    """延迟创建真实取色 adapter，避免无颜色脚本触发截图依赖。"""
-    from game_automation.platform.desktop.adapters import PyAutoGuiPixelColorReader
-
-    return PyAutoGuiPixelColorReader()
-
-
-def build_real_screen_image_locator() -> ScreenImageLocator:
-    """延迟创建真实图像定位 adapter，避免普通脚本触发截图依赖。"""
-    from game_automation.platform.desktop.adapters import PyAutoGuiScreenImageLocator
-
-    return PyAutoGuiScreenImageLocator()
-
-
-def build_real_screen_image_batch_locator() -> ScreenImageBatchLocator:
-    """延迟创建真实批量图像定位 adapter，避免打开 UI 时触发截图权限。"""
-    from game_automation.platform.desktop.adapters import PyAutoGuiScreenImageLocator
-
-    return PyAutoGuiScreenImageLocator()
-
-
-def build_real_screen_state_reader(
-    *, project_root: Path = PROJECT_ROOT
-) -> ScreenStateReader:
-    """直接装配脚本状态读取能力，避免依赖 UI 会话或诊断用例。"""
-    return ProjectScreenStateReader(
-        project_root=project_root,
-        real_image_locator_factory=build_real_screen_image_locator,
-        real_image_batch_locator_factory=build_real_screen_image_batch_locator,
     )
 
 

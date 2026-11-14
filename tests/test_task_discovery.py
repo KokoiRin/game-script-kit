@@ -5,13 +5,13 @@
 
 import pytest
 
-from game_automation.portable.application.project_scripts import (
-    load_project_script_catalog_result,
+from game_automation.portable.application.project_tasks import (
+    load_project_task_catalog_result,
 )
-from game_automation.portable.scripts_manager.catalog import ScriptCatalog
+from game_automation.portable.application.task_catalog import TaskCatalog
 
 
-@pytest.mark.parametrize("suffix", [".json", ".py"])
+@pytest.mark.parametrize("suffix", [".py"])
 def test_catalog_isolates_dangling_source_symlinks(tmp_path, suffix) -> None:
     """坏源码链接不能阻断同目录中的有效任务。"""
     scripts = tmp_path / "scripts"
@@ -21,30 +21,29 @@ def test_catalog_isolates_dangling_source_symlinks(tmp_path, suffix) -> None:
     )
     (scripts / f"bad{suffix}").symlink_to(tmp_path / "missing")
 
-    result = load_project_script_catalog_result(
-        tmp_path, base_catalog=ScriptCatalog(())
-    )
+    result = load_project_task_catalog_result(tmp_path, base_catalog=TaskCatalog(()))
 
     assert result.catalog.list_names() == ("good",)
-    assert len(result.script_config_errors) == 1
-    assert result.script_config_errors[0].file == f"bad{suffix}"
+    assert len(result.task_config_errors) == 1
+    assert result.task_config_errors[0].file == f"bad{suffix}"
 
 
-def test_json_source_reports_required_python_migration(tmp_path):
-    """旧 JSON 文件产生迁移诊断且不会执行其中的动作。"""
+def test_json_files_are_not_tasks(tmp_path):
+    """scripts 中的 JSON 不再作为任务格式读取。"""
     scripts = tmp_path / "scripts"
     scripts.mkdir()
     (scripts / "old.json").write_text('{"name": "old", "steps": [{"wait": 0}]}')
-    result = load_project_script_catalog_result(tmp_path)
-    assert result.catalog.list_names() == ()
-    assert len(result.script_config_errors) == 1
-    assert result.script_config_errors[0].file == "old.json"
-    assert "run(ctx)" in result.script_config_errors[0].message
+    (scripts / "good.py").write_text(
+        "TASK = {'name': 'good'}\ndef run(ctx): pass\n", encoding="utf-8"
+    )
+    result = load_project_task_catalog_result(tmp_path)
+    assert result.catalog.list_names() == ("good",)
+    assert result.task_config_errors == ()
 
 
-@pytest.mark.parametrize("suffix", [".json", ".py"])
+@pytest.mark.parametrize("suffix", [".py"])
 def test_catalog_isolates_invalid_source_encoding(tmp_path, suffix) -> None:
-    """两种格式使用同一逐文件编码错误边界。"""
+    """Python 任务使用逐文件编码错误边界。"""
     scripts = tmp_path / "scripts"
     scripts.mkdir()
     (scripts / "good.py").write_text(
@@ -52,27 +51,21 @@ def test_catalog_isolates_invalid_source_encoding(tmp_path, suffix) -> None:
     )
     (scripts / f"bad{suffix}").write_bytes(b"\xff")
 
-    result = load_project_script_catalog_result(
-        tmp_path, base_catalog=ScriptCatalog(())
-    )
+    result = load_project_task_catalog_result(tmp_path, base_catalog=TaskCatalog(()))
 
     assert result.catalog.list_names() == ("good",)
-    assert tuple(error.file for error in result.script_config_errors) == (
-        f"bad{suffix}",
-    )
+    assert tuple(error.file for error in result.task_config_errors) == (f"bad{suffix}",)
 
 
 def test_catalog_reports_invalid_directory_once(tmp_path) -> None:
     """统一目录检查只产生一条路径诊断。"""
     (tmp_path / "scripts").write_text("not a directory", encoding="utf-8")
 
-    result = load_project_script_catalog_result(
-        tmp_path, base_catalog=ScriptCatalog(())
-    )
+    result = load_project_task_catalog_result(tmp_path, base_catalog=TaskCatalog(()))
 
     assert result.catalog.list_names() == ()
-    assert len(result.script_config_errors) == 1
-    assert "not a directory" in result.script_config_errors[0].message
+    assert len(result.task_config_errors) == 1
+    assert "not a directory" in result.task_config_errors[0].message
 
 
 def test_catalog_preserves_filename_order_and_duplicate_source(tmp_path):
@@ -88,10 +81,10 @@ def test_catalog_preserves_filename_order_and_duplicate_source(tmp_path):
         (scripts / file).write_text(
             f"TASK = {{'name': {name!r}}}\ndef run(ctx): pass\n"
         )
-    result = load_project_script_catalog_result(tmp_path)
+    result = load_project_task_catalog_result(tmp_path)
     assert result.catalog.list_names() == ("first", "shared", "last")
-    assert tuple(error.file for error in result.script_config_errors) == ("c.py",)
-    assert "duplicate script name: shared" in result.script_config_errors[0].message
+    assert tuple(error.file for error in result.task_config_errors) == ("c.py",)
+    assert "duplicate task name: shared" in result.task_config_errors[0].message
 
 
 def test_python_encoding_declaration_and_snapshot_use_the_same_source(tmp_path) -> None:
@@ -101,9 +94,7 @@ def test_python_encoding_declaration_and_snapshot_use_the_same_source(tmp_path) 
     source = "# coding: latin-1\nTASK = {'name': 'café'}\ndef run(ctx): pass\n"
     (scripts / "encoded.py").write_bytes(source.encode("latin-1"))
 
-    result = load_project_script_catalog_result(
-        tmp_path, base_catalog=ScriptCatalog(())
-    )
+    result = load_project_task_catalog_result(tmp_path, base_catalog=TaskCatalog(()))
 
-    assert result.script_config_errors == ()
+    assert result.task_config_errors == ()
     assert result.catalog.get("café").source == source

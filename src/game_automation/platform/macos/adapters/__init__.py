@@ -7,13 +7,9 @@
 from game_automation.platform.macos.adapters.application_activation import (
     MacOSApplicationActivator,
 )
-from game_automation.platform.macos.adapters.application_window import (
-    MacOSApplicationWindowController,
-)
 from game_automation.platform.macos.adapters.pointer_device import MacOSPointerDevice
 
 __all__ = [
     "MacOSApplicationActivator",
-    "MacOSApplicationWindowController",
     "MacOSPointerDevice",
 ]

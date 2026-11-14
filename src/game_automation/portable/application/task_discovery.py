@@ -27,7 +27,7 @@ class TaskFileEntry:
     """将任务定义与目录中的来源文件绑定。"""
 
     file: str
-    script: FunctionTask
+    task: FunctionTask
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,7 +54,7 @@ def discover_task_files(
         return TaskDiscoveryResult()
     except NotADirectoryError:
         error = TaskLoadError(
-            script_dir.name, f"script path is not a directory: {script_dir}"
+            script_dir.name, f"task path is not a directory: {script_dir}"
         )
         return TaskDiscoveryResult(errors=(error,))
     except OSError as exc:
@@ -63,17 +63,7 @@ def discover_task_files(
     entries: list[TaskFileEntry] = []
     errors: list[TaskLoadError] = []
     for path in sorted(paths, key=lambda item: item.name):
-        if path.suffix == ".json":
-            errors.append(
-                TaskLoadError(
-                    path.name,
-                    f"{path.name}: JSON task format is unsupported; migrate to Python TASK and run(ctx)",
-                )
-            )
-            continue
-        if path.suffix != ".py":
-            continue
-        if path.suffix == ".py" and path.name.startswith("_"):
+        if path.suffix != ".py" or path.name.startswith("_"):
             continue
         try:
             source = _read_source(path)

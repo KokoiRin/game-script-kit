@@ -9,7 +9,7 @@ from game_automation.platform.macos.adapters.window_input import (
     _activate_bound_application as activate_bound_application,
 )
 from game_automation.portable.domain import Point, Rect
-from game_automation.portable.engine.cancellation import ScriptCancelledError
+from game_automation.portable.engine.cancellation import TaskCancelledError
 
 
 @pytest.fixture(autouse=True)
@@ -148,7 +148,7 @@ class Session:
     def check_cancelled(self):
         """模拟协作式取消。"""
         if self.cancelled:
-            raise ScriptCancelledError("cancelled")
+            raise TaskCancelledError("cancelled")
 
     def input_finished(self):
         """记录后续视觉读取门槛。"""
@@ -217,7 +217,7 @@ def test_hotkey_cancellation_releases_held_modifier():
         session.cancelled = True
 
     q.CGEventPost = post
-    with pytest.raises(ScriptCancelledError):
+    with pytest.raises(TaskCancelledError):
         MacOSWindowInputDevice(session).hotkey(("ctrl", "a"))
     assert [e["kind"] for _, e in q.events] == [(59, True), (59, False)]
 

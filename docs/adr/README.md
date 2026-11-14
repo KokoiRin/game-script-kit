@@ -28,13 +28,15 @@ ADR 保存重要设计取舍的状态、理由和代价。下表收录当前已�
 
 | [0011](0011-priority-window-observation.md) | accepted | 窗口状态按优先级分组截断 | 用户要求命中高层后跳过低层 |
 
-| [0012](0012-native-script-runtime.md) | accepted | 显式 macOS 窗口运行会话，截图识别输入共用固定目标 | 用户要求新 port 并保留旧 backend |
+| [0012](0012-native-script-runtime.md) | accepted；桌面回退由 [0016](0016-native-window-only-runtime.md) 替代 | 显式 macOS 窗口运行会话，截图识别输入共用固定目标 | 用户要求新 port；当时保留旧 backend |
 
 | [0013](0013-function-tasks.md) | superseded by 0015 | Python 函数任务与共享动作内核 | 用户授权重构任务基础并改用直接函数执行 |
 
 | [0014](0014-core-first-execution.md) | accepted | 直接运行上下文与核心优先接入 | 用户要求整体设计并先简化核心 |
 
 | [0015](0015-python-only-tasks.md) | accepted | 全部活动任务统一使用 Python 并移除旧格式 | 用户明确要求完整迁移与清理 |
+
+| [0016](0016-native-window-only-runtime.md) | accepted | 真实运行只使用 Python 任务和原生窗口，去掉屏幕坐标与 screen-states | 用户确认保留 Python 任务并收成单一执行模型 |
 
 ## 如何新增
 

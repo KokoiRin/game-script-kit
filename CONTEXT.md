@@ -8,7 +8,7 @@ Star 是本地桌面自动化框架。主仓维护执行能力、平台适配、
 
 用户描述任务意图，Agent 负责观察目标应用、补齐流程、生成脚本和资源、验证及维护。用户不需要先学会脚本格式，也不需要提前提交完整流程规格。这个协作方式已于 2026-10-18 确认，取舍见 [ADR 0001](docs/adr/0001-agent-authored-tasks.md)。
 
-新任务可以在工作区的 Python 文件中声明 `TASK` 并实现同步 `run(ctx)`。Python 负责函数和控制流，运行上下文直接负责动作、观察、取消和事件。任务统一使用这一种作者接口，迁移与清理范围见 [ADR 0015](docs/adr/0015-python-only-tasks.md)，核心职责见 [ADR 0014](docs/adr/0014-core-first-execution.md)。
+新任务可以在工作区的 Python 文件中声明 `TASK` 并实现同步 `run(ctx)`。Python 负责函数和控制流，运行上下文直接负责动作、观察、取消和事件。任务统一使用这一种作者接口，迁移与清理范围见 [ADR 0015](docs/adr/0015-python-only-tasks.md)，核心职责见 [ADR 0014](docs/adr/0014-core-first-execution.md)。真实运行只绑定 macOS 原生窗口，坐标和状态规则都相对该窗口，见 [ADR 0016](docs/adr/0016-native-window-only-runtime.md)。
 
 任务工作区以 `~/StarWorkspaces/<name>` 为常用存放位置，通过 `star --workspace PATH ...` 显式选择。该目录下的 `scripts/`、`assets/` 和状态配置共同构成任务数据根。`scripts/` 加载 Python 函数任务。指定后只使用该根的数据，不混入主仓或内置示例。每个后台固定绑定一个工作区，原生壳显示其路径，切换时先回收旧后台。理由见 [ADR 0006](docs/adr/0006-local-task-workspaces.md) 和后续的原生壳决策。
 

@@ -1,7 +1,7 @@
-"""静态分析脚本资源引用、运行前校验和详情依赖。
+"""静态分析任务资源引用、运行前校验和详情依赖。
 
 本 module 消费统一任务事实，判断共享资源需求并生成 readiness。
-它不生成步骤摘要、不运行脚本，也不处理 HTTP/UI 展示细节。
+它不生成步骤摘要、不运行任务，也不处理 UI 展示细节。
 """
 
 from __future__ import annotations
@@ -32,7 +32,7 @@ from game_automation.portable.domain.task_analysis import (
 
 
 @dataclass(frozen=True, slots=True)
-class ScriptDependencyDetails:
+class TaskDependencyDetails:
     dependencies: tuple[str, ...] = ()
     state_dependencies: tuple[str, ...] = ()
     point_dependencies: tuple[str, ...] = ()
@@ -40,22 +40,22 @@ class ScriptDependencyDetails:
     readiness: tuple[tuple[str, str, str], ...] = ()
 
 
-def validate_script_resource_references(script: FunctionTask) -> None:
+def validate_task_resource_references(task: FunctionTask) -> None:
     """执行前解析任务声明的资源引用，不读取桌面或要求模拟模板文件存在。"""
-    analysis = analyze_task(script)
+    analysis = analyze_task(task)
     for name in analysis.point_names:
-        script.resources.resolve_point(PointRef(name))
+        task.resources.resolve_point(PointRef(name))
     for image in analysis.image_sources:
-        _resolve_image_dependency_template(image, resources=script.resources)
+        _resolve_image_dependency_template(image, resources=task.resources)
 
 
-def script_needs_shared_resources(script: FunctionTask) -> bool:
-    """仅在脚本引用的搜索或区域无法由局部资源解析时请求共享配置。"""
-    analysis = analyze_task(script)
+def task_needs_shared_resources(task: FunctionTask) -> bool:
+    """仅在任务引用的搜索或区域无法由局部资源解析时请求共享配置。"""
+    analysis = analyze_task(task)
     for image in analysis.image_sources:
         if isinstance(image, SearchRef):
             try:
-                script.resources.resolve_search(image)
+                task.resources.resolve_search(image)
             except UnknownImageSearchNameError, UnknownRegionNameError:
                 return True
             except UnknownImageNameError:
@@ -64,16 +64,16 @@ def script_needs_shared_resources(script: FunctionTask) -> bool:
     return False
 
 
-def describe_script_dependencies(
-    script: FunctionTask,
+def describe_task_dependencies(
+    task: FunctionTask,
     *,
     asset_root: Path,
     supported_image_suffixes: frozenset[str],
     state_names: tuple[str, ...] | None,
     analysis: TaskAnalysis | None = None,
-) -> ScriptDependencyDetails:
-    """生成脚本依赖摘要、结构化依赖和运行前检查。"""
-    analysis = analysis if analysis is not None else analyze_task(script)
+) -> TaskDependencyDetails:
+    """生成任务依赖摘要、结构化依赖和运行前检查。"""
+    analysis = analysis if analysis is not None else analyze_task(task)
     point_names = analysis.point_names
     image_sources = analysis.image_sources
     dependencies = tuple(
@@ -85,16 +85,16 @@ def describe_script_dependencies(
             )
         )
     )
-    return ScriptDependencyDetails(
+    return TaskDependencyDetails(
         dependencies=dependencies,
         state_dependencies=analysis.state_names,
         point_dependencies=point_names,
         image_dependencies=_resolved_image_paths(
-            image_sources, resources=script.resources
+            image_sources, resources=task.resources
         ),
         readiness=_describe_readiness(
             analysis=analysis,
-            resources=script.resources,
+            resources=task.resources,
             asset_root=asset_root,
             supported_image_suffixes=supported_image_suffixes,
             state_names=state_names,
@@ -110,7 +110,7 @@ def _describe_readiness(
     supported_image_suffixes: frozenset[str],
     state_names: tuple[str, ...] | None,
 ) -> tuple[tuple[str, str, str], ...]:
-    """生成脚本详情中的运行前依赖检查结果。"""
+    """生成任务详情中的运行前依赖检查结果。"""
     checks = []
     for name in analysis.state_names:
         checks.append(_screen_state_readiness(name, state_names=state_names))
@@ -209,7 +209,7 @@ def _screen_state_readiness(
     *,
     state_names: tuple[str, ...] | None,
 ) -> tuple[str, str, str]:
-    """检查脚本引用的界面状态是否能从配置中确认。"""
+    """检查任务引用的界面状态是否能从窗口规则中确认。"""
     dependency = f"状态: {state}"
     if state_names is None:
         return dependency, "unknown", "状态配置不可用，无法确认"
@@ -224,7 +224,7 @@ def _image_readiness(
     asset_root: Path,
     supported_image_suffixes: frozenset[str],
 ) -> tuple[str, str, str]:
-    """检查脚本引用的 assets 图片是否存在。"""
+    """检查任务引用的 assets 图片是否存在。"""
     if dependency.template is None:
         return (
             dependency.label,

@@ -6,9 +6,9 @@ from dataclasses import replace
 import pytest
 
 from game_automation.portable.application.runtime_ports import RuntimePorts
-from game_automation.portable.application.script_run import run_script
+from game_automation.portable.application.task_run import run_task
 from game_automation.portable.domain import AreaWindow, Point, Rect
-from game_automation.portable.domain.task import ScriptTarget, TaskRequirements
+from game_automation.portable.domain.task import TaskRequirements, TaskTarget
 from tests.support.function_tasks import function_task
 
 
@@ -46,14 +46,14 @@ def script():
         "native",
         "ctx.click(Point(5, 6))",
         window=AreaWindow(Rect(0, 0, 80, 60)),
-        target=ScriptTarget("Example", "Game", 80, 60, backend="macos-window"),
+        target=TaskTarget("Example", "Game", 80, 60, backend="macos-window"),
     )
 
 
 def test_explicit_native_backend_owns_all_ports():
     """原生后端只打开一次会话且只增加一次窗口原点。"""
     factory = Factory()
-    result = run_script(script(), dry_run=False, real_runtime_factory=factory)
+    result = run_task(script(), dry_run=False, real_runtime_factory=factory)
     assert result.finish_reason == "completed"
     assert factory.closed
     assert factory.device.clicks == [Point(105, 206)]
@@ -62,7 +62,7 @@ def test_explicit_native_backend_owns_all_ports():
 def test_close_failure_never_reports_completed():
     """采集停止失败作为可见失败而非成功。"""
     factory = Factory(fail_close=True)
-    result = run_script(script(), dry_run=False, real_runtime_factory=factory)
+    result = run_task(script(), dry_run=False, real_runtime_factory=factory)
     assert result.finish_reason == "cleanup_failed"
     assert result.exit_code == 1
     assert "stream shutdown failed" in result.error_message
@@ -70,45 +70,38 @@ def test_close_failure_never_reports_completed():
 
 def test_native_does_not_fallback_to_global_backend():
     """缺少原生工厂必须失败，不访问旧设备。"""
-    calls = []
-    result = run_script(
-        script(), dry_run=False, real_device_factory=lambda: calls.append(1)
-    )
+    result = run_task(script(), dry_run=False)
     assert result.finish_reason == "setup_failed"
-    assert calls == []
+    assert "desktop fallback is disabled" in result.error_message
 
 
 def test_dry_run_does_not_open_native_session():
     """模拟模式保留无需平台依赖的执行路径。"""
-    result = run_script(script(), dry_run=True)
+    result = run_task(script(), dry_run=True)
     assert result.finish_reason == "completed"
 
 
-def test_native_window_override_is_rejected_before_open():
-    """显式固定目标不能被入口参数悄悄改绑。"""
+def test_real_run_without_native_target_never_opens_factory():
+    """没有原生目标时，即使注入了工厂也不会打开会话。"""
     factory = Factory()
-    result = run_script(
-        script(),
-        dry_run=False,
-        real_runtime_factory=factory,
-        target_application="Other",
-    )
+    plain = function_task("plain", "ctx.click(Point(1, 2))")
+    result = run_task(plain, dry_run=False, real_runtime_factory=factory)
     assert result.finish_reason == "configuration_failed"
     assert factory.closed is False
 
 
 def test_cancelled_run_closes_and_preserves_cancellation_when_cleanup_fails():
     """取消是主结果，停流失败仍在错误信息中可见。"""
-    from game_automation.portable.engine.cancellation import ScriptCancelledError
+    from game_automation.portable.engine.cancellation import TaskCancelledError
 
     factory = Factory(fail_close=True)
 
     def click(point):
         """模拟输入边界收到取消。"""
-        raise ScriptCancelledError("cancelled by user")
+        raise TaskCancelledError("cancelled by user")
 
     factory.device.click = click
-    result = run_script(script(), dry_run=False, real_runtime_factory=factory)
+    result = run_task(script(), dry_run=False, real_runtime_factory=factory)
     assert result.finish_reason == "cancelled"
     assert result.exit_code == 130
     assert "cleanup failed" in result.error_message
@@ -119,7 +112,7 @@ def test_setup_failure_after_open_closes_runtime():
     """端口装配失败也必须释放已经打开的会话。"""
     factory = Factory()
     needs_color = replace(script(), requires=TaskRequirements(colors=True))
-    result = run_script(needs_color, dry_run=False, real_runtime_factory=factory)
+    result = run_task(needs_color, dry_run=False, real_runtime_factory=factory)
     assert result.finish_reason == "setup_failed"
     assert factory.closed
 
@@ -140,7 +133,7 @@ def test_cleanup_failure_emits_only_failed_terminal_event():
             self.events.append(event)
 
     logger = Logger()
-    result = run_script(
+    result = run_task(
         script(),
         dry_run=False,
         real_runtime_factory=Factory(fail_close=True),
@@ -157,18 +150,18 @@ def test_sync_and_background_control_use_same_runtime_factory(tmp_path):
     from game_automation.portable.application.local_control import (
         LocalControlApplication,
     )
-    from game_automation.portable.scripts_manager.catalog import ScriptCatalog
+    from game_automation.portable.application.task_catalog import TaskCatalog
 
     factory = Factory()
     app = LocalControlApplication(
-        catalog=ScriptCatalog((script(),)),
+        catalog=TaskCatalog((script(),)),
         project_root=tmp_path,
         real_runtime_factory=factory,
     )
-    assert app.run_named_script("native", dry_run=False).finish_reason == "completed"
-    app.start_named_script("native", dry_run=False)
-    assert app.wait_for_script_stop(2)
-    assert app.current_script_run().finish_reason == "completed"
+    assert app.run_named_task("native", dry_run=False).finish_reason == "completed"
+    app.start_named_task("native", dry_run=False)
+    assert app.wait_for_task_stop(2)
+    assert app.current_task_run().finish_reason == "completed"
     assert factory.device.clicks == [Point(105, 206), Point(105, 206)]
 
 
@@ -211,7 +204,7 @@ def test_native_details_use_window_rule_state_names(tmp_path):
     from game_automation.portable.application.local_control import (
         LocalControlApplication,
     )
-    from game_automation.portable.scripts_manager.catalog import ScriptCatalog
+    from game_automation.portable.application.task_catalog import TaskCatalog
 
     state_script = replace(
         script(), requires=TaskRequirements(states=("窗口专用状态",))
@@ -221,13 +214,10 @@ def test_native_details_use_window_rule_state_names(tmp_path):
     (assets / "window-states.json").write_text(
         json.dumps({"groups": [{"state": "窗口专用状态"}]})
     )
-    (assets / "screen-states.json").write_text(
-        json.dumps({"groups": [{"state": "旧桌面状态"}]})
-    )
     app = LocalControlApplication(
-        catalog=ScriptCatalog((state_script,)), project_root=tmp_path
+        catalog=TaskCatalog((state_script,)), project_root=tmp_path
     )
-    details = app.describe_script("native")
+    details = app.describe_task("native")
     assert details.exit_code == 0
     assert details.readiness == (("状态: 窗口专用状态", "ok", "状态已配置"),)
 
@@ -236,10 +226,11 @@ def test_shared_resource_merge_preserves_native_target_through_control_entry(
     tmp_path, monkeypatch
 ):
     """补齐共享搜索后仍进入显式原生会话，不能丢失后端声明。"""
-    from game_automation.portable.application import script_resources
+    from game_automation.portable.application import task_resources as script_resources
     from game_automation.portable.application.local_control import (
         LocalControlApplication,
     )
+    from game_automation.portable.application.task_catalog import TaskCatalog
     from game_automation.portable.domain import (
         ImageMatch,
         ImageSearchSpec,
@@ -247,7 +238,6 @@ def test_shared_resource_merge_preserves_native_target_through_control_entry(
         TargetCatalog,
     )
     from game_automation.portable.domain.point_aliases import NamedImageSearch
-    from game_automation.portable.scripts_manager.catalog import ScriptCatalog
 
     original = function_task(
         "native",
@@ -263,9 +253,9 @@ def test_shared_resource_merge_preserves_native_target_through_control_entry(
         )
     )
     monkeypatch.setattr(
-        script_resources, "load_shared_script_resources", lambda root: shared
+        script_resources, "load_shared_task_resources", lambda root: shared
     )
-    merged = script_resources.script_with_shared_resources(original, shared)
+    merged = script_resources.task_with_shared_resources(original, shared)
     assert merged.target is original.target
 
     class ImageFactory(Factory):
@@ -289,14 +279,14 @@ def test_shared_resource_merge_preserves_native_target_through_control_entry(
 
     factory = ImageFactory()
     app = LocalControlApplication(
-        catalog=ScriptCatalog((original,)),
+        catalog=TaskCatalog((original,)),
         project_root=tmp_path,
         real_runtime_factory=factory,
     )
-    assert app.run_named_script("native", dry_run=False).finish_reason == "completed"
-    app.start_named_script("native", dry_run=False)
-    assert app.wait_for_script_stop(2)
-    assert app.current_script_run().finish_reason == "completed"
+    assert app.run_named_task("native", dry_run=False).finish_reason == "completed"
+    app.start_named_task("native", dry_run=False)
+    assert app.wait_for_task_stop(2)
+    assert app.current_task_run().finish_reason == "completed"
     assert factory.device.clicks == [Point(105, 206), Point(105, 206)]
 
 
@@ -326,7 +316,7 @@ def test_cancellation_arriving_during_close_wins_even_if_close_also_fails(fail_c
                     raise RuntimeError("stop failed")
 
     factory = ClosingFactory()
-    result = run_script(
+    result = run_task(
         script(),
         dry_run=False,
         real_runtime_factory=factory,
@@ -342,7 +332,7 @@ def test_cli_plan_cannot_open_second_native_source_after_cleanup_failure(monkeyp
     """继续普通错误的计划也必须在源清理失败后停止。"""
     from game_automation.platform.local_desktop import composition
     from game_automation.platform.local_desktop.entrypoints import cli
-    from game_automation.portable.application.run_plan import ScriptPlanItem
+    from game_automation.portable.application.run_plan import TaskPlanItem
 
     factories = []
 
@@ -357,8 +347,8 @@ def test_cli_plan_cannot_open_second_native_source_after_cleanup_failure(monkeyp
         cli,
         "_resolve_plan_items",
         lambda args: (
-            ScriptPlanItem("first", script()),
-            ScriptPlanItem("second", script()),
+            TaskPlanItem("first", script()),
+            TaskPlanItem("second", script()),
         ),
     )
     assert cli.main(["run-plan", "first", "second", "--continue-on-error"]) == 1
@@ -380,10 +370,7 @@ def test_cli_native_details_use_window_rule_state_names(tmp_path):
     (assets / "window-states.json").write_text(
         json.dumps({"groups": [{"state": "窗口专用状态"}]})
     )
-    (assets / "screen-states.json").write_text(
-        json.dumps({"groups": [{"state": "旧桌面状态"}]})
-    )
-    assert cli._describe_script(state_script, tmp_path).exit_code == 0
+    assert cli._describe_task(state_script, tmp_path).exit_code == 0
 
 
 def test_background_backend_is_native_and_never_falls_through_to_desktop():
@@ -392,14 +379,11 @@ def test_background_backend_is_native_and_never_falls_through_to_desktop():
         script(), target=replace(script().target, backend="macos-window-background")
     )
     assert background.target.uses_native_window
-    calls = []
-    result = run_script(
-        background, dry_run=False, real_device_factory=lambda: calls.append("desktop")
-    )
+    result = run_task(background, dry_run=False)
     assert result.finish_reason == "setup_failed"
-    assert calls == []
+    assert "desktop fallback is disabled" in result.error_message
     factory = Factory()
-    result = run_script(background, dry_run=False, real_runtime_factory=factory)
+    result = run_task(background, dry_run=False, real_runtime_factory=factory)
     assert result.finish_reason == "completed"
     assert factory.device.clicks == [Point(105, 206)]
 
@@ -412,7 +396,7 @@ def test_background_cli_and_control_read_window_rules(tmp_path):
     from game_automation.portable.application.local_control import (
         LocalControlApplication,
     )
-    from game_automation.portable.scripts_manager.catalog import ScriptCatalog
+    from game_automation.portable.application.task_catalog import TaskCatalog
 
     background = replace(
         script(),
@@ -424,14 +408,11 @@ def test_background_cli_and_control_read_window_rules(tmp_path):
     (assets / "window-states.json").write_text(
         json.dumps({"groups": [{"state": "窗口专用状态"}]})
     )
-    (assets / "screen-states.json").write_text(
-        json.dumps({"groups": [{"state": "旧桌面状态"}]})
-    )
     app = LocalControlApplication(
-        catalog=ScriptCatalog((background,)), project_root=tmp_path
+        catalog=TaskCatalog((background,)), project_root=tmp_path
     )
-    assert app.describe_script("native").exit_code == 0
-    assert cli._describe_script(background, tmp_path).exit_code == 0
+    assert app.describe_task("native").exit_code == 0
+    assert cli._describe_task(background, tmp_path).exit_code == 0
 
 
 def test_native_runtime_control_drives_click_preparation_and_repeat_budget():
@@ -481,7 +462,7 @@ def test_native_runtime_control_drives_click_preparation_and_repeat_budget():
         "        ctx.wait(0.06)",
         target=script().target,
     )
-    result = run_script(timed, dry_run=False, real_runtime_factory=factory)
+    result = run_task(timed, dry_run=False, real_runtime_factory=factory)
     assert result.finish_reason == "timed_out"
     assert factory.closed
     assert factory.device.clicks == [Point(105, 206), Point(105, 206)]

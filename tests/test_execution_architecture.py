@@ -7,7 +7,7 @@
 import ast
 from pathlib import Path
 
-from game_automation.portable.application.script_run import run_script
+from game_automation.portable.application.task_run import run_task
 from game_automation.portable.domain.task import FunctionTask
 
 
@@ -51,7 +51,7 @@ def test_function_task_runs_with_legacy_modules_removed(tmp_path):
         'def run(ctx):\n    """执行一次模拟等待。"""\n    ctx.wait(0)\n',
     )
 
-    result = run_script(task, dry_run=True)
+    result = run_task(task, dry_run=True)
 
     assert result.finish_reason == "completed"
     source_root = Path(__file__).resolve().parents[1] / "src/game_automation/portable"

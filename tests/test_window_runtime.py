@@ -29,9 +29,9 @@ from game_automation.portable.domain import (
     Rect,
 )
 from game_automation.portable.domain.screen_state import FrameProof
-from game_automation.portable.domain.task import ScriptTarget
-from game_automation.portable.engine.cancellation import ScriptCancelledError
-from game_automation.portable.engine.script_requirements import ScriptRequirements
+from game_automation.portable.domain.task import TaskTarget
+from game_automation.portable.engine.cancellation import TaskCancelledError
+from game_automation.portable.engine.runtime_requirements import RuntimeRequirements
 from game_automation.portable.preparation.models import DesktopWindow
 
 
@@ -164,7 +164,7 @@ def test_cancelled_wait_still_allows_owned_source_cleanup():
     """取消在捕获前生效，关闭不再次受取消拦截。"""
     token = SimpleNamespace(is_cancelled=lambda: True)
     session, source, _, _ = setup_session(cancellation=token)
-    with pytest.raises(ScriptCancelledError):
+    with pytest.raises(TaskCancelledError):
         session.screenshot()
     session.close()
     session.close()
@@ -250,12 +250,12 @@ def test_factory_retains_lease_when_capture_shutdown_fails(monkeypatch, tmp_path
         source_factory=lambda *args, **kwargs: source,
         session_factory=Session,
     )
-    target = ScriptTarget("Example", "Game", 80, 60, backend="macos-window")
+    target = TaskTarget("Example", "Game", 80, 60, backend="macos-window")
     with pytest.raises(RuntimeError, match="stop barrier"):
-        with factory.open(target, ScriptRequirements(), None, None):
+        with factory.open(target, RuntimeRequirements(), None, None):
             pass
     with pytest.raises(RuntimeError, match="重新启动后台"):
-        with factory.open(target, ScriptRequirements(), None, None):
+        with factory.open(target, RuntimeRequirements(), None, None):
             pass
     assert source.closed == 1
 
@@ -295,9 +295,9 @@ def test_capture_cancellation_crosses_template_and_state_boundary_unchanged():
         cancellation=SimpleNamespace(is_cancelled=lambda: True)
     )
     template = ImageTemplate("unused.png")
-    with pytest.raises(ScriptCancelledError):
+    with pytest.raises(TaskCancelledError):
         WindowImageLocator(session).locate(template)
-    with pytest.raises(ScriptCancelledError):
+    with pytest.raises(TaskCancelledError):
         WindowStateReader(session).read_current_state()
     assert source.captures == 0
 
@@ -396,13 +396,13 @@ def test_factory_uses_new_owned_source_for_each_successful_or_cancelled_run(
         binding_factory=Binding,
         source_factory=source_factory,
     )
-    target = ScriptTarget("Example", "Game", 80, 60, backend="macos-window")
-    with factory.open(target, ScriptRequirements(), None, None) as first:
+    target = TaskTarget("Example", "Game", 80, 60, backend="macos-window")
+    with factory.open(target, RuntimeRequirements(), None, None) as first:
         assert first.window == AreaWindow(candidate.rect)
-    with pytest.raises(ScriptCancelledError):
-        with factory.open(target, ScriptRequirements(), None, None):
-            raise ScriptCancelledError("cancel")
-    with factory.open(target, ScriptRequirements(), None, None):
+    with pytest.raises(TaskCancelledError):
+        with factory.open(target, RuntimeRequirements(), None, None):
+            raise TaskCancelledError("cancel")
+    with factory.open(target, RuntimeRequirements(), None, None):
         pass
     assert len(sources) == 3
     assert all(source.closed == 1 for source in sources)
@@ -441,15 +441,15 @@ def test_process_lease_blocks_second_factory_and_workspace_after_failed_close(
     }
     first = MacOSRuntimeFactory(tmp_path / "workspace-a", **kwargs)
     second = MacOSRuntimeFactory(tmp_path / "workspace-b", **kwargs)
-    target = ScriptTarget("Example", "Game", 80, 60, backend="macos-window")
+    target = TaskTarget("Example", "Game", 80, 60, backend="macos-window")
     with pytest.raises(RuntimeError, match="stop barrier"):
-        with first.open(target, ScriptRequirements(), None, None):
+        with first.open(target, RuntimeRequirements(), None, None):
             pass
     del first
     gc.collect()
     assert refs[0]() is not None
     with pytest.raises(RuntimeError, match="重新启动后台"):
-        with second.open(target, ScriptRequirements(), None, None):
+        with second.open(target, RuntimeRequirements(), None, None):
             pass
     assert len(refs) == 1
 
@@ -472,7 +472,7 @@ def test_session_selects_isolated_background_device_with_same_visual_source(
 
     monkeypatch.setattr(module, "MacOSBackgroundWindowInputDevice", Device)
     ports = session.ports(
-        ScriptRequirements(
+        RuntimeRequirements(
             needs_color_reader=True,
             needs_image_locator=True,
             needs_screen_state_reader=True,

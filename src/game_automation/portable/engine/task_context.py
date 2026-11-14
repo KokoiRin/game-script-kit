@@ -29,7 +29,7 @@ from game_automation.portable.domain.targets import ImageTarget
 from game_automation.portable.domain.windows import Window
 from game_automation.portable.engine.cancellation import (
     RunCancelled,
-    ScriptCancelledError,
+    TaskCancelledError,
 )
 from game_automation.portable.engine.image_query import (
     ImageSearchSource,
@@ -46,8 +46,8 @@ from game_automation.portable.engine.ports import (
     ScreenStateReader,
 )
 from game_automation.portable.engine.run_events import (
-    ScriptRunEvent,
-    emit_script_run_event,
+    TaskRunEvent,
+    emit_task_run_event,
 )
 
 _Result = TypeVar("_Result")
@@ -366,7 +366,7 @@ class TaskContext:
             seconds = min(seconds, max(0.0, expiry.expires_at - self.clock()))
         try:
             self.device.wait(seconds)
-        except ScriptCancelledError as exc:
+        except TaskCancelledError as exc:
             raise RunCancelled(str(exc)) from exc
         self.check_cancelled(check_guard=False)
 
@@ -434,7 +434,7 @@ class TaskContext:
         try:
             yield path
             self.check_cancelled(check_guard=False)
-        except ScriptCancelledError as exc:
+        except TaskCancelledError as exc:
             raise RunCancelled(str(exc)) from exc
         except TaskTimeout as exc:
             self._check_cancellation()
@@ -482,9 +482,9 @@ class TaskContext:
     ) -> None:
         """按需输出已经发生的操作或作用域事件。"""
         if self.emit_step_events:
-            emit_script_run_event(
+            emit_task_run_event(
                 self.logger,
-                ScriptRunEvent(
+                TaskRunEvent(
                     event_type,
                     step_path,
                     step_type,
@@ -499,7 +499,7 @@ class TaskContext:
             self.cancellation_token is not None
             and self.cancellation_token.is_cancelled()
         ):
-            raise RunCancelled("script run cancelled")
+            raise RunCancelled("task run cancelled")
 
     def _earliest_deadline(self) -> _Scope | None:
         """选取最早到期的作用域，等时刻时保留外层拥有者。"""
@@ -531,7 +531,7 @@ class TaskContext:
                 if self.runtime_control is None
                 else self.runtime_control.execute_input(operation)
             )
-        except ScriptCancelledError as exc:
+        except TaskCancelledError as exc:
             raise RunCancelled(str(exc)) from exc
 
     def _send_hotkey(self, keys: tuple[str, ...], path: str) -> None:

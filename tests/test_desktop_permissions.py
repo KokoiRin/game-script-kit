@@ -96,22 +96,22 @@ def test_permission_request_is_rejected_during_script_run(tmp_path, permissions)
     service, calls = permissions
 
     class Control:
-        def list_scripts(self):
+        def list_tasks(self):
             """提供最小脚本查询接口以正常加载控制服务。"""
             return ()
 
-        def list_script_config_errors(self):
+        def list_task_config_errors(self):
             """提供无配置错误的控制服务。"""
             return ()
 
-        def current_script_run(self):
+        def current_task_run(self):
             """模拟运行中的公开会话状态。"""
             return SimpleNamespace(running=True)
 
-        def stop_running_script(self):
+        def stop_running_task(self):
             """接受会话关闭请求而不访问设备。"""
 
-        def wait_for_script_stop(self, timeout):
+        def wait_for_task_stop(self, timeout):
             """模拟关闭时已回收线程。"""
             return True
 

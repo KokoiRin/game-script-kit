@@ -9,21 +9,21 @@ from pathlib import Path
 
 import pytest
 
-from game_automation.portable.application.project_scripts import (
-    load_project_script_catalog_result,
+from game_automation.portable.application.project_tasks import (
+    load_project_task_catalog_result,
 )
-from game_automation.portable.application.script_dependencies import (
-    validate_script_resource_references,
+from game_automation.portable.application.task_catalog import TaskCatalog
+from game_automation.portable.application.task_dependencies import (
+    validate_task_resource_references,
 )
-from game_automation.portable.application.script_details import describe_script_details
-from game_automation.portable.application.script_resources import (
-    prepare_script_resources,
+from game_automation.portable.application.task_details import describe_task_details
+from game_automation.portable.application.task_resources import (
+    prepare_task_resources,
 )
 from game_automation.portable.domain.task import FunctionTask
-from game_automation.portable.engine.script_requirements import (
-    inspect_script_requirements,
+from game_automation.portable.engine.runtime_requirements import (
+    inspect_runtime_requirements,
 )
-from game_automation.portable.scripts_manager.catalog import ScriptCatalog
 
 
 def write_task(
@@ -43,12 +43,12 @@ def write_task(
 
 def discover(root: Path):
     """只使用外部工作区文件构建脚本目录。"""
-    return load_project_script_catalog_result(root, base_catalog=ScriptCatalog(()))
+    return load_project_task_catalog_result(root, base_catalog=TaskCatalog(()))
 
 
 def details(task: FunctionTask, root: Path, *, states: tuple[str, ...] = ()):
     """通过共享详情入口读取任务的声明依赖。"""
-    return describe_script_details(
+    return describe_task_details(
         task,
         asset_root=root / "assets",
         supported_image_suffixes=frozenset({".png"}),
@@ -71,7 +71,7 @@ def test_catalog_and_details_read_function_task_without_executing_module(
     task = result.catalog.get("static")
     description = details(task, tmp_path)
 
-    assert result.script_config_errors == ()
+    assert result.task_config_errors == ()
     assert isinstance(task, FunctionTask)
     assert task.source_path == path.resolve()
     assert description.exit_code == 0
@@ -135,9 +135,9 @@ def test_bad_python_task_is_isolated_from_valid_tasks(
     result = discover(tmp_path)
 
     assert result.catalog.list_names() == ("good",)
-    assert len(result.script_config_errors) == 1
-    assert result.script_config_errors[0].file == "bad.py"
-    assert message in result.script_config_errors[0].message
+    assert len(result.task_config_errors) == 1
+    assert result.task_config_errors[0].file == "bad.py"
+    assert message in result.task_config_errors[0].message
 
 
 def test_helper_files_are_not_listed_or_imported(tmp_path) -> None:
@@ -164,7 +164,7 @@ def test_nested_generator_does_not_change_run_entrypoint_kind(tmp_path) -> None:
     result = discover(tmp_path)
 
     assert result.catalog.list_names() == ("nested",)
-    assert result.script_config_errors == ()
+    assert result.task_config_errors == ()
 
 
 def test_task_metadata_accepts_literal_type_annotation(tmp_path) -> None:
@@ -188,8 +188,7 @@ def test_function_task_survives_unsupported_json_file(tmp_path) -> None:
     result = discover(tmp_path)
 
     assert result.catalog.list_names() == ("same",)
-    assert len(result.script_config_errors) == 1
-    assert "JSON task format is unsupported" in result.script_config_errors[0].message
+    assert result.task_config_errors == ()
 
 
 def test_local_resources_automatically_supply_declared_dependencies(tmp_path) -> None:
@@ -226,7 +225,7 @@ def test_local_resources_automatically_supply_declared_dependencies(tmp_path) ->
 
     task = discover(tmp_path).catalog.get("resources")
     description = details(task, tmp_path, states=("home",))
-    requirements = inspect_script_requirements(task)
+    requirements = inspect_runtime_requirements(task)
 
     assert task.requires.points == ("open",)
     assert task.requires.images == ("button",)
@@ -239,7 +238,7 @@ def test_local_resources_automatically_supply_declared_dependencies(tmp_path) ->
     assert requirements.needs_image_locator
     assert requirements.needs_screen_state_reader
     assert requirements.needs_color_reader
-    validate_script_resource_references(task)
+    validate_task_resource_references(task)
 
 
 def test_missing_references_are_visible_in_details_and_rejected_before_run(
@@ -266,7 +265,7 @@ def test_missing_references_are_visible_in_details_and_rejected_before_run(
     assert len(description.readiness) == 4
     assert {status for _, status, _ in description.readiness} == {"missing"}
     with pytest.raises(LookupError, match="unknown"):
-        validate_script_resource_references(task)
+        validate_task_resource_references(task)
 
 
 def test_function_task_can_resolve_shared_searches(tmp_path) -> None:
@@ -274,7 +273,7 @@ def test_function_task_can_resolve_shared_searches(tmp_path) -> None:
     asset_root = tmp_path / "assets"
     asset_root.mkdir()
     (asset_root / "button.png").write_bytes(b"template")
-    (asset_root / "screen-states.json").write_text(
+    (asset_root / "window-states.json").write_text(
         json.dumps(
             {
                 "groups": [
@@ -289,9 +288,9 @@ def test_function_task_can_resolve_shared_searches(tmp_path) -> None:
     )
     write_task(tmp_path, {"name": "shared", "requires": {"searches": ["shared"]}})
 
-    task = prepare_script_resources(discover(tmp_path).catalog.get("shared"), tmp_path)
+    task = prepare_task_resources(discover(tmp_path).catalog.get("shared"), tmp_path)
 
-    validate_script_resource_references(task)
+    validate_task_resource_references(task)
     assert details(task, tmp_path).image_dependencies == (
         str(asset_root / "button.png"),
     )
@@ -302,4 +301,4 @@ def test_missing_script_directory_returns_empty_result(tmp_path) -> None:
     result = discover(tmp_path)
 
     assert result.catalog.list_names() == ()
-    assert result.script_config_errors == ()
+    assert result.task_config_errors == ()

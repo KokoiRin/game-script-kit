@@ -1,7 +1,7 @@
-"""定义脚本执行窗口，以及窗口内坐标到屏幕坐标的解析规则。
+"""定义任务窗口，以及窗口内坐标到已绑定窗口屏幕位置的解析规则。
 
-本 module 只负责窗口坐标解析的领域规则；它不读写真实窗口状态，
-也不负责寻找或激活应用窗口。
+本 module 只负责坐标解析；它不读写真实窗口，也不选择或激活应用。
+真实运行由原生窗口会话提供 AreaWindow。未绑定窗口只用于不接触桌面的 dry-run。
 """
 
 from __future__ import annotations
@@ -14,20 +14,22 @@ from game_automation.portable.domain.geometry import Point, Rect
 
 class Window(Protocol):
     def resolve(self, point: Point) -> Point:
-        """把窗口内点解析为屏幕坐标点。"""
+        """把窗口内点解析为本次运行使用的坐标点。"""
 
     def resolve_region(self, region: Rect | None) -> Rect | None:
-        """把可选窗口内区域解析为屏幕图片搜索区域。"""
+        """把可选窗口内区域解析为本次运行的图片搜索区域。"""
 
 
 @dataclass(frozen=True, slots=True)
-class ScreenWindow:
+class UnboundWindow:
+    """dry-run 没有活动窗口时按作者写下的窗口相对坐标原样传递。"""
+
     def resolve(self, point: Point) -> Point:
-        """屏幕窗口直接使用传入点作为屏幕坐标。"""
+        """不把点位映射到屏幕，避免 dry-run 引入第二套绝对坐标。"""
         return point
 
     def resolve_region(self, region: Rect | None) -> Rect | None:
-        """屏幕窗口保持整屏默认或显式屏幕搜索区域。"""
+        """保留作者声明的搜索区域；没有区域时不扩展成整屏。"""
         return region
 
 

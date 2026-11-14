@@ -1,7 +1,7 @@
 """star 命令行入口。
 
-本 module 负责解析命令行参数、选择本地工作区并打印用户可见结果；脚本运行和
-本地 UI 委托应用/入口编排层，recorder 子命令保留终端工具组装但不解释脚本步骤。
+本 module 负责解析命令行参数、选择本地工作区并打印用户可见结果；任务运行和
+本地 UI 委托应用/入口编排层，recorder 子命令保留终端工具组装但不解释任务步骤。
 """
 
 from __future__ import annotations
@@ -13,71 +13,68 @@ from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
 from game_automation.platform.local_desktop.composition import (
-    run_script_on_local_desktop,
+    run_task_on_local_desktop,
 )
 from game_automation.portable.application.project_assets import (
     IMAGE_ASSET_SUFFIXES,
     PROJECT_ROOT,
     image_asset_root,
 )
-from game_automation.portable.application.project_scripts import (
-    ProjectScriptCatalogResult,
-    load_project_script_catalog_result,
+from game_automation.portable.application.project_tasks import (
+    ProjectTaskCatalogResult,
+    load_project_task_catalog_result,
 )
 from game_automation.portable.application.run_plan import (
-    ScriptPlanItem,
-    ScriptPlanItemResult,
-    ScriptPlanResult,
-    ScriptPlanScriptResult,
-    run_script_plan,
+    TaskPlanItem,
+    TaskPlanItemResult,
+    TaskPlanResult,
+    TaskPlanRunResult,
+    run_task_plan,
 )
 from game_automation.portable.application.screen_state_config import (
     load_screen_state_names,
 )
-from game_automation.portable.application.script_details import (
-    ScriptDetailsResult,
-    describe_script_details,
+from game_automation.portable.application.task_catalog import TaskNotFoundError
+from game_automation.portable.application.task_details import (
+    TaskDetailsResult,
+    describe_task_details,
 )
-from game_automation.portable.application.script_resources import (
-    prepare_script_resources,
-    script_state_config_path,
+from game_automation.portable.application.task_resources import (
+    prepare_task_resources,
+    task_state_config_path,
 )
-from game_automation.portable.scripts_manager.catalog import ScriptNotFoundError
 
 
 def _run_list(args: argparse.Namespace) -> int:
-    """列出所有可用脚本。"""
-    catalog_result = _load_cli_script_catalog_result(
+    """列出所有可用任务。"""
+    catalog_result = _load_cli_task_catalog_result(
         args.project_root,
     )
     for name in catalog_result.catalog.list_names():
         print(name)
-    _print_script_config_errors(catalog_result)
+    _print_task_config_errors(catalog_result)
     return 0
 
 
-def _run_script(args: argparse.Namespace) -> int:
-    """按名称运行脚本。"""
-    target_application_error = _validate_target_application_args(args)
-    if target_application_error != 0:
-        return target_application_error
+def _run_task(args: argparse.Namespace) -> int:
+    """按名称运行任务。"""
     if args.dry_run_script_images and not args.dry_run:
         print("--dry-run-script-images requires --dry-run", file=sys.stderr)
         return 2
     try:
-        script = _load_cli_script_catalog_result(
+        task = _load_cli_task_catalog_result(
             args.project_root,
         ).catalog.get(args.name)
-    except ScriptNotFoundError as exc:
+    except TaskNotFoundError as exc:
         print(exc, file=sys.stderr)
         return 1
     except ValueError as exc:
-        print(f"script configuration failed: {exc}", file=sys.stderr)
+        print(f"task configuration failed: {exc}", file=sys.stderr)
         return 2
     try:
-        script = prepare_script_resources(script, args.project_root)
+        task = prepare_task_resources(task, args.project_root)
     except (LookupError, ValueError) as exc:
-        print(f"script resource configuration failed: {exc}", file=sys.stderr)
+        print(f"task resource configuration failed: {exc}", file=sys.stderr)
         return 2
 
     dry_run_images = _resolve_dry_run_images(args.dry_run_image, args.project_root)
@@ -85,22 +82,20 @@ def _run_script(args: argparse.Namespace) -> int:
         try:
             dry_run_images = _merge_dry_run_images(
                 dry_run_images,
-                _describe_script(script, args.project_root).image_dependencies,
+                _describe_task(task, args.project_root).image_dependencies,
             )
         except (LookupError, ValueError) as exc:
-            print(f"script details configuration failed: {exc}", file=sys.stderr)
+            print(f"task details configuration failed: {exc}", file=sys.stderr)
             return 2
 
     dry_run_screen_state = args.dry_run_screen_state
 
-    result = run_script_on_local_desktop(
-        script,
+    result = run_task_on_local_desktop(
+        task,
         dry_run=args.dry_run,
         dry_run_color=args.dry_run_color,
         dry_run_images=dry_run_images,
         dry_run_screen_state=dry_run_screen_state,
-        target_application=args.target_app,
-        target_window_title=args.target_window_title,
         project_root=args.project_root,
     )
     if result.error_message is not None:
@@ -109,10 +104,7 @@ def _run_script(args: argparse.Namespace) -> int:
 
 
 def _run_plan(args: argparse.Namespace) -> int:
-    """按用户给定顺序运行一轮脚本计划。"""
-    target_application_error = _validate_target_application_args(args)
-    if target_application_error != 0:
-        return target_application_error
+    """按用户给定顺序运行一轮任务计划。"""
     if args.dry_run_script_images and not args.dry_run:
         print("--dry-run-script-images requires --dry-run", file=sys.stderr)
         return 2
@@ -122,15 +114,13 @@ def _run_plan(args: argparse.Namespace) -> int:
         return plan_items_result
     dry_run_screen_state = args.dry_run_screen_state
 
-    result = run_script_plan(
+    result = run_task_plan(
         plan_items_result,
         run_item=lambda item: _run_plan_item(
             item,
             dry_run=args.dry_run,
             dry_run_color=args.dry_run_color,
             dry_run_screen_state=dry_run_screen_state,
-            target_application=args.target_app,
-            target_window_title=args.target_window_title,
             project_root=args.project_root,
         ),
         continue_on_error=args.continue_on_error,
@@ -139,71 +129,67 @@ def _run_plan(args: argparse.Namespace) -> int:
     return result.exit_code
 
 
-def _resolve_plan_items(args: argparse.Namespace) -> tuple[ScriptPlanItem, ...] | int:
-    """解析 Run Plan 中每个脚本名和该脚本自己的 dry-run 图片依赖。"""
-    catalog_result = _load_cli_script_catalog_result(
+def _resolve_plan_items(args: argparse.Namespace) -> tuple[TaskPlanItem, ...] | int:
+    """解析 Run Plan 中每个任务名和该任务自己的 dry-run 图片依赖。"""
+    catalog_result = _load_cli_task_catalog_result(
         args.project_root,
     )
-    scripts = []
-    for script_name in args.names:
+    tasks = []
+    for task_name in args.names:
         try:
-            script = catalog_result.catalog.get(script_name)
-        except ScriptNotFoundError as exc:
+            task = catalog_result.catalog.get(task_name)
+        except TaskNotFoundError as exc:
             print(exc, file=sys.stderr)
             return 1
         except ValueError as exc:
-            print(f"script configuration failed: {exc}", file=sys.stderr)
+            print(f"task configuration failed: {exc}", file=sys.stderr)
             return 2
-        scripts.append((script_name, script))
-    items: list[ScriptPlanItem] = []
-    for script_name, script in scripts:
+        tasks.append((task_name, task))
+    items: list[TaskPlanItem] = []
+    for task_name, task in tasks:
         try:
-            script = prepare_script_resources(script, args.project_root)
+            task = prepare_task_resources(task, args.project_root)
         except (LookupError, ValueError) as exc:
-            print(f"script resource configuration failed: {exc}", file=sys.stderr)
+            print(f"task resource configuration failed: {exc}", file=sys.stderr)
             return 2
         dry_run_images = _resolve_dry_run_images(args.dry_run_image, args.project_root)
         if args.dry_run_script_images:
             try:
                 dry_run_images = _merge_dry_run_images(
                     dry_run_images,
-                    _describe_script(script, args.project_root).image_dependencies,
+                    _describe_task(task, args.project_root).image_dependencies,
                 )
             except (LookupError, ValueError) as exc:
-                print(f"script details configuration failed: {exc}", file=sys.stderr)
+                print(f"task details configuration failed: {exc}", file=sys.stderr)
                 return 2
-        items.append(ScriptPlanItem(script_name, script, dry_run_images=dry_run_images))
+        items.append(TaskPlanItem(task_name, task, dry_run_images=dry_run_images))
     return tuple(items)
 
 
 def _run_plan_item(
-    item: ScriptPlanItem,
+    item: TaskPlanItem,
     *,
     dry_run: bool,
     dry_run_color: str,
     dry_run_screen_state: str,
-    target_application: str | None,
-    target_window_title: str | None,
     project_root: Path,
-) -> ScriptPlanScriptResult:
-    """运行计划中的单个脚本并捕获输出，供计划摘要统一展示。"""
+) -> TaskPlanRunResult:
+    """运行计划中的单个任务并捕获输出，供计划摘要统一展示。"""
     stdout = io.StringIO()
     stderr = io.StringIO()
     with redirect_stdout(stdout), redirect_stderr(stderr):
-        result = run_script_on_local_desktop(
-            item.script,
+        result = run_task_on_local_desktop(
+            item.task,
             dry_run=dry_run,
             dry_run_color=dry_run_color,
             dry_run_images=item.dry_run_images,
             dry_run_screen_state=dry_run_screen_state,
-            target_application=target_application,
-            target_window_title=target_window_title,
             project_root=project_root,
         )
     if result.error_message is not None:
         stderr.write(result.error_message)
         stderr.write("\n")
-    return ScriptPlanScriptResult(
+    return TaskPlanRunResult(
         exit_code=result.exit_code,
         finish_reason=result.finish_reason,
         stdout=stdout.getvalue(),
@@ -211,8 +197,8 @@ def _run_plan_item(
     )
 
 
-def _print_run_plan_result(result: ScriptPlanResult) -> None:
-    """打印一轮计划摘要和每个脚本捕获到的输出。"""
+def _print_run_plan_result(result: TaskPlanResult) -> None:
+    """打印一轮计划摘要和每个任务捕获到的输出。"""
     print(
         f"Run Plan: exit_code={result.exit_code} finish_reason={result.finish_reason}"
     )
@@ -220,10 +206,10 @@ def _print_run_plan_result(result: ScriptPlanResult) -> None:
         _print_run_plan_item_result(item)
 
 
-def _print_run_plan_item_result(item: ScriptPlanItemResult) -> None:
-    """打印计划中单个脚本的摘要和输出。"""
+def _print_run_plan_item_result(item: TaskPlanItemResult) -> None:
+    """打印计划中单个任务的摘要和输出。"""
     print(
-        f"[{item.index}] {item.script_name}: "
+        f"[{item.index}] {item.task_name}: "
         f"exit_code={item.exit_code} finish_reason={item.finish_reason}"
     )
     if item.stdout:
@@ -232,60 +218,49 @@ def _print_run_plan_item_result(item: ScriptPlanItemResult) -> None:
         print(item.stderr, file=sys.stderr, end="")
 
 
-def _validate_target_application_args(args: argparse.Namespace) -> int:
-    """拒绝要求无副作用的 dry-run 同时激活真实应用。"""
-    if args.target_window_title is not None and args.target_app is None:
-        print("--target-window-title requires --target-app", file=sys.stderr)
-        return 2
-    if args.target_app is not None and args.dry_run:
-        print("--target-app cannot be used with --dry-run", file=sys.stderr)
-        return 2
-    return 0
-
-
 def _run_details(args: argparse.Namespace) -> int:
-    """按名称展示脚本详情。"""
+    """按名称展示任务详情。"""
     try:
-        script = _load_cli_script_catalog_result(
+        task = _load_cli_task_catalog_result(
             args.project_root,
         ).catalog.get(args.name)
-    except ScriptNotFoundError as exc:
+    except TaskNotFoundError as exc:
         print(exc, file=sys.stderr)
         return 1
     except ValueError as exc:
-        print(f"script configuration failed: {exc}", file=sys.stderr)
+        print(f"task configuration failed: {exc}", file=sys.stderr)
         return 2
     try:
-        script = prepare_script_resources(script, args.project_root)
-        details = _describe_script(script, args.project_root)
+        task = prepare_task_resources(task, args.project_root)
+        details = _describe_task(task, args.project_root)
     except (LookupError, ValueError) as exc:
-        print(f"script details configuration failed: {exc}", file=sys.stderr)
+        print(f"task details configuration failed: {exc}", file=sys.stderr)
         return 2
-    _print_script_details(details)
+    _print_task_details(details)
     return details.exit_code
 
 
-def _load_cli_script_catalog_result(project_root: Path) -> ProjectScriptCatalogResult:
+def _load_cli_task_catalog_result(project_root: Path) -> ProjectTaskCatalogResult:
     """只从所选工作区发现 Python 任务，并保留逐文件诊断。"""
-    return load_project_script_catalog_result(project_root)
+    return load_project_task_catalog_result(project_root)
 
 
-def _print_script_config_errors(catalog_result: ProjectScriptCatalogResult) -> None:
-    """把文件脚本配置错误写入 stderr，避免污染 stdout 脚本列表。"""
-    if not catalog_result.script_config_errors:
+def _print_task_config_errors(catalog_result: ProjectTaskCatalogResult) -> None:
+    """把任务配置错误写入 stderr，避免污染 stdout 任务列表。"""
+    if not catalog_result.task_config_errors:
         return
-    print("脚本配置错误：", file=sys.stderr)
-    for error in catalog_result.script_config_errors:
+    print("任务配置错误：", file=sys.stderr)
+    for error in catalog_result.task_config_errors:
         print(f"- {error.message}", file=sys.stderr)
 
 
-def _describe_script(script, project_root: Path) -> ScriptDetailsResult:
-    """生成 CLI 复用的脚本详情。"""
-    return describe_script_details(
-        script,
+def _describe_task(task, project_root: Path) -> TaskDetailsResult:
+    """生成 CLI 复用的任务详情。"""
+    return describe_task_details(
+        task,
         asset_root=image_asset_root(project_root),
         supported_image_suffixes=IMAGE_ASSET_SUFFIXES,
-        state_names=_configured_screen_state_names(project_root, script),
+        state_names=_configured_window_state_names(project_root, task),
     )
 
 
@@ -307,23 +282,21 @@ def _merge_dry_run_images(
     return tuple(dict.fromkeys((*explicit_images, *script_images)))
 
 
-def _configured_screen_state_names(
-    project_root: Path, script
-) -> tuple[str, ...] | None:
-    """读取状态配置中的状态名，配置不可用时返回 None。"""
+def _configured_window_state_names(project_root: Path, task) -> tuple[str, ...] | None:
+    """读取窗口规则中的状态名，配置不可用时返回 None。"""
     try:
-        return load_screen_state_names(script_state_config_path(script, project_root))
+        return load_screen_state_names(task_state_config_path(task, project_root))
     except ValueError:
         return None
 
 
-def _print_script_details(details: ScriptDetailsResult) -> None:
-    """把脚本详情结果打印成稳定的 CLI 文本。"""
+def _print_task_details(details: TaskDetailsResult) -> None:
+    """把任务详情结果打印成稳定的 CLI 文本。"""
     if details.stderr:
         print(details.stderr, file=sys.stderr, end="")
     if not details.steps:
         return
-    print(f"脚本：{details.name}")
+    print(f"任务：{details.name}")
     _print_section("任务入口", details.steps)
     _print_section("点位依赖", details.point_dependencies)
     _print_section("图片依赖", details.image_dependencies)
@@ -429,19 +402,19 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--workspace",
         metavar="PATH",
-        help="Use scripts and assets from this existing local workspace (before the command).",
+        help="Use tasks and assets from this existing local workspace (before the command).",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    subparsers.add_parser("list", help="List available scripts.")
+    subparsers.add_parser("list", help="List available tasks.")
 
     details_parser = subparsers.add_parser(
-        "details", help="Show a named script's steps and dependencies."
+        "details", help="Show a named task's entry and dependencies."
     )
-    details_parser.add_argument("name", help="Script name to inspect.")
+    details_parser.add_argument("name", help="Task name to inspect.")
 
-    run_parser = subparsers.add_parser("run", help="Run a named script.")
-    run_parser.add_argument("name", help="Script name to run.")
+    run_parser = subparsers.add_parser("run", help="Run a named task.")
+    run_parser.add_argument("name", help="Task name to run.")
     mode = run_parser.add_mutually_exclusive_group()
     mode.add_argument(
         "--dry-run",
@@ -465,30 +438,18 @@ def main(argv: list[str] | None = None) -> int:
     run_parser.add_argument(
         "--dry-run-script-images",
         action="store_true",
-        help="Treat resolved script image dependencies as found when dry-running.",
+        help="Treat resolved task image dependencies as found when dry-running.",
     )
     run_parser.add_argument(
         "--dry-run-screen-state",
         default="未知",
-        help="Fixed screen state used when dry-running screen-state conditions.",
-    )
-    run_parser.add_argument(
-        "--target-app",
-        default=None,
-        help="Activate this application before a real script run.",
-    )
-    run_parser.add_argument(
-        "--target-window-title",
-        default=None,
-        help="Raise the unique top-level window containing this title and bind its bounds.",
+        help="Fixed state name used when dry-running state conditions.",
     )
 
     run_plan_parser = subparsers.add_parser(
-        "run-plan", help="Run many named scripts in order."
+        "run-plan", help="Run many named tasks in order."
     )
-    run_plan_parser.add_argument(
-        "names", nargs="+", help="Script names to run in order."
-    )
+    run_plan_parser.add_argument("names", nargs="+", help="Task names to run in order.")
     run_plan_mode = run_plan_parser.add_mutually_exclusive_group()
     run_plan_mode.add_argument(
         "--dry-run",
@@ -512,27 +473,17 @@ def main(argv: list[str] | None = None) -> int:
     run_plan_parser.add_argument(
         "--dry-run-script-images",
         action="store_true",
-        help="Treat each script's resolved image dependencies as found when dry-running.",
+        help="Treat each task's resolved image dependencies as found when dry-running.",
     )
     run_plan_parser.add_argument(
         "--dry-run-screen-state",
         default="未知",
-        help="Fixed screen state used when dry-running screen-state conditions.",
+        help="Fixed state name used when dry-running state conditions.",
     )
     run_plan_parser.add_argument(
         "--continue-on-error",
         action="store_true",
-        help="Continue running later scripts after a script returns a non-zero exit code.",
-    )
-    run_plan_parser.add_argument(
-        "--target-app",
-        default=None,
-        help="Activate this application before every real plan item.",
-    )
-    run_plan_parser.add_argument(
-        "--target-window-title",
-        default=None,
-        help="Raise and bind the matching top-level window before every real plan item.",
+        help="Continue running later tasks after a task returns a non-zero exit code.",
     )
 
     recorder_parser = subparsers.add_parser(
@@ -569,7 +520,7 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "details":
         return _run_details(args)
     elif args.command == "run":
-        return _run_script(args)
+        return _run_task(args)
     elif args.command == "run-plan":
         return _run_plan(args)
     elif args.command == "recorder":

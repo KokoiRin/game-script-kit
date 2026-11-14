@@ -42,7 +42,7 @@ def run_function_task(
     def check_cancelled() -> None:
         """用终止信号传播用户取消，让任务中的普通异常捕获继续有效。"""
         if cancellation_token is not None and cancellation_token.is_cancelled():
-            raise RunCancelled("script run cancelled")
+            raise RunCancelled("task run cancelled")
 
     def trace_task(frame, event, arg):
         """只在任务 Python 帧检查终止取消，避免打断平台提交与清理。"""
@@ -87,7 +87,7 @@ def run_function_task(
             raise ValueError("task run(ctx) must complete synchronously")
         check_cancelled()
     except KeyboardInterrupt as exc:
-        raise RunCancelled("script run cancelled") from exc
+        raise RunCancelled("task run cancelled") from exc
     except SystemExit as exc:
         raise RuntimeError(f"task exited with code {exc.code}") from exc
     finally:

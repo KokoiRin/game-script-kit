@@ -1,6 +1,6 @@
 # Star
 
-Star 是本地桌面自动化框架，在 macOS 上执行点击、组合键、识图、条件等待和循环。用户描述任务，Agent 生成和维护脚本。主仓保存框架与通用示例，具体任务保存在仓库外的本地工作区；边界见 [ADR 0006](docs/adr/0006-local-task-workspaces.md)，能力与缺口见 [当前状态](docs/current-state.md)。
+Star 是本地桌面自动化框架，在 macOS 上执行点击、组合键、识图、条件等待和循环。用户描述任务，Agent 用 Python 函数生成和维护任务。主仓保存框架与通用示例，具体任务保存在仓库外的本地工作区；边界见 [ADR 0006](docs/adr/0006-local-task-workspaces.md)，能力与缺口见 [当前状态](docs/current-state.md)。
 
 ## 安装与上手
 
@@ -13,7 +13,7 @@ python3.14 -m venv .venv
 .venv/bin/star run demo --dry-run
 ```
 
-不指定工作区时，使用主仓的通用示例。`scripts/` 保存 Python 函数任务和粘贴示例，具体业务任务由外部工作区保存和维护。
+不指定工作区时，使用主仓的通用示例。`scripts/` 保存 Python 函数任务，具体业务任务由外部工作区保存和维护。真实运行需要任务声明原生窗口目标；下面的上手命令使用 dry-run。
 
 ## macOS 原生应用
 
@@ -48,7 +48,7 @@ open ~/Applications/Star.app
 my-tasks/
 ├── scripts/                 # Python 函数任务
 ├── assets/                  # 模板图片，可分子目录
-│   └── screen-states.json   # 按需配置的状态与共享资源
+│   └── window-states.json   # 窗口规则、状态与共享搜索
 └── …                        # 任务说明、运行记录与证据
 ```
 
@@ -64,23 +64,23 @@ cp scripts/paste.py ~/StarWorkspaces/my-tasks/scripts/
 .venv/bin/star --workspace ~/StarWorkspaces/my-tasks ui
 ```
 
-`--workspace` 是全局参数，放在 `list/details/run/run-plan/ui` 之前。显式指定后加载该根 `scripts/` 中的 Python 任务，并使用同根 `assets/`、状态配置和共享资源，不混入内置或主仓示例。任务资料需单独备份。
+`--workspace` 是全局参数，放在 `list/details/run/run-plan/ui` 之前。显式指定后加载该根 `scripts/` 中的 Python 任务，并使用同根 `assets/` 与 `window-states.json`，不混入内置或主仓示例。任务资料需单独备份。
 
-原生应用显示当前工作区。切换目录时先回收旧后台，再启动绑定新目录的后台；同一工作区只允许一个后台。运行页提供脚本详情、模拟或真实运行、停止和运行记录；修改脚本后点击“重新加载”。旧 `--host/--port/--no-open` 网页参数已移除。
+原生应用显示当前工作区。切换目录时先回收旧后台，再启动绑定新目录的后台；同一工作区只允许一个后台。运行页提供任务详情、模拟或真实运行、停止和运行记录；修改任务后点击“重新加载”。旧 `--host/--port/--no-open` 网页参数已移除。
 
 ## 运行与停止
 
-先模拟检查步骤，再执行真实操作：
+先模拟检查路径，再在声明了原生窗口目标的任务上执行真实操作：
 
 ```bash
-.venv/bin/star --workspace ~/StarWorkspaces/my-tasks run 粘贴
+.venv/bin/star --workspace ~/StarWorkspaces/my-tasks run 粘贴 --dry-run
 ```
 
-粘贴示例等待 3 秒后执行 Command+V；先复制内容，再在等待期间切到目标输入框。动作发出不保证应用接受内容。真实运行需要 macOS“辅助功能”权限，识图和取色还需要“屏幕录制”权限。
+粘贴示例等待 3 秒后执行 Command+V。真实运行会打开任务 `target` 声明的 macOS 窗口会话，需要 macOS“辅助功能”权限，识图和取色还需要“屏幕录制”权限。没有 `macos-window` 或 `macos-window-background` 目标时，真实运行直接失败。动作发出不保证应用接受内容。
 
-运行前会校验声明的点位、图片、搜索和区域依赖；未定义引用返回 `configuration_failed`，不会先执行前序动作。`details` 检出缺失依赖时返回退出码 2，仍展示入口与检查明细。模拟运行不要求模板文件实际存在，但资源别名必须已定义。
+运行前会校验声明的点位、图片、搜索和区域依赖；未定义引用返回 `configuration_failed`，不会先执行前序动作。`details` 检出缺失依赖时返回退出码 2，仍展示入口与检查明细。模拟运行不要求模板文件实际存在，但资源别名必须已定义。状态名来自 `assets/window-states.json`。
 
-模拟运行不读取或操作真实桌面。可指定固定颜色、图片集合和状态，例如在通用示例模式下：
+模拟运行不读取或操作真实桌面，也不要求活动窗口。可指定固定颜色、图片集合和状态，例如在通用示例模式下：
 
 ```bash
 .venv/bin/star run conditional-color-demo --dry-run --dry-run-color '#102030'
@@ -88,29 +88,32 @@ cp scripts/paste.py ~/StarWorkspaces/my-tasks/scripts/
 .venv/bin/star run file-script-demo --dry-run --dry-run-screen-state 主页
 ```
 
-`--dry-run-script-images` 把当前脚本的图片依赖全部模拟为找到；这不能证明真实识图或任务完成。Run Plan 默认在首个未正常结束项后停止，`--continue-on-error` 可继续收集普通失败后的结果；用户取消始终结束整轮，返回 `130/cancelled`，各项结果保留。
+`--dry-run-script-images` 把当前任务的图片依赖全部模拟为找到；这不能证明真实识图或任务完成。Run Plan 默认在首个未正常结束项后停止，`--continue-on-error` 可继续收集普通失败后的结果；用户取消始终结束整轮，返回 `130/cancelled`，各项结果保留。
 手动使用 `--dry-run-image assets/start.png` 时，相对路径基于所选工作区根；绝对路径保持原样。
 
 CLI 按 Ctrl+C 取消；原生运行页点击“停止脚本”。后台真实等待每最多 50ms 检查取消，正在进行的平台调用仍可能延迟响应。关闭原生应用会先请求停止再回收后台，详情与异常回收记录保存在工作区 `.star/desktop.log`。`completed` 表示任务函数正常返回，未捕获的等待超时为 `timed_out`，必需图片缺失为 `stopped_unmet_condition`。退出码 0 本身不证明业务任务完成。
 
 ## 目标窗口
 
-CLI 可在真实运行前激活应用，并按标题绑定唯一的可见顶层窗口：
+真实运行使用任务里的 `target`，不使用命令行覆盖：
 
-```bash
-.venv/bin/star --workspace ~/StarWorkspaces/my-tasks run 粘贴 \
-  --target-app TextEdit --target-window-title "目标文档标题"
+```python
+"target": {
+    "application": "Example",
+    "window_title": "Example window",
+    "width": 856,
+    "height": 674,
+    "backend": "macos-window",
+}
 ```
 
-绑定后，点位按窗口左上角偏移，默认图片搜索限制在窗口内。Run Plan 在每个脚本开始前重新读取窗口位置。`--target-window-title` 要求同时指定 `--target-app`；目标应用参数不能与 `--dry-run` 同用。
-
-控制台尚未接入目标窗口选择。状态配置的区域仍是屏幕绝对坐标，不随窗口移动；模板也需要匹配当前缩放和主题。
+点位和搜索区域相对该窗口。会话开始时核对唯一可见窗口的逻辑尺寸，并与 `window-states.json` 的采集尺寸一致。`macos-window-background` 是同一窗口会话上的后台点击试验。模板仍需要匹配采集时的缩放和主题。
 
 ## 实时识别窗口状态
 
 在素材准备页登记状态素材及搜索范围，再进入“实时识别”页选择窗口，点击“开始观察”。支持每秒 1、2 或 5 次采样、连续帧确认、每条素材的证据及状态变化记录。停止、截图失败和过期结果不输出有效状态。
 
-窗口规则与素材保存在所选任务工作区。首次使用流程、坐标约定和限制见 [原生应用说明](native/StarDesktop/README.md#登记素材并开始实时识别)。观察保持只读，暂不驱动脚本动作。
+窗口规则与素材保存在所选任务工作区的 `assets/window-states.json`。首次使用流程、坐标约定和限制见 [原生应用说明](native/StarDesktop/README.md#登记素材并开始实时识别)。观察保持只读，暂不驱动任务动作。真实运行在观察停止后用独立会话读取同一份规则。
 
 ## 创建和维护任务
 
@@ -124,7 +127,7 @@ mkdir -p ~/StarWorkspaces/my-tasks
 填写目标应用名，读取并选择窗口，然后截取画面。截图会切换目标应用，完成后原生壳回到前台；点击冻结画面获取窗口相对点位，拖动框选后填写名称保存模板。
 模板写入该工作区的 `assets/<名称>.png`，界面给出可复制的资源片段供 Agent 生成脚本；当前不自动写入脚本或状态配置，重名模板不会覆盖。
 
-准备与执行用例仍独立，在同一个原生壳组合；只有进入运行功能才加载脚本目录，运行时禁止并发操作素材。`prepare` 要求显式工作区。窗口相对点位运行时仍须通过 CLI 显式传递 `--target-app/--target-window-title`，准备选窗不会自动绑定运行目标。
+准备与执行用例仍独立，在同一个原生壳组合；只有进入运行功能才加载任务目录，运行时禁止并发操作素材。`prepare` 要求显式工作区。窗口相对点位由任务 `target` 声明，准备选窗不会自动绑定运行目标。
 
 当前是手动冻结截图，支持主屏幕范围内的 macOS 窗口；系统需授予辅助功能与屏幕录制权限。新截图会使旧帧框选失效，多显示器、持续画面和状态驱动仍待扩展；设计见 [ADR 0007](docs/adr/0007-preparation-and-execution.md)。
 

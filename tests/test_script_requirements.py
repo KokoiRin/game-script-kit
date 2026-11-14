@@ -11,8 +11,8 @@ from game_automation.portable.application.function_task_loader import (
     parse_function_task_source,
 )
 from game_automation.portable.domain.task import FunctionTask, TaskRequirements
-from game_automation.portable.engine.script_requirements import (
-    inspect_script_requirements,
+from game_automation.portable.engine.runtime_requirements import (
+    inspect_runtime_requirements,
 )
 
 
@@ -37,7 +37,7 @@ def test_declared_capabilities_select_runtime_ports(requires, expected):
         "ports", Path("ports.py"), "def run(ctx): pass", requires=requires
     )
 
-    result = inspect_script_requirements(task)
+    result = inspect_runtime_requirements(task)
 
     assert (
         result.needs_color_reader,
@@ -59,7 +59,7 @@ def run(ctx):
         source, path=tmp_path / "task.py", asset_root=tmp_path
     )
 
-    assert inspect_script_requirements(task).needs_image_locator
+    assert inspect_runtime_requirements(task).needs_image_locator
     assert task.requires.images == ("button",)
     assert task.requires.searches == ("confirm",)
 
@@ -68,4 +68,4 @@ def test_python_body_does_not_implicitly_declare_capabilities():
     """调用上下文的 Python 语句不会被静态解释为隐式依赖。"""
     task = FunctionTask("explicit", Path("explicit.py"), "def run(ctx): ctx.state()")
 
-    assert not inspect_script_requirements(task).needs_screen_state_reader
+    assert not inspect_runtime_requirements(task).needs_screen_state_reader

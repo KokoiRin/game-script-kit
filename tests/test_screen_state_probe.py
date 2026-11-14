@@ -6,13 +6,8 @@
 
 import json
 
-import pytest
-
 from game_automation.portable.application.screen_state_config import (
     load_screen_state_target_catalog,
-)
-from game_automation.portable.application.screen_state_reader import (
-    ProjectScreenStateReader,
 )
 from game_automation.portable.domain import (
     ImageBatchMatchResult,
@@ -154,176 +149,12 @@ def test_screen_state_probe_result_chooses_highest_confidence_match() -> None:
     assert result.current_state == "装备"
 
 
-def test_project_state_reader_reads_state_from_image_assets(tmp_path) -> None:
-    """未建立配置时，reader 从 assets 模板名称识别当前界面。"""
-    assets = tmp_path / "assets"
-    assets.mkdir()
-    (assets / "人物.png").write_bytes(b"fake")
-    (assets / "装备.webp").write_bytes(b"fake")
-    requested_templates = []
-
-    class FakeImageLocator:
-        def locate(self, template, *, region=None, min_confidence=1.0, logger=None):
-            """按模板文件名返回固定匹配结果。"""
-            requested_templates.append((template.path, min_confidence))
-            if template.path.endswith("装备.webp"):
-                return ImageMatch(Rect(10, 20, 30, 40), confidence=0.91)
-            return None
-
-    reader = ProjectScreenStateReader(
-        project_root=tmp_path,
-        real_image_locator_factory=FakeImageLocator,
-    )
-
-    current_state = reader.read_current_state(min_confidence=0.8)
-
-    assert current_state == "装备"
-    assert requested_templates == [
-        (str(assets / "人物.png"), 0.8),
-        (str(assets / "装备.webp"), 0.8),
-    ]
-
-
-def test_project_state_reader_uses_batch_locator_when_configured(tmp_path) -> None:
-    """装配 batch locator 后，reader 一轮读取只使用批量定位。"""
-    assets = tmp_path / "assets"
-    assets.mkdir()
-    (assets / "人物.png").write_bytes(b"fake")
-    (assets / "装备.webp").write_bytes(b"fake")
-    batch_requests = []
-
-    class FailingSingleLocator:
-        def locate(self, template, *, region=None, min_confidence=1.0, logger=None):
-            """batch 已装配时 application 不应调用单图定位。"""
-            raise AssertionError("single image locator should not be called")
-
-    class FakeBatchLocator:
-        def locate_requests(
-            self,
-            requests,
-            *,
-            logger=None,
-            stop_on_first_match=False,
-        ):
-            """记录批量请求并返回装备命中。"""
-            batch_requests.append((requests, stop_on_first_match))
-            return (
-                ImageBatchMatchResult(requests[0].template, None, elapsed_ms=3.0),
-                ImageBatchMatchResult(
-                    requests[1].template,
-                    ImageMatch(Rect(10, 20, 30, 40), confidence=0.91),
-                    elapsed_ms=4.0,
-                ),
-            )
-
-    reader = ProjectScreenStateReader(
-        project_root=tmp_path,
-        real_image_locator_factory=FailingSingleLocator,
-        real_image_batch_locator_factory=FakeBatchLocator,
-    )
-
-    current_state = reader.read_current_state(min_confidence=0.8)
-
-    assert current_state == "装备"
-    assert len(batch_requests) == 1
-    assert batch_requests[0][1] is True
-    assert [request.min_confidence for request in batch_requests[0][0]] == [0.8, 0.8]
-
-
-def test_project_state_reader_reads_state_from_configured_groups(tmp_path) -> None:
-    """reader 从状态组配置生成带区域的搜索请求，并正确映射命中状态。"""
-    assets = tmp_path / "assets"
-    assets.mkdir()
-    (assets / "离开.png").write_bytes(b"fake")
-    (assets / "重来.png").write_bytes(b"fake")
-    (assets / "主页.png").write_bytes(b"fake")
-    (assets / "screen-states.json").write_text(
-        json.dumps(
-            {
-                "regions": {
-                    "右上弹窗": {"left": 100, "top": 20, "width": 300, "height": 120},
-                    "主页标题": {"left": 0, "top": 0, "width": 200, "height": 80},
-                },
-                "groups": [
-                    {
-                        "state": "战斗失败",
-                        "searches": [
-                            {
-                                "name": "离开按钮",
-                                "image": "离开.png",
-                                "region": "右上弹窗",
-                                "min_confidence": 0.75,
-                            },
-                            {
-                                "name": "重来按钮",
-                                "image": "重来.png",
-                                "region": "右上弹窗",
-                                "min_confidence": 0.8,
-                            },
-                        ],
-                    },
-                    {
-                        "state": "主页",
-                        "searches": [
-                            {
-                                "name": "主页标题",
-                                "image": "主页.png",
-                                "region": "主页标题",
-                            }
-                        ],
-                    },
-                ],
-            },
-            ensure_ascii=False,
-        ),
-        encoding="utf-8",
-    )
-    captured_requests = []
-
-    class FailingSingleLocator:
-        def locate(self, template, *, region=None, min_confidence=1.0, logger=None):
-            """batch 已装配时不应调用单图定位。"""
-            raise AssertionError("single image locator should not be called")
-
-    class FakeBatchLocator:
-        def locate_requests(self, requests, *, logger=None, stop_on_first_match=False):
-            """记录状态组配置生成的搜索请求，并让第二个搜索项命中。"""
-            captured_requests.append((requests, stop_on_first_match))
-            return (
-                ImageBatchMatchResult(requests[0].template, None, elapsed_ms=3.0),
-                ImageBatchMatchResult(
-                    requests[1].template,
-                    ImageMatch(Rect(10, 20, 30, 40), confidence=0.91),
-                    elapsed_ms=4.0,
-                ),
-                ImageBatchMatchResult.skipped_result(requests[2].template),
-            )
-
-    reader = ProjectScreenStateReader(
-        project_root=tmp_path,
-        real_image_locator_factory=FailingSingleLocator,
-        real_image_batch_locator_factory=FakeBatchLocator,
-    )
-
-    current_state = reader.read_current_state(min_confidence=0.8)
-
-    assert current_state == "战斗失败"
-    requests, stop_on_first_match = captured_requests[0]
-    assert stop_on_first_match is True
-    assert [request.region for request in requests] == [
-        Rect(100, 20, 300, 120),
-        Rect(100, 20, 300, 120),
-        Rect(0, 0, 200, 80),
-    ]
-    assert [request.min_confidence for request in requests] == [0.75, 0.8, 0.8]
-
-
 def test_screen_state_config_loads_shared_target_catalog(tmp_path) -> None:
     """验证状态配置可转换成脚本可复用的共享资源目录。"""
     assets = tmp_path / "assets"
     assets.mkdir()
     (assets / "离开.png").write_bytes(b"fake")
-    (assets / "screen-states.json").write_text(
+    (assets / "window-states.json").write_text(
         json.dumps(
             {
                 "regions": {
@@ -349,7 +180,7 @@ def test_screen_state_config_loads_shared_target_catalog(tmp_path) -> None:
     )
 
     catalog = load_screen_state_target_catalog(
-        assets / "screen-states.json",
+        assets / "window-states.json",
         asset_root=assets,
         supported_suffixes=frozenset({".png"}),
     )
@@ -359,86 +190,6 @@ def test_screen_state_config_loads_shared_target_catalog(tmp_path) -> None:
     assert search.image == ImageTemplate(str(assets / "离开.png"))
     assert search.region == Rect(100, 20, 300, 120)
     assert search.min_confidence == 0.75
-
-
-def test_project_state_reader_rejects_invalid_screen_state_config(tmp_path) -> None:
-    """验证状态组配置中的非法图片路径会被拒绝。"""
-    assets = tmp_path / "assets"
-    assets.mkdir()
-    (assets / "screen-states.json").write_text(
-        json.dumps(
-            {
-                "groups": [
-                    {
-                        "state": "坏配置",
-                        "searches": [{"name": "逃逸图片", "image": "../outside.png"}],
-                    }
-                ]
-            },
-            ensure_ascii=False,
-        ),
-        encoding="utf-8",
-    )
-    reader = ProjectScreenStateReader(project_root=tmp_path)
-
-    with pytest.raises(
-        RuntimeError, match="screen state search image must stay inside assets folder"
-    ):
-        reader.read_current_state(min_confidence=0.8)
-
-
-@pytest.mark.parametrize(
-    ("config", "error_type", "message"),
-    [
-        (
-            {"groups": []},
-            ValueError,
-            "screen state config groups must be a non-empty list",
-        ),
-        (
-            {"groups": [{"state": "空场景", "searches": []}]},
-            ValueError,
-            "screen state group searches must be non-empty: 空场景",
-        ),
-        (
-            {
-                "groups": [
-                    {
-                        "state": "未知区域",
-                        "searches": [
-                            {
-                                "name": "按钮",
-                                "image": "按钮.png",
-                                "region": "不存在区域",
-                            }
-                        ],
-                    }
-                ]
-            },
-            LookupError,
-            "unknown region target: 不存在区域",
-        ),
-    ],
-)
-def test_project_state_reader_rejects_malformed_screen_state_config(
-    tmp_path,
-    config,
-    error_type,
-    message,
-) -> None:
-    """验证状态组配置中的空组、空搜索和未知区域会被拒绝。"""
-    assets = tmp_path / "assets"
-    assets.mkdir()
-    (assets / "按钮.png").write_bytes(b"fake")
-    (assets / "screen-states.json").write_text(
-        json.dumps(config, ensure_ascii=False),
-        encoding="utf-8",
-    )
-    reader = ProjectScreenStateReader(project_root=tmp_path)
-
-    with pytest.raises(RuntimeError, match=message) as exc:
-        reader.read_current_state(min_confidence=0.8)
-    assert isinstance(exc.value.__cause__, error_type)
 
 
 def test_probe_screen_state_prefers_batch_locator_and_preserves_candidate_order() -> (

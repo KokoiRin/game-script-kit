@@ -38,8 +38,8 @@ def test_rule_registration_converts_search_pixels_and_preserves_old_config(
     """搜索框按截图比例转成窗口坐标，旧状态配置不被改写。"""
     service, frame = preparation
     (tmp_path / "assets").mkdir()
-    old = tmp_path / "assets/screen-states.json"
-    old.write_text("old")
+    notes = tmp_path / "assets/notes.txt"
+    notes.write_text("old")
     save_window_state_rule(
         tmp_path,
         service,
@@ -55,7 +55,7 @@ def test_rule_registration_converts_search_pixels_and_preserves_old_config(
         frame.image.height,
     )
     assert rules.candidates[0].search.region == Rect(0, 0, 40, 50)
-    assert old.read_text() == "old"
+    assert notes.read_text() == "old"
     assert list_window_state_rules(tmp_path)["rules"][0]["state"] == "页面"
 
 

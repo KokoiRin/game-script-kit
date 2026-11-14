@@ -10,8 +10,8 @@ import ast
 from pathlib import Path
 
 from game_automation.portable.application.task_metadata import (
-    parse_script_resources,
-    parse_script_target,
+    parse_task_resources,
+    parse_task_target,
 )
 from game_automation.portable.domain import TargetCatalog
 from game_automation.portable.domain.task import FunctionTask, TaskRequirements
@@ -53,7 +53,7 @@ def parse_function_task_source(
             f"unknown TASK fields: {', '.join(map(str, sorted(unknown, key=str)))}"
         )
     _validate_run(tree)
-    resources = parse_script_resources(
+    resources = parse_task_resources(
         metadata.get("resources", {}), asset_root=asset_root
     )
     return FunctionTask(
@@ -61,7 +61,7 @@ def parse_function_task_source(
         source_path=path,
         source=source,
         resources=resources,
-        target=parse_script_target(metadata.get("target")),
+        target=parse_task_target(metadata.get("target")),
         requires=_parse_requires(metadata.get("requires", {}), resources),
     )
 

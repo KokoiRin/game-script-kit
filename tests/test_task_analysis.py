@@ -5,13 +5,13 @@
 
 import pytest
 
-from game_automation.portable.application.script_dependencies import (
-    describe_script_dependencies,
-    script_needs_shared_resources,
-    validate_script_resource_references,
+from game_automation.portable.application.task_dependencies import (
+    describe_task_dependencies,
+    task_needs_shared_resources,
+    validate_task_resource_references,
 )
-from game_automation.portable.application.script_resources import (
-    script_with_shared_resources,
+from game_automation.portable.application.task_resources import (
+    task_with_shared_resources,
 )
 from game_automation.portable.domain import (
     ImageRef,
@@ -26,8 +26,8 @@ from game_automation.portable.domain import (
 )
 from game_automation.portable.domain.task import FunctionTask, TaskRequirements
 from game_automation.portable.domain.task_analysis import analyze_task
-from game_automation.portable.engine.script_requirements import (
-    inspect_script_requirements,
+from game_automation.portable.engine.runtime_requirements import (
+    inspect_runtime_requirements,
 )
 from tests.support.function_tasks import function_task
 
@@ -48,7 +48,7 @@ def test_analysis_preserves_declared_order_and_deduplicates_names(tmp_path):
     )
 
     analysis = analyze_task(task)
-    requirements = inspect_script_requirements(task)
+    requirements = inspect_runtime_requirements(task)
 
     assert analysis.references == (
         PointRef("open"),
@@ -79,28 +79,28 @@ def test_declared_search_region_missing_shared_resource_is_reported_then_resolve
     )
     task = function_task("search", 'ctx.click_image("button")', resources=resources)
 
-    before = describe_script_dependencies(
+    before = describe_task_dependencies(
         task,
         asset_root=tmp_path,
         supported_image_suffixes=frozenset({".png"}),
         state_names=(),
     )
 
-    assert script_needs_shared_resources(task)
+    assert task_needs_shared_resources(task)
     assert before.readiness[0][1] == "missing"
     with pytest.raises(LookupError, match="dialog"):
-        validate_script_resource_references(task)
-    prepared = script_with_shared_resources(
+        validate_task_resource_references(task)
+    prepared = task_with_shared_resources(
         task, TargetCatalog(regions=(NamedRegion("dialog", Rect(0, 0, 20, 30)),))
     )
-    after = describe_script_dependencies(
+    after = describe_task_dependencies(
         prepared,
         asset_root=tmp_path,
         supported_image_suffixes=frozenset({".png"}),
         state_names=(),
     )
-    assert not script_needs_shared_resources(prepared)
+    assert not task_needs_shared_resources(prepared)
     assert after.image_dependencies == (image.path,)
     assert after.readiness[0][1] == "ok"
     assert str(image.path) in after.readiness[0][2]
-    validate_script_resource_references(prepared)
+    validate_task_resource_references(prepared)

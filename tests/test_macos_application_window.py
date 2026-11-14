@@ -1,4 +1,4 @@
-"""验证 macOS 顶层窗口选择、矩形读取和 Accessibility Raise。"""
+"""验证 macOS Accessibility 窗口读取和 Raise。"""
 
 from __future__ import annotations
 
@@ -8,83 +8,10 @@ from game_automation.platform.macos.adapters.accessibility_window_backend import
     MacOSAccessibilityWindowBackend,
 )
 from game_automation.platform.macos.adapters.application_window import (
-    MacOSApplicationWindowController,
     MacOSWindowCandidate,
 )
 from game_automation.portable.application.ports import FocusedApplicationWindow
 from game_automation.portable.domain import Rect
-
-
-class FakeWindowBackend:
-    """提供可控候选窗口和 Raise 记录。"""
-
-    def __init__(self, windows: tuple[MacOSWindowCandidate, ...]) -> None:
-        """初始化候选窗口集合。"""
-        self.windows = windows
-        self.calls = []
-
-    def list_windows(self, application: str) -> tuple[MacOSWindowCandidate, ...]:
-        """记录应用查询并返回候选窗口。"""
-        self.calls.append(("list", application))
-        return self.windows
-
-    def raise_window(self, window: MacOSWindowCandidate) -> None:
-        """记录目标窗口 Raise。"""
-        self.calls.append(("raise", window))
-
-
-def test_macos_window_controller_focuses_unique_title_match() -> None:
-    """验证控制器按不区分大小写的标题子串选择唯一窗口。"""
-    target = MacOSWindowCandidate(
-        42, 7, "Star 视觉自动化靶场", Rect(100, 200, 800, 600)
-    )
-    backend = FakeWindowBackend(
-        (
-            MacOSWindowCandidate(42, 6, "其他页面", Rect(0, 0, 400, 300)),
-            target,
-        )
-    )
-    waits = []
-    controller = MacOSApplicationWindowController(
-        backend=backend,
-        sleeper=waits.append,
-        stabilization_seconds=0.2,
-    )
-
-    result = controller.focus_window("Safari", "STAR 视觉自动化")
-
-    assert result == FocusedApplicationWindow(target.title, target.rect)
-    assert backend.calls == [("list", "Safari"), ("raise", target)]
-    assert waits == [0.2]
-
-
-def test_macos_window_controller_rejects_missing_title() -> None:
-    """验证没有匹配窗口时返回可读错误。"""
-    controller = MacOSApplicationWindowController(
-        backend=FakeWindowBackend(()),
-        sleeper=lambda _: None,
-    )
-
-    with pytest.raises(
-        RuntimeError, match="target window containing 'Missing' was not found"
-    ):
-        controller.focus_window("Safari", "Missing")
-
-
-def test_macos_window_controller_rejects_ambiguous_title() -> None:
-    """验证多个窗口匹配时要求更具体的标题。"""
-    backend = FakeWindowBackend(
-        (
-            MacOSWindowCandidate(42, 6, "Star - A", Rect(0, 0, 400, 300)),
-            MacOSWindowCandidate(42, 7, "Star - B", Rect(10, 20, 400, 300)),
-        )
-    )
-    controller = MacOSApplicationWindowController(
-        backend=backend, sleeper=lambda _: None
-    )
-
-    with pytest.raises(RuntimeError, match="matched multiple windows.*more specific"):
-        controller.focus_window("Safari", "Star")
 
 
 def test_macos_accessibility_backend_reads_and_converts_ax_windows() -> None:
@@ -335,7 +262,6 @@ class FocusedAccessibility:
 
 def test_focused_window_read_is_bound_pid_and_geometry_without_reselection():
     """焦点读取只访问绑定应用的AXFocusedWindow及完整几何。"""
-    from game_automation.portable.application.ports import FocusedApplicationWindow
 
     accessibility = FocusedAccessibility()
     backend = MacOSAccessibilityWindowBackend(

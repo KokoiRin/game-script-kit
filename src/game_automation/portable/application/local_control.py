@@ -1,7 +1,7 @@
-"""为本地控制入口提供脚本列表、详情与运行会话。
+"""为本地控制入口提供任务列表、详情与运行会话。
 
-本 module 编排命名脚本的同步或后台运行并收敛输出；不渲染页面、不解析 HTTP、
-不解释脚本步骤。界面状态通过独立 reader 实时读取，不持有后台探测缓存。
+本 module 编排命名任务的同步或后台运行并收敛输出；不渲染页面、不解析协议、
+不解释任务步骤。真实运行只交给原生窗口会话。
 """
 
 from __future__ import annotations
@@ -18,48 +18,35 @@ from game_automation.portable.application.project_assets import (
     IMAGE_ASSET_SUFFIXES,
     PROJECT_ROOT,
     image_asset_root,
-    screen_state_config_path,
 )
 from game_automation.portable.application.runtime_ports import RuntimeFactory
 from game_automation.portable.application.screen_state_config import (
     load_screen_state_names,
 )
-from game_automation.portable.application.screen_state_reader import (
-    ProjectScreenStateReader,
-    ScreenImageBatchLocatorFactory,
+from game_automation.portable.application.task_catalog import (
+    TaskCatalog,
+    TaskNotFoundError,
 )
-from game_automation.portable.application.script_details import (
-    ScriptDetailsResult,
-    describe_script_details,
-)
-from game_automation.portable.application.script_resources import (
-    prepare_script_resources,
-    script_state_config_path,
-)
-from game_automation.portable.application.script_run import (
-    ApplicationActivatorFactory,
-    ApplicationWindowControllerFactory,
-    InputDeviceFactory,
-    PixelColorReaderFactory,
-    ScreenImageLocatorFactory,
-    run_script,
+from game_automation.portable.application.task_details import (
+    TaskDetailsResult,
+    describe_task_details,
 )
 from game_automation.portable.application.task_discovery import TaskLoadError
-from game_automation.portable.domain.task import FunctionTask
-from game_automation.portable.engine.ports import ScreenStateReader
-from game_automation.portable.engine.run_events import (
-    ScriptRunEvent,
-    format_script_run_event,
+from game_automation.portable.application.task_resources import (
+    prepare_task_resources,
+    task_state_config_path,
 )
-from game_automation.portable.scripts_manager.catalog import (
-    ScriptCatalog,
-    ScriptNotFoundError,
+from game_automation.portable.application.task_run import run_task
+from game_automation.portable.domain.task import FunctionTask
+from game_automation.portable.engine.run_events import (
+    TaskRunEvent,
+    format_task_run_event,
 )
 
 
 @dataclass(frozen=True, slots=True)
 class ControlResult:
-    """表达同步脚本运行的输出与结束原因。"""
+    """表达同步任务运行的输出与结束原因。"""
 
     exit_code: int
     stdout: str = ""
@@ -68,13 +55,13 @@ class ControlResult:
 
 
 @dataclass(frozen=True, slots=True)
-class ScriptRunStatus:
+class TaskRunStatus:
     running: bool
     exit_code: int | None = None
     stdout: str = ""
     stderr: str = ""
     finish_reason: str = "idle"
-    events: tuple[ScriptRunEvent, ...] = ()
+    events: tuple[TaskRunEvent, ...] = ()
 
     def __post_init__(self) -> None:
         """运行中的状态默认使用 running 作为结束原因占位。"""
@@ -88,11 +75,11 @@ class _CancellationFlag:
         self._event = threading.Event()
 
     def cancel(self) -> None:
-        """请求后台脚本取消运行。"""
+        """请求后台任务取消运行。"""
         self._event.set()
 
     def is_cancelled(self) -> bool:
-        """返回后台脚本是否已收到取消请求。"""
+        """返回后台任务是否已收到取消请求。"""
         return self._event.is_set()
 
 
@@ -102,7 +89,7 @@ class _ThreadSafeRunLog:
         self._lock = threading.Lock()
         self._stdout = io.StringIO()
         self._stderr = io.StringIO()
-        self._events: deque[ScriptRunEvent] = deque(maxlen=2048)
+        self._events: deque[TaskRunEvent] = deque(maxlen=2048)
 
     def stdout_writer(self):
         """返回用于重定向 stdout 的 writer。"""
@@ -116,7 +103,7 @@ class _ThreadSafeRunLog:
         """把运行诊断日志追加到 stdout。"""
         self.write_stdout(f"{message}\n")
 
-    def log_event(self, event: ScriptRunEvent) -> None:
+    def log_event(self, event: TaskRunEvent) -> None:
         """记录结构化运行事件，并同步追加可读文本日志。"""
         with self._lock:
             self._events.append(
@@ -125,7 +112,7 @@ class _ThreadSafeRunLog:
                     details={key: value[:4096] for key, value in event.details.items()},
                 )
             )
-            self._append(self._stdout, f"{format_script_run_event(event)}\n")
+            self._append(self._stdout, f"{format_task_run_event(event)}\n")
 
     def write_stdout(self, text: str) -> None:
         """追加一段 stdout 文本。"""
@@ -155,7 +142,7 @@ class _ThreadSafeRunLog:
         with self._lock:
             return self._stdout.getvalue(), self._stderr.getvalue()
 
-    def snapshot_events(self) -> tuple[ScriptRunEvent, ...]:
+    def snapshot_events(self) -> tuple[TaskRunEvent, ...]:
         """返回当前结构化运行事件快照。"""
         with self._lock:
             return tuple(self._events)
@@ -184,9 +171,9 @@ class _StringRunLogger:
         """把运行诊断日志写入同步 stdout 捕获流。"""
         self._stream.write(f"{message}\n")
 
-    def log_event(self, event: ScriptRunEvent) -> None:
+    def log_event(self, event: TaskRunEvent) -> None:
         """把结构化运行事件写入同步 stdout 捕获流。"""
-        self._stream.write(f"{format_script_run_event(event)}\n")
+        self._stream.write(f"{format_task_run_event(event)}\n")
 
 
 class _BackgroundScriptRun:
@@ -206,12 +193,12 @@ class _BackgroundScriptRun:
             self._exit_code = exit_code
             self._finish_reason = finish_reason
 
-    def snapshot(self) -> ScriptRunStatus:
+    def snapshot(self) -> TaskRunStatus:
         """返回后台脚本当前状态快照。"""
         stdout, stderr = self.log.snapshot()
         events = self.log.snapshot_events()
         with self._lock:
-            return ScriptRunStatus(
+            return TaskRunStatus(
                 running=self._running,
                 exit_code=self._exit_code,
                 stdout=stdout,
@@ -224,32 +211,17 @@ class _BackgroundScriptRun:
 class LocalControlApplication:
     def __init__(
         self,
-        catalog: ScriptCatalog | None = None,
+        catalog: TaskCatalog | None = None,
         *,
-        script_config_errors: tuple[TaskLoadError, ...] = (),
+        task_config_errors: tuple[TaskLoadError, ...] = (),
         project_root: Path = PROJECT_ROOT,
         real_runtime_factory: RuntimeFactory | None = None,
-        real_device_factory: InputDeviceFactory | None = None,
-        real_color_reader_factory: PixelColorReaderFactory | None = None,
-        real_image_locator_factory: ScreenImageLocatorFactory | None = None,
-        real_image_batch_locator_factory: ScreenImageBatchLocatorFactory | None = None,
-        real_application_activator_factory: ApplicationActivatorFactory | None = None,
-        real_application_window_controller_factory: ApplicationWindowControllerFactory
-        | None = None,
     ) -> None:
-        """注入脚本目录、项目路径和运行所需的外部能力工厂。"""
-        self._real_application_activator_factory = real_application_activator_factory
-        self._real_application_window_controller_factory = (
-            real_application_window_controller_factory
-        )
-        self._catalog = catalog if catalog is not None else ScriptCatalog()
-        self._script_config_errors = script_config_errors
+        """注入任务目录、项目路径和原生窗口运行时工厂。"""
+        self._catalog = catalog if catalog is not None else TaskCatalog()
+        self._task_config_errors = task_config_errors
         self._project_root = project_root
         self._real_runtime_factory = real_runtime_factory
-        self._real_device_factory = real_device_factory
-        self._real_color_reader_factory = real_color_reader_factory
-        self._real_image_locator_factory = real_image_locator_factory
-        self._real_image_batch_locator_factory = real_image_batch_locator_factory
         self._run_lock = threading.Lock()
         self._current_run: _BackgroundScriptRun | None = None
         self._run_thread: threading.Thread | None = None
@@ -259,40 +231,40 @@ class LocalControlApplication:
         """返回此控制会话绑定的工作区，供入口明确展示任务来源。"""
         return self._project_root
 
-    def list_scripts(self) -> tuple[str, ...]:
-        """返回 UI 可展示的脚本名称列表。"""
+    def list_tasks(self) -> tuple[str, ...]:
+        """返回 UI 可展示的任务名称列表。"""
         return self._catalog.list_names()
 
-    def list_script_config_errors(self) -> tuple[TaskLoadError, ...]:
-        """返回文件脚本加载时被隔离的配置错误。"""
-        return self._script_config_errors
+    def list_task_config_errors(self) -> tuple[TaskLoadError, ...]:
+        """返回任务加载时被隔离的配置错误。"""
+        return self._task_config_errors
 
-    def list_screen_state_names(self) -> tuple[str, ...]:
-        """列出状态配置中的界面状态名称，配置不可用时返回空列表。"""
+    def list_window_state_names(self) -> tuple[str, ...]:
+        """列出窗口规则中的界面状态名称，配置不可用时返回空列表。"""
         try:
             names = load_screen_state_names(
-                screen_state_config_path(self._project_root)
+                task_state_config_path(None, self._project_root)
             )
         except ValueError:
             return ()
         return () if names is None else names
 
-    def describe_script(self, name: str) -> ScriptDetailsResult:
-        """返回 UI 可展示的脚本步骤和依赖摘要。"""
+    def describe_task(self, name: str) -> TaskDetailsResult:
+        """返回 UI 可展示的任务入口和依赖摘要。"""
         try:
-            script = self._script_with_shared_resources(self._catalog.get(name))
-        except ScriptNotFoundError as exc:
-            return ScriptDetailsResult(exit_code=1, name=name, stderr=str(exc))
+            task = self._task_with_shared_resources(self._catalog.get(name))
+        except TaskNotFoundError as exc:
+            return TaskDetailsResult(exit_code=1, name=name, stderr=str(exc))
         except (LookupError, ValueError) as exc:
-            return ScriptDetailsResult(exit_code=2, name=name, stderr=f"{exc}\n")
-        return describe_script_details(
-            script,
+            return TaskDetailsResult(exit_code=2, name=name, stderr=f"{exc}\n")
+        return describe_task_details(
+            task,
             asset_root=self._image_asset_root(),
             supported_image_suffixes=IMAGE_ASSET_SUFFIXES,
-            state_names=self._configured_screen_state_names_for_readiness(script),
+            state_names=self._configured_state_names_for_readiness(task),
         )
 
-    def run_named_script(
+    def run_named_task(
         self,
         name: str,
         *,
@@ -301,36 +273,30 @@ class LocalControlApplication:
         dry_run_screen_state: str = "未知",
         dry_run_images: tuple[str, ...] = (),
     ) -> ControlResult:
-        """按名称运行脚本，并捕获入口层可展示的输出。"""
+        """按名称运行任务，并捕获入口层可展示的输出。"""
         try:
-            script = self._script_with_shared_resources(self._catalog.get(name))
-        except ScriptNotFoundError as exc:
+            task = self._task_with_shared_resources(self._catalog.get(name))
+        except TaskNotFoundError as exc:
             return ControlResult(
-                exit_code=1, stderr=str(exc), finish_reason="script_not_found"
+                exit_code=1, stderr=str(exc), finish_reason="task_not_found"
             )
         except (LookupError, ValueError) as exc:
             return ControlResult(
                 exit_code=2,
-                stderr=f"script resource configuration failed: {exc}\n",
+                stderr=f"task resource configuration failed: {exc}\n",
                 finish_reason="configuration_failed",
             )
 
         stdout = io.StringIO()
         stderr = io.StringIO()
         with redirect_stdout(stdout), redirect_stderr(stderr):
-            result = run_script(
-                script,
+            result = run_task(
+                task,
                 dry_run=dry_run,
                 dry_run_color=dry_run_color,
                 dry_run_images=dry_run_images if dry_run else (),
                 dry_run_screen_state=dry_run_screen_state,
-                real_application_activator_factory=self._real_application_activator_factory,
-                real_application_window_controller_factory=self._real_application_window_controller_factory,
                 real_runtime_factory=self._real_runtime_factory,
-                real_device_factory=self._real_device_factory,
-                real_color_reader_factory=self._real_color_reader_factory,
-                real_image_locator_factory=self._real_image_locator_factory,
-                real_screen_state_reader_factory=self.build_screen_state_reader,
                 logger=_StringRunLogger(stdout),
             )
 
@@ -344,7 +310,7 @@ class LocalControlApplication:
             finish_reason=result.finish_reason,
         )
 
-    def start_named_script(
+    def start_named_task(
         self,
         name: str,
         *,
@@ -352,42 +318,42 @@ class LocalControlApplication:
         dry_run_color: str = "#000000",
         dry_run_screen_state: str = "未知",
         dry_run_images: tuple[str, ...] = (),
-    ) -> ScriptRunStatus:
-        """启动一个后台脚本运行会话。"""
+    ) -> TaskRunStatus:
+        """启动一个后台任务运行会话。"""
         with self._run_lock:
             if self._current_run is not None and self._current_run.snapshot().running:
                 current = self._current_run.snapshot()
-                return ScriptRunStatus(
+                return TaskRunStatus(
                     running=current.running,
                     exit_code=current.exit_code,
                     stdout=current.stdout,
-                    stderr=current.stderr + "script is already running\n",
+                    stderr=current.stderr + "task is already running\n",
                     finish_reason=current.finish_reason,
                     events=current.events,
                 )
             try:
-                script = self._script_with_shared_resources(self._catalog.get(name))
-            except ScriptNotFoundError as exc:
-                return ScriptRunStatus(
+                task = self._task_with_shared_resources(self._catalog.get(name))
+            except TaskNotFoundError as exc:
+                return TaskRunStatus(
                     running=False,
                     exit_code=1,
                     stderr=str(exc),
-                    finish_reason="script_not_found",
+                    finish_reason="task_not_found",
                 )
             except (LookupError, ValueError) as exc:
-                return ScriptRunStatus(
+                return TaskRunStatus(
                     running=False,
                     exit_code=2,
-                    stderr=f"script resource configuration failed: {exc}\n",
+                    stderr=f"task resource configuration failed: {exc}\n",
                     finish_reason="configuration_failed",
                 )
 
             session = _BackgroundScriptRun()
             self._current_run = session
             thread = threading.Thread(
-                target=self._run_script_session,
+                target=self._run_task_session,
                 args=(
-                    script,
+                    task,
                     dry_run,
                     dry_run_color,
                     dry_run_screen_state,
@@ -400,24 +366,24 @@ class LocalControlApplication:
             thread.start()
             return session.snapshot()
 
-    def current_script_run(self) -> ScriptRunStatus:
-        """返回当前后台脚本运行状态。"""
+    def current_task_run(self) -> TaskRunStatus:
+        """返回当前后台任务运行状态。"""
         with self._run_lock:
             if self._current_run is None:
-                return ScriptRunStatus(running=False)
+                return TaskRunStatus(running=False)
             return self._current_run.snapshot()
 
-    def stop_running_script(self) -> ScriptRunStatus:
-        """请求停止当前后台脚本运行。"""
+    def stop_running_task(self) -> TaskRunStatus:
+        """请求停止当前后台任务运行。"""
         with self._run_lock:
             if self._current_run is None:
-                return ScriptRunStatus(
-                    running=False, exit_code=0, stderr="no script is running\n"
+                return TaskRunStatus(
+                    running=False, exit_code=0, stderr="no task is running\n"
                 )
             self._current_run.cancellation.cancel()
             return self._current_run.snapshot()
 
-    def wait_for_script_stop(self, timeout: float | None = None) -> bool:
+    def wait_for_task_stop(self, timeout: float | None = None) -> bool:
         """等待后台线程真正退出，供宿主在取消后有序回收进程。"""
         with self._run_lock:
             thread = self._run_thread
@@ -426,35 +392,29 @@ class LocalControlApplication:
         thread.join(timeout)
         return not thread.is_alive()
 
-    def _run_script_session(
+    def _run_task_session(
         self,
-        script: FunctionTask,
+        task: FunctionTask,
         dry_run: bool,
         dry_run_color: str,
         dry_run_screen_state: str,
         dry_run_images: tuple[str, ...],
         session: _BackgroundScriptRun,
     ) -> None:
-        """在后台线程中运行脚本并写入会话状态。"""
+        """在后台线程中运行任务并写入会话状态。"""
         exit_code, finish_reason = 1, "failed"
         try:
             with (
                 redirect_stdout(session.log.stdout_writer()),
                 redirect_stderr(session.log.stderr_writer()),
             ):
-                result = run_script(
-                    script,
+                result = run_task(
+                    task,
                     dry_run=dry_run,
                     dry_run_color=dry_run_color,
                     dry_run_images=dry_run_images,
                     dry_run_screen_state=dry_run_screen_state,
-                    real_application_activator_factory=self._real_application_activator_factory,
-                    real_application_window_controller_factory=self._real_application_window_controller_factory,
                     real_runtime_factory=self._real_runtime_factory,
-                    real_device_factory=self._real_device_factory,
-                    real_color_reader_factory=self._real_color_reader_factory,
-                    real_image_locator_factory=self._real_image_locator_factory,
-                    real_screen_state_reader_factory=self.build_screen_state_reader,
                     cancellation_token=session.cancellation,
                     logger=session.log,
                     emit_step_events=True,
@@ -463,10 +423,10 @@ class LocalControlApplication:
             if result.error_message is not None:
                 session.log.write_stderr(f"{result.error_message}\n")
         except Exception as exc:
-            message = f"unexpected script run failure: {type(exc).__name__}: {exc}"
+            message = f"unexpected task run failure: {type(exc).__name__}: {exc}"
             session.log.write_stderr(f"{message}\n")
             session.log.log_event(
-                ScriptRunEvent(
+                TaskRunEvent(
                     event_type="run_finished",
                     status="failed",
                     details={"exit_code": "1", "error": message},
@@ -480,25 +440,17 @@ class LocalControlApplication:
         """返回本地 UI 允许读取模板图片的项目内目录。"""
         return image_asset_root(self._project_root)
 
-    def _configured_screen_state_names_for_readiness(
-        self, script: FunctionTask
+    def _configured_state_names_for_readiness(
+        self, task: FunctionTask
     ) -> tuple[str, ...] | None:
-        """读取状态名用于详情检查，配置不可用时返回 None。"""
+        """读取窗口规则中的状态名，配置不可用时返回 None。"""
         try:
             return load_screen_state_names(
-                script_state_config_path(script, self._project_root)
+                task_state_config_path(task, self._project_root)
             )
         except ValueError:
             return None
 
-    def _script_with_shared_resources(self, script: FunctionTask) -> FunctionTask:
-        """按脚本需要合并状态配置里的共享搜索资源。"""
-        return prepare_script_resources(script, self._project_root)
-
-    def build_screen_state_reader(self) -> ScreenStateReader:
-        """创建按需读取最新配置和画面的状态 reader。"""
-        return ProjectScreenStateReader(
-            project_root=self._project_root,
-            real_image_locator_factory=self._real_image_locator_factory,
-            real_image_batch_locator_factory=self._real_image_batch_locator_factory,
-        )
+    def _task_with_shared_resources(self, task: FunctionTask) -> FunctionTask:
+        """按任务需要合并窗口规则里的共享搜索资源。"""
+        return prepare_task_resources(task, self._project_root)

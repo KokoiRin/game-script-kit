@@ -1,7 +1,7 @@
 """为入口测试建立直接 Python 函数任务及显式资源声明。
 
 本模块只包装源码和元信息，不解释动作，也不执行任务。
-运行行为由公开 run_script 和 TaskContext 入口验证。
+运行行为由公开 run_task 和 TaskContext 入口验证。
 """
 
 from dataclasses import replace
@@ -10,7 +10,7 @@ from textwrap import indent
 
 from game_automation.portable.domain import NamedImage, TargetCatalog
 from game_automation.portable.domain.task import FunctionTask, TaskRequirements
-from game_automation.portable.domain.windows import ScreenWindow
+from game_automation.portable.domain.windows import UnboundWindow
 
 
 def function_task(
@@ -55,7 +55,7 @@ def function_task(
         name,
         Path(__file__).with_name("task.py"),
         source,
-        window=window or ScreenWindow(),
+        window=window or UnboundWindow(),
         resources=resources,
         target=target,
         requires=requires,

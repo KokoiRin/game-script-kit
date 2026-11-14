@@ -26,6 +26,6 @@ def test_prepare_starts_without_loading_script_catalog(tmp_path, monkeypatch):
         raise AssertionError("loaded scripts during preparation")
 
     monkeypatch.setattr(desktop_app, "launch_desktop", serve)
-    monkeypatch.setattr(cli, "_load_cli_script_catalog_result", reject)
+    monkeypatch.setattr(cli, "_load_cli_task_catalog_result", reject)
     assert cli.main(["--workspace", str(tmp_path), "prepare"]) == 0
     assert captured == {"workspace": tmp_path}

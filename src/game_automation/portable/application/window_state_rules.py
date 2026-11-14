@@ -1,7 +1,7 @@
 """管理按窗口相对坐标配置的实时识别素材。
 
-本 module 复用现有状态配置解析器，并保存冻结帧裁图与状态关联；
-不采集桌面、不执行动作，也不更改旧 screen-states.json 的屏幕坐标语义。
+本 module 复用状态组解析器，并保存冻结帧裁图与状态关联；
+不采集桌面、不执行动作。窗口规则只写入 window-states.json。
 """
 
 import json
@@ -54,7 +54,7 @@ class WindowStateRules:
 
 
 def rules_path(workspace: Path) -> Path:
-    """返回独立的窗口识别配置，避免改变原有脚本状态配置的坐标含义。"""
+    """返回当前工作区的窗口识别配置路径。"""
     assets = (workspace / "assets").resolve()
     if not assets.is_relative_to(workspace.resolve()):
         raise ValueError("素材目录必须位于当前工作区内")

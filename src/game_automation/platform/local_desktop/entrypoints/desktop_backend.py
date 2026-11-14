@@ -108,7 +108,7 @@ class DesktopBackend:
             raise RuntimeError("desktop backend is stopping")
         running = (
             self._control_app is not None
-            and self._control_app.current_script_run().running
+            and self._control_app.current_task_run().running
         )
         if running and (
             method.startswith("preparation.")
@@ -275,20 +275,20 @@ class DesktopBackend:
                 self._control_app = None
             app = self._control()
             return {
-                "scripts": list(app.list_scripts()),
-                "errors": [asdict(error) for error in app.list_script_config_errors()],
+                "scripts": list(app.list_tasks()),
+                "errors": [asdict(error) for error in app.list_task_config_errors()],
             }
         if method == "script.details":
-            return asdict(self._control().describe_script(_text(params, "name")))
+            return asdict(self._control().describe_task(_text(params, "name")))
         if method == "script.start":
             name = _text(params, "name")
             dry_run = params.get("dry_run", True)
             if type(dry_run) is not bool:
                 raise ValueError("dry_run must be a boolean")
             app = self._control()
-            details = app.describe_script(name)
+            details = app.describe_task(name)
             return _run_status(
-                app.start_named_script(
+                app.start_named_task(
                     name,
                     dry_run=dry_run,
                     dry_run_color=_text(params, "dry_run_color", "#000000"),
@@ -305,9 +305,9 @@ class DesktopBackend:
                     "stderr": "",
                     "exit_code": None,
                 }
-            return _run_status(self._control_app.current_script_run())
+            return _run_status(self._control_app.current_task_run())
         if method == "script.stop":
-            return _run_status(self._control().stop_running_script())
+            return _run_status(self._control().stop_running_task())
         raise KeyError(f"unknown desktop method: {method}")
 
     def close(self, timeout: float = 5) -> bool:
@@ -319,8 +319,8 @@ class DesktopBackend:
         if self._observation is not None:
             stopped = self._observation.stop(timeout)
         if self._control_app is not None:
-            self._control_app.stop_running_script()
-            stopped = self._control_app.wait_for_script_stop(timeout) and stopped
+            self._control_app.stop_running_task()
+            stopped = self._control_app.wait_for_task_stop(timeout) and stopped
         self._cache.cleanup()
         self._closed = True
         return stopped

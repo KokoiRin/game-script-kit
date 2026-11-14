@@ -7,8 +7,8 @@ from game_automation.portable.domain import (
     OffsetTarget,
     Point,
     PointRef,
-    ScreenWindow,
     TargetCatalog,
+    UnboundWindow,
     UnknownPointNameError,
 )
 from game_automation.portable.domain.task import TaskRequirements
@@ -47,7 +47,7 @@ def test_target_catalog_reports_unknown_point_name() -> None:
 def test_script_uses_empty_target_catalog_by_default() -> None:
     """验证现有脚本构造默认带空资源目录。"""
     script = function_task(
-        "default-resources", "ctx.click(Point(1, 2))", window=ScreenWindow()
+        "default-resources", "ctx.click(Point(1, 2))", window=UnboundWindow()
     )
 
     assert script.resources == TargetCatalog()
@@ -59,7 +59,7 @@ def test_script_can_carry_target_catalog() -> None:
     script = function_task(
         "named-resources",
         "ctx.click(PointRef('头像'))",
-        window=ScreenWindow(),
+        window=UnboundWindow(),
         resources=catalog,
         requires=TaskRequirements(points=("头像",)),
     )

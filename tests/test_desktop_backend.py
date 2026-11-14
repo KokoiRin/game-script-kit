@@ -9,6 +9,7 @@ import subprocess
 import sys
 import threading
 import time
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
@@ -19,10 +20,12 @@ from game_automation.platform.local_desktop.entrypoints.desktop_backend import (
     run_stdio,
 )
 from game_automation.portable.application.local_control import LocalControlApplication
-from game_automation.portable.domain import ScreenWindow
+from game_automation.portable.application.runtime_ports import RuntimePorts
+from game_automation.portable.application.task_catalog import TaskCatalog
+from game_automation.portable.domain import AreaWindow, Rect, UnboundWindow
+from game_automation.portable.domain.task import TaskTarget
 from game_automation.portable.engine.ports import InputDevice
 from game_automation.portable.preparation.service import PreparationService
-from game_automation.portable.scripts_manager.catalog import ScriptCatalog
 from tests.support.function_tasks import function_task
 from tests.test_preparation import PreparationBackend
 
@@ -35,8 +38,8 @@ def backend(tmp_path):
         windows=device, capture=device, images=device, templates=device
     )
     control = LocalControlApplication(
-        catalog=ScriptCatalog(
-            (function_task("sample", "ctx.wait(0)", window=ScreenWindow()),)
+        catalog=TaskCatalog(
+            (function_task("sample", "ctx.wait(0)", window=UnboundWindow()),)
         ),
         project_root=tmp_path,
     )
@@ -118,8 +121,8 @@ def test_background_script_does_not_capture_protocol_output(backend):
     )
     replies = [json.loads(line) for line in output.getvalue().splitlines()]
     assert [reply["id"] for reply in replies] == [1, 2]
-    assert not control.current_script_run().running
-    assert control.wait_for_script_stop(0)
+    assert not control.current_task_run().running
+    assert control.wait_for_task_stop(0)
 
 
 def test_workspace_allows_only_one_backend_owner(tmp_path):
@@ -197,12 +200,27 @@ def test_pipe_eof_cancels_active_wait_and_preserves_protocol_output(tmp_path):
             entered.set()
             time.sleep(duration_seconds)
 
+    class Factory:
+        @contextmanager
+        def open(self, target, requirements, cancellation, logger):
+            """提供会真实等待的原生会话替身。"""
+            yield RuntimePorts(AreaWindow(Rect(0, 0, 10, 10)), Device())
+
     control = LocalControlApplication(
-        catalog=ScriptCatalog(
-            (function_task("long", "ctx.wait(60)", window=ScreenWindow()),)
+        catalog=TaskCatalog(
+            (
+                function_task(
+                    "long",
+                    "ctx.wait(60)",
+                    window=UnboundWindow(),
+                    target=TaskTarget(
+                        "Example", "Window", 10, 10, backend="macos-window"
+                    ),
+                ),
+            )
         ),
         project_root=tmp_path,
-        real_device_factory=Device,
+        real_runtime_factory=Factory(),
     )
     prep = PreparationBackend()
     session = DesktopBackend(
@@ -236,8 +254,8 @@ def test_pipe_eof_cancels_active_wait_and_preserves_protocol_output(tmp_path):
     assert time.monotonic() - started < 1
     replies = [json.loads(line) for line in output.getvalue().splitlines()]
     assert replies[1]["result"]["running"] is True
-    assert control.current_script_run().finish_reason == "cancelled"
-    assert control.wait_for_script_stop(0)
+    assert control.current_task_run().finish_reason == "cancelled"
+    assert control.wait_for_task_stop(0)
 
 
 def test_real_backend_termination_signal_releases_ownership(tmp_path):

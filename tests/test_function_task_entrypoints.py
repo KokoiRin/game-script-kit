@@ -106,10 +106,10 @@ def run(ctx):
         assert backend.close()
 
 
-def test_native_protocol_reports_json_migration_and_keeps_python_task_available(
+def test_native_protocol_ignores_json_and_keeps_python_task_available(
     tmp_path,
 ):
-    """原生目录公开旧文件迁移诊断，同时继续允许有效 Python 任务模拟运行。"""
+    """JSON 文件不是任务；有效 Python 任务仍可模拟运行。"""
     write_task(tmp_path, 'TASK = {"name": "valid"}\ndef run(ctx): ctx.wait(0)\n')
     (tmp_path / "scripts" / "old.json").write_text(
         '{"name": "old", "steps": [{"wait": 60}]}'
@@ -118,9 +118,7 @@ def test_native_protocol_reports_json_migration_and_keeps_python_task_available(
     try:
         listing = backend.dispatch("script.list", {})
         assert listing["scripts"] == ["valid"]
-        assert len(listing["errors"]) == 1
-        assert listing["errors"][0]["file"] == "old.json"
-        assert "run(ctx)" in listing["errors"][0]["message"]
+        assert listing["errors"] == []
         backend.dispatch("script.start", {"name": "valid", "dry_run": True})
         assert wait_finished(backend)["finish_reason"] == "completed"
     finally:

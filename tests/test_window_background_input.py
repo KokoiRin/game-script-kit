@@ -229,7 +229,7 @@ def test_missing_private_setter_fails_before_any_event(monkeypatch):
 
 def test_cancelled_hold_releases_without_rechecking_cancellation():
     """后台按住期间取消，必要释放不再被取消校验阻断。"""
-    from game_automation.portable.engine.cancellation import ScriptCancelledError
+    from game_automation.portable.engine.cancellation import TaskCancelledError
 
     q = Quartz()
     session = Session(q)
@@ -237,10 +237,10 @@ def test_cancelled_hold_releases_without_rechecking_cancellation():
     def check():
         """收到按下后模拟协作取消。"""
         if any(event["kind"] == "down" for _, event in q.events):
-            raise ScriptCancelledError("cancelled")
+            raise TaskCancelledError("cancelled")
 
     session.check_cancelled = check
-    with pytest.raises(ScriptCancelledError):
+    with pytest.raises(TaskCancelledError):
         device(session).click(Point(105, 206))
     assert [event["kind"] for _, event in q.events] == ["move", "down", "up"]
     assert session.finished == 1

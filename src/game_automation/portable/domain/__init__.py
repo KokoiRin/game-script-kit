@@ -39,16 +39,16 @@ from game_automation.portable.domain.target_offsets import OffsetTarget
 from game_automation.portable.domain.targets import ImageTarget
 from game_automation.portable.domain.task import (
     FunctionTask,
-    ScriptTarget,
     TaskRequirements,
+    TaskTarget,
 )
-from game_automation.portable.domain.windows import AreaWindow, ScreenWindow, Window
+from game_automation.portable.domain.windows import AreaWindow, UnboundWindow, Window
 
 __all__ = [
     "AreaWindow",
     "FunctionTask",
-    "ScriptTarget",
     "TaskRequirements",
+    "TaskTarget",
     "Color",
     "ImageBatchMatchResult",
     "ImageLookupResult",
@@ -66,7 +66,7 @@ __all__ = [
     "Point",
     "PointRef",
     "Rect",
-    "ScreenWindow",
+    "UnboundWindow",
     "ScreenStateCandidate",
     "ScreenStateCandidateResult",
     "ScreenStateProbeResult",
