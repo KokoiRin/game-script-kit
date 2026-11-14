@@ -42,6 +42,8 @@ def run(ctx):
 
 `TASK` 支持 `name`、`target`、`resources`、`requires`。`target` 和 `resources` 使用下面的字面量结构。图片文件相对所选工作区的 `assets/`。
 
+任务发现会检查声明字段。`resources` 只接受 `points`、`images`、`regions` 和 `searches`；点位、区域和搜索对象中的未知字段会报告资源名称与字段位置。修正文件后在原生运行页点击“重新加载”，即可更新任务列表与诊断。
+
 ```python
 TASK = {
     "name": "等待任务入口",

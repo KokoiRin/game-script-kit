@@ -123,3 +123,33 @@ def test_native_protocol_ignores_json_and_keeps_python_task_available(
         assert wait_finished(backend)["finish_reason"] == "completed"
     finally:
         assert backend.close()
+
+
+def test_resource_typo_is_reported_and_corrected_through_both_entrypoints(
+    tmp_path, capsys
+):
+    """两种入口展示资源字段错误，修正后重新加载并完成模拟运行。"""
+    write_task(tmp_path, 'TASK = {"name": "valid"}\ndef run(ctx): ctx.wait(0)\n')
+    broken = write_task(
+        tmp_path,
+        'TASK = {"name": "fixed", "resources": {"imagse": {}}}\ndef run(ctx): ctx.wait(0)\n',
+        filename="broken.py",
+    )
+    args = ["--workspace", str(tmp_path)]
+    cli.main([*args, "list"])
+    output = capsys.readouterr()
+    assert "resources.imagse" in output.out + output.err
+    backend = DesktopBackend(tmp_path, preparation=object())
+    try:
+        listing = backend.dispatch("script.list", {})
+        assert listing["scripts"] == ["valid"]
+        assert "resources.imagse" in str(listing["errors"])
+        broken.write_text('TASK = {"name": "fixed"}\ndef run(ctx): ctx.wait(0)\n')
+        listing = backend.dispatch("script.reload", {})
+        assert set(listing["scripts"]) == {"valid", "fixed"}
+        assert listing["errors"] == []
+        assert cli.main([*args, "run", "fixed", "--dry-run"]) == 0
+        backend.dispatch("script.start", {"name": "fixed", "dry_run": True})
+        assert wait_finished(backend)["finish_reason"] == "completed"
+    finally:
+        assert backend.close()

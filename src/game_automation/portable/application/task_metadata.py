@@ -29,6 +29,9 @@ def parse_task_resources(value: Any, *, asset_root: Path) -> TargetCatalog:
     """解析 TASK 中的局部资源声明。"""
     if not isinstance(value, dict):
         raise ValueError("task resources must be an object")
+    _reject_unknown_fields(
+        value, {"points", "images", "regions", "searches"}, field="resources"
+    )
     return TargetCatalog(
         points=_parse_points(value.get("points", {})),
         images=_parse_images(value.get("images", {}), asset_root=asset_root),
@@ -82,6 +85,11 @@ def _parse_searches(value: Any) -> tuple[NamedImageSearch, ...]:
     for name, search_value in value.items():
         if not isinstance(search_value, dict):
             raise ValueError(f"image search resource {name} must be an object")
+        _reject_unknown_fields(
+            search_value,
+            {"image", "region", "min_confidence"},
+            field=f"image search resource {name}",
+        )
         searches.append(
             NamedImageSearch(
                 str(name),
@@ -105,6 +113,7 @@ def _parse_point(value: Any, *, field: str) -> Point:
     """解析 x/y 坐标对象。"""
     if not isinstance(value, dict):
         raise ValueError(f"{field} must be an object")
+    _reject_unknown_fields(value, {"x", "y"}, field=field)
     return Point(
         _int_value(value.get("x"), f"{field} x"),
         _int_value(value.get("y"), f"{field} y"),
@@ -115,12 +124,21 @@ def _parse_rect(value: Any, *, field: str) -> Rect:
     """解析矩形区域对象。"""
     if not isinstance(value, dict):
         raise ValueError(f"{field} must be an object")
+    _reject_unknown_fields(value, {"left", "top", "width", "height"}, field=field)
     return Rect(
         left=_int_value(value.get("left"), f"{field} left"),
         top=_int_value(value.get("top"), f"{field} top"),
         width=_int_value(value.get("width"), f"{field} width"),
         height=_int_value(value.get("height"), f"{field} height"),
     )
+
+
+def _reject_unknown_fields(value: dict, allowed: set[str], *, field: str) -> None:
+    """拒绝拼写错误的声明字段，并给出所属资源及字段位置。"""
+    unknown = value.keys() - allowed
+    if unknown:
+        paths = ", ".join(f"{field}.{key}" for key in sorted(unknown, key=str))
+        raise ValueError(f"unknown task resource fields: {paths}")
 
 
 def _parse_region_ref(value: Any) -> RegionRef | Rect | None:

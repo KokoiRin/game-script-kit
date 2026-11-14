@@ -121,6 +121,26 @@ def test_discovery_preserves_validated_source_snapshot(tmp_path) -> None:
             "states",
         ),
         ("TASK = {'name': 'bad', 'step': []}\ndef run(ctx): pass\n", "step"),
+        (
+            "TASK = {'name': 'bad', 'resources': {'imagse': {}}}\ndef run(ctx): pass\n",
+            "resources.imagse",
+        ),
+        (
+            "TASK = {'name': 'bad', 'resources': {'points': {'button': {'x': 1, 'y': 2, 'z': 3}}}}\ndef run(ctx): pass\n",
+            "point resource button.z",
+        ),
+        (
+            "TASK = {'name': 'bad', 'resources': {'regions': {'panel': {'left': 0, 'top': 0, 'width': 10, 'height': 10, 'extra': 1}}}}\ndef run(ctx): pass\n",
+            "region resource panel.extra",
+        ),
+        (
+            "TASK = {'name': 'bad', 'resources': {'searches': {'button': {'image': 'button', 'min_confidnce': 0.94}}}}\ndef run(ctx): pass\n",
+            "image search resource button.min_confidnce",
+        ),
+        (
+            "TASK = {'name': 'bad', 'resources': {'searches': {'button': {'image': 'button', 'region': {'left': 0, 'top': 0, 'width': 10, 'height': 10, 'extra': 1}}}}}\ndef run(ctx): pass\n",
+            "image search region.extra",
+        ),
         ("TASK = {'name': 'bad'}\ndef run(ctx):\n    break\n", "syntax"),
         ("TASK = {'name': 'bad'}\ndef run(ctx):\n    yield ctx\n", "run"),
     ],
@@ -138,6 +158,39 @@ def test_bad_python_task_is_isolated_from_valid_tasks(
     assert len(result.task_config_errors) == 1
     assert result.task_config_errors[0].file == "bad.py"
     assert message in result.task_config_errors[0].message
+
+
+def test_resource_error_is_cleared_after_reloading_corrected_task(tmp_path) -> None:
+    """修正资源字段后重新发现任务，保留有效声明及其他任务。"""
+    write_task(tmp_path, {"name": "good"}, filename="good.py")
+    write_task(tmp_path, {"name": "fixed", "resources": {"imagse": {}}})
+    assert len(discover(tmp_path).task_config_errors) == 1
+
+    write_task(
+        tmp_path,
+        {
+            "name": "fixed",
+            "resources": {
+                "images": {"button": "button.png"},
+                "points": {"button": {"x": 1, "y": 2}},
+                "regions": {"panel": {"left": 0, "top": 0, "width": 10, "height": 10}},
+                "searches": {
+                    "button": {
+                        "image": "button",
+                        "region": "panel",
+                        "min_confidence": 0.94,
+                    }
+                },
+            },
+        },
+    )
+    result = discover(tmp_path)
+
+    assert result.task_config_errors == ()
+    assert result.catalog.list_names() == ("good", "fixed")
+    assert (
+        result.catalog.get("fixed").resources.searches[0].search.min_confidence == 0.94
+    )
 
 
 def test_helper_files_are_not_listed_or_imported(tmp_path) -> None:
