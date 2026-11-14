@@ -6,7 +6,7 @@
 
 ## 职责与依赖
 
-Star 使用 ports-and-adapters，把脚本规则与桌面设备、权限和入口隔开。
+Star 使用 ports-and-adapters，把任务规则与桌面设备、权限和入口隔开。
 这让同一条规则能通过 fake 验证，并允许通过更换 adapter 接入其他平台；理由见 [ADR 0002](adr/0002-ports-and-adapters.md)。
 
 ```text
@@ -29,14 +29,14 @@ Star 使用 ports-and-adapters，把脚本规则与桌面设备、权限和入�
 | 装配 | 选择平台实现，向用例注入 factory | [composition.py](../src/game_automation/platform/local_desktop/composition.py) |
 | 原生界面 | SwiftUI 展示与 AppKit 画布、窗口和进程生命周期 | [StarDesktop](../native/StarDesktop/) |
 | 入口 | 解析 CLI/本地管道请求，调用用例，转换展示格式 | [entrypoints](../src/game_automation/platform/local_desktop/entrypoints/) |
-| 素材准备用例 | 冻结帧、取点换算、裁图边界与保存编排，独立于脚本执行 | [preparation](../src/game_automation/portable/preparation/) |
+| 素材准备用例 | 冻结帧、取点换算、裁图边界与保存编排，独立于任务执行 | [preparation](../src/game_automation/portable/preparation/) |
 
 依赖方向比目录名称更重要：领域对象不访问设备；执行层不创建真实 adapter；平台细节留在 adapter。
-具体任务的点位、模板和步骤由脚本表达；任务编写取舍见 [ADR 0001](adr/0001-agent-authored-tasks.md)。
+具体任务的点位、模板和流程由 Python 函数任务表达；任务编写取舍见 [ADR 0001](adr/0001-agent-authored-tasks.md)。
 
 ## 当前主链路与装配
 
-CLI 单脚本链路：
+CLI 单任务链路：
 
 ```text
 cli → 项目 catalog / 窗口规则共享资源 → run_task_on_local_desktop
@@ -51,7 +51,7 @@ SwiftUI/AppKit 壳 → 受管理的 Python 子进程 / desktop_backend
     → Python run(ctx) → TaskContext → 运行 ports
 ```
 
-[run_task](../src/game_automation/portable/application/task_run.py) 按任务需求创建运行依赖。真实执行只打开原生窗口会话；dry-run 使用固定替身。
+[run_task](../src/game_automation/portable/application/task_run.py) 按任务需求创建运行依赖。真实执行要求任务声明 `target.backend` 为 `macos-window` 或 `macos-window-background`，只打开原生窗口会话，不提供桌面回退或命令行目标覆盖；dry-run 使用固定替身，不要求打开窗口。
 [run_task_plan](../src/game_automation/portable/application/run_plan.py) 编排已有任务及停止策略，单个任务仍交给注入的运行函数。
 窗口状态由该会话的状态端口读取 `assets/window-states.json`，不从控制台缓存取结果。
 新增执行入口复用这些用例；保持运行控制台聚焦运行与停止的理由见 [ADR 0004](adr/0004-small-console.md)，独立素材准备壳见 [ADR 0007](adr/0007-preparation-and-execution.md)。
@@ -63,7 +63,7 @@ SwiftUI/AppKit 壳 → 受管理的 Python 子进程 / desktop_backend
 ```
 
 准备 UI 拥有选择和框选交互；通用准备服务拥有冻结帧身份、坐标转换与校验。
-准备服务不导入 runner、运行控制应用或脚本目录；执行器不读取准备 UI 的状态。
+准备服务不导入 runner、运行控制应用或任务目录；执行器不读取准备 UI 的状态。
 原生壳组合两个用例，不能通过共享可变界面状态驱动规则。生命周期和进程边界见 [ADR 0008](adr/0008-native-macos-desktop.md)：原生层负责监督进程，Python 会话负责取消和等待实际执行线程，双方各自回收所拥有的资源。
 
 ## 只读窗口观察
@@ -127,10 +127,10 @@ Python 是唯一任务格式。任务自身使用函数、分支、循环和异�
 
 [Window](../src/game_automation/portable/domain/windows.py) 负责点位和搜索区域的坐标解析。真实运行由原生窗口会话提供 `AreaWindow`；dry-run 使用不接触桌面的未绑定窗口。
 运行前绑定的窗口范围用于本次任务副本，不修改 catalog 中的任务定义。
-脚本点位、图片匹配结果、显示像素和实际输入坐标要在对应边界转换，调用方应明确自己使用的坐标系。
+任务点位和搜索区域相对目标窗口。图片匹配结果、显示像素和实际输入坐标要在对应边界转换，调用方应明确自己使用的坐标系。
 窗口移动、状态识别区域及入口能力差异的当前限制记录在 [项目现状](current-state.md)；它们不是需要永久保留的架构规则。
 
-准备会话按帧 ID 绑定 PNG、实际像素尺寸、窗口逻辑范围与采集时间。UI 的显示坐标先转图像像素，再由准备服务转窗口相对或屏幕坐标；裁图只读取指定帧的内容。准备选窗不会修改运行目标，准备截图不充当运行状态缓存。
+准备会话按帧 ID 绑定 PNG、实际像素尺寸、窗口逻辑范围与采集时间。UI 的显示坐标先转图像像素，准备服务同时返回窗口相对点和截图时的屏幕点；任务只使用窗口相对点，裁图只读取指定帧的内容。准备选窗不会修改运行目标，准备截图不充当运行状态缓存。
 
 ## 结果与验证边界
 
@@ -146,7 +146,7 @@ Python 是唯一任务格式。任务自身使用函数、分支、循环和异�
 
 | 需求 | 优先落点 | 需要重审的越界做法 |
 | --- | --- | --- |
-| 某任务增加点击、等待或模板 | 外部工作区的脚本与 assets，复用上下文动作 | 在主仓保存玩法记录或在 runner 中判断游戏名称 |
+| 某任务增加点击、等待或模板 | 外部工作区的任务与 assets，复用上下文动作 | 在主仓保存玩法记录或在 runner 中判断游戏名称 |
 | 确认新增通用动作或控制语义 | 执行核心与作者接口，按需补声明解析与 adapter | 在 CLI/JS 中拼出另一套执行器 |
 | 增加平台输入或窗口能力 | 对应 adapter 与 composition；必要时调整消费方 port | 让 portable 层导入平台库或系统命令 |
 | 增加入口或调整展示 | 入口映射及已有 application 用例 | 用页面显示状态替代执行时读取 |

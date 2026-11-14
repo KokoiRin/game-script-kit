@@ -62,7 +62,9 @@ TASK = {
 }
 ```
 
-本地声明的点位、图片与搜索自动参与依赖检查。使用 `assets/window-states.json` 里的共享搜索时，在 `requires.searches` 中列出名称。`requires` 的 `points`、`images`、`searches`、`states` 接受名称列表，`colors` 接受布尔值。状态依赖和 `colors` 决定是否装配状态读取与取色能力。真实运行必须写出 `target.backend`，取值为 `macos-window` 或 `macos-window-background`。
+本地声明的点位、图片与搜索自动参与依赖检查。状态与共享搜索只来自 `assets/window-states.json`；使用共享搜索时，在 `requires.searches` 中列出名称。`requires` 的 `points`、`images`、`searches`、`states` 接受名称列表，`colors` 接受布尔值。状态依赖和 `colors` 决定是否装配状态读取与取色能力。
+
+真实运行必须声明完整 `target`，`target.backend` 只能是 `macos-window` 或 `macos-window-background`，不接受命令行选窗或屏幕绝对坐标。省略 `target` 的任务仍可 dry-run，无需打开窗口。
 
 任务元信息必须是 Python 字面量，入口是接收一个位置参数的同步普通函数。名称重复和格式错误按文件报告。以下划线开头的文件可保存辅助代码，任务通过相对导入复用，例如 `from ._helpers import open_panel`。辅助模块在本次运行中加载，各次运行使用独立模块命名空间。
 

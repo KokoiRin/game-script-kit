@@ -17,7 +17,7 @@ python3.14 -m venv .venv
 
 ## macOS 原生应用
 
-桌面界面使用 SwiftUI + AppKit，支持素材准备与脚本运行；不需要 Qt、浏览器或本地 Web 服务。要求 macOS 13+、Swift 5.9+（Xcode 或 Command Line Tools）。首次构建：
+桌面界面使用 SwiftUI + AppKit，支持素材准备与任务运行（运行页仍显示“脚本运行”）；不需要 Qt、浏览器或本地 Web 服务。要求 macOS 13+、Swift 5.9+（Xcode 或 Command Line Tools）。首次构建：
 
 ```bash
 swift build --package-path native/StarDesktop
@@ -125,7 +125,7 @@ mkdir -p ~/StarWorkspaces/my-tasks
 ```
 
 填写目标应用名，读取并选择窗口，然后截取画面。截图会切换目标应用，完成后原生壳回到前台；点击冻结画面获取窗口相对点位，拖动框选后填写名称保存模板。
-模板写入该工作区的 `assets/<名称>.png`，界面给出可复制的资源片段供 Agent 生成脚本；当前不自动写入脚本或状态配置，重名模板不会覆盖。
+模板写入该工作区的 `assets/<名称>.png`，界面给出可复制的资源片段供 Agent 生成任务；当前不自动写入任务或状态配置，重名模板不会覆盖。
 
 准备与执行用例仍独立，在同一个原生壳组合；只有进入运行功能才加载任务目录，运行时禁止并发操作素材。`prepare` 要求显式工作区。窗口相对点位由任务 `target` 声明，准备选窗不会自动绑定运行目标。
 
@@ -152,9 +152,9 @@ def run(ctx):
 
 保存为 `<workspace>/scripts/my_task.py` 后，使用相同的 `list`、`details`、`run --dry-run` 和原生运行页。目录查询只读取 `TASK` 字面量，运行时执行发现时保存的主文件源码。完整接口、共享资源、局部恢复和停止边界见 [函数任务说明](docs/task-functions.md)。通用示例可通过 `.venv/bin/star run function-task-demo --dry-run` 检查。
 
-任务全部使用 Python 函数。原 JSON 步骤、`Script`、`Repeat`、`If` 和 `WaitUntil` 已退役，迁移说明见 [ADR 0015](docs/adr/0015-python-only-tasks.md)。资源与窗口状态配置继续使用 JSON。任务目录遇到遗留 JSON 文件会显示迁移提示。
+任务全部使用 Python 函数。原 JSON 步骤、`Script`、`Repeat`、`If` 和 `WaitUntil` 已退役，迁移说明见 [ADR 0015](docs/adr/0015-python-only-tasks.md)。资源与窗口状态配置继续使用 JSON。任务发现只读取 `.py`，遗留 JSON 等非 Python 文件被静默忽略，不显示迁移提示。
 
-运行 `.venv/bin/star recorder` 可记录屏幕坐标与颜色；终端保持焦点，按 `1` 记录、`Q` 结束。它只输出素材，不创建任务脚本。
+运行 `.venv/bin/star recorder` 可记录屏幕坐标与颜色；终端保持焦点，按 `1` 记录、`Q` 结束。它只打印记录，不创建任务；屏幕坐标不能直接用于任务，任务点位应在素材准备页采集窗口相对坐标。
 
 ## 开发与验证
 
