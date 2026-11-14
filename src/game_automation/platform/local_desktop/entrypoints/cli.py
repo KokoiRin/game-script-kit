@@ -31,17 +31,14 @@ from game_automation.portable.application.run_plan import (
     TaskPlanRunResult,
     run_task_plan,
 )
-from game_automation.portable.application.screen_state_config import (
-    load_screen_state_names,
-)
 from game_automation.portable.application.task_catalog import TaskNotFoundError
 from game_automation.portable.application.task_details import (
     TaskDetailsResult,
     describe_task_details,
 )
 from game_automation.portable.application.task_resources import (
+    load_task_state_names,
     prepare_task_resources,
-    task_state_config_path,
 )
 
 
@@ -260,7 +257,7 @@ def _describe_task(task, project_root: Path) -> TaskDetailsResult:
         task,
         asset_root=image_asset_root(project_root),
         supported_image_suffixes=IMAGE_ASSET_SUFFIXES,
-        state_names=_configured_window_state_names(project_root, task),
+        state_names=load_task_state_names(task, project_root),
     )
 
 
@@ -280,14 +277,6 @@ def _merge_dry_run_images(
 ) -> tuple[str, ...]:
     """合并用户显式 dry-run 图片和脚本解析出的图片依赖。"""
     return tuple(dict.fromkeys((*explicit_images, *script_images)))
-
-
-def _configured_window_state_names(project_root: Path, task) -> tuple[str, ...] | None:
-    """读取窗口规则中的状态名，配置不可用时返回 None。"""
-    try:
-        return load_screen_state_names(task_state_config_path(task, project_root))
-    except ValueError:
-        return None
 
 
 def _print_task_details(details: TaskDetailsResult) -> None:

@@ -14,6 +14,7 @@ from game_automation.portable.application.project_assets import (
     image_asset_root,
 )
 from game_automation.portable.application.screen_state_config import (
+    load_screen_state_names,
     load_screen_state_target_catalog,
 )
 from game_automation.portable.application.task_dependencies import (
@@ -33,11 +34,26 @@ def prepare_task_resources(task: FunctionTask, project_root: Path) -> FunctionTa
 
 def load_shared_task_resources(project_root: Path) -> TargetCatalog | None:
     """读取窗口规则中可供任务复用的共享资源目录。"""
-    return load_screen_state_target_catalog(
-        rules_path(project_root),
-        asset_root=image_asset_root(project_root),
-        supported_suffixes=IMAGE_ASSET_SUFFIXES,
-    )
+    try:
+        return load_screen_state_target_catalog(
+            rules_path(project_root),
+            asset_root=image_asset_root(project_root),
+            supported_suffixes=IMAGE_ASSET_SUFFIXES,
+        )
+    except OSError as exc:
+        raise ValueError(f"无法读取共享窗口规则：{exc}") from exc
+
+
+def load_task_state_names(
+    task: FunctionTask | None, project_root: Path
+) -> tuple[str, ...] | None:
+    """按状态依赖读取就绪信息，独立枚举时读取全部名称，错误返回未知。"""
+    if task is not None and not task.requires.states:
+        return ()
+    try:
+        return load_screen_state_names(task_state_config_path(task, project_root))
+    except OSError, ValueError:
+        return None
 
 
 def task_with_shared_resources(

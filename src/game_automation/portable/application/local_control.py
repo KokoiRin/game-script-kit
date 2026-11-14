@@ -20,9 +20,6 @@ from game_automation.portable.application.project_assets import (
     image_asset_root,
 )
 from game_automation.portable.application.runtime_ports import RuntimeFactory
-from game_automation.portable.application.screen_state_config import (
-    load_screen_state_names,
-)
 from game_automation.portable.application.task_catalog import (
     TaskCatalog,
     TaskNotFoundError,
@@ -33,8 +30,8 @@ from game_automation.portable.application.task_details import (
 )
 from game_automation.portable.application.task_discovery import TaskLoadError
 from game_automation.portable.application.task_resources import (
+    load_task_state_names,
     prepare_task_resources,
-    task_state_config_path,
 )
 from game_automation.portable.application.task_run import run_task
 from game_automation.portable.domain.task import FunctionTask
@@ -241,13 +238,7 @@ class LocalControlApplication:
 
     def list_window_state_names(self) -> tuple[str, ...]:
         """列出窗口规则中的界面状态名称，配置不可用时返回空列表。"""
-        try:
-            names = load_screen_state_names(
-                task_state_config_path(None, self._project_root)
-            )
-        except ValueError:
-            return ()
-        return () if names is None else names
+        return load_task_state_names(None, self._project_root) or ()
 
     def describe_task(self, name: str) -> TaskDetailsResult:
         """返回 UI 可展示的任务入口和依赖摘要。"""
@@ -261,7 +252,7 @@ class LocalControlApplication:
             task,
             asset_root=self._image_asset_root(),
             supported_image_suffixes=IMAGE_ASSET_SUFFIXES,
-            state_names=self._configured_state_names_for_readiness(task),
+            state_names=load_task_state_names(task, self._project_root),
         )
 
     def run_named_task(
@@ -439,17 +430,6 @@ class LocalControlApplication:
     def _image_asset_root(self) -> Path:
         """返回本地 UI 允许读取模板图片的项目内目录。"""
         return image_asset_root(self._project_root)
-
-    def _configured_state_names_for_readiness(
-        self, task: FunctionTask
-    ) -> tuple[str, ...] | None:
-        """读取窗口规则中的状态名，配置不可用时返回 None。"""
-        try:
-            return load_screen_state_names(
-                task_state_config_path(task, self._project_root)
-            )
-        except ValueError:
-            return None
 
     def _task_with_shared_resources(self, task: FunctionTask) -> FunctionTask:
         """按任务需要合并窗口规则里的共享搜索资源。"""
