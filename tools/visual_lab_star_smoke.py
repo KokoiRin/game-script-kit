@@ -8,22 +8,19 @@ from __future__ import annotations
 
 import argparse
 import json
-from pathlib import Path
 import time
+from pathlib import Path
+from pprint import pformat
 from typing import Any
 from urllib.request import Request, urlopen
 
-from game_automation.platform.local_desktop.composition import run_script_on_local_desktop
-from game_automation.portable.domain import (
-    Click,
-    ImageExists,
-    ImageTarget,
-    ImageTemplate,
-    ScreenWindow,
-    Script,
-    WaitUntil,
+from game_automation.platform.local_desktop.composition import (
+    run_script_on_local_desktop,
 )
-
+from game_automation.portable.application.function_task_loader import (
+    parse_function_task_source,
+)
+from game_automation.portable.domain.task import FunctionTask
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 LAB_IMAGE_ROOT = PROJECT_ROOT / "src" / "star_visual_lab" / "static" / "images"
@@ -31,8 +28,12 @@ LAB_IMAGE_ROOT = PROJECT_ROOT / "src" / "star_visual_lab" / "static" / "images"
 
 def main(argv: list[str] | None = None) -> int:
     """重置靶场、用真实 Star 完成任务并读取真值验收。"""
-    parser = argparse.ArgumentParser(description="Run Star against the local visual lab.")
-    parser.add_argument("--url", default="http://127.0.0.1:8770", help="Running visual lab URL.")
+    parser = argparse.ArgumentParser(
+        description="Run Star against the local visual lab."
+    )
+    parser.add_argument(
+        "--url", default="http://127.0.0.1:8770", help="Running visual lab URL."
+    )
     parser.add_argument(
         "--target-app",
         default="Safari",
@@ -65,10 +66,12 @@ def main(argv: list[str] | None = None) -> int:
         {"mode": "normal", "loading_delay_seconds": 0.6},
     )
     if args.start_delay:
-        print(f"Visual lab smoke starts in {args.start_delay:g}s; keep the lab browser visible.")
+        print(
+            f"Visual lab smoke starts in {args.start_delay:g}s; keep the lab browser visible."
+        )
         time.sleep(args.start_delay)
     result = run_script_on_local_desktop(
-        _build_smoke_script(min_confidence=args.min_confidence),
+        _build_smoke_task(min_confidence=args.min_confidence),
         dry_run=False,
         target_application=args.target_app,
         target_window_title=args.target_window_title,
@@ -86,33 +89,32 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
-def _build_smoke_script(*, min_confidence: float) -> Script:
-    """构造依次识别并点击三个目标、等待完成标识的 smoke 脚本。"""
-    open_tasks = ImageTemplate(str(LAB_IMAGE_ROOT / "open-tasks.png"))
-    target_task = ImageTemplate(str(LAB_IMAGE_ROOT / "target-task.png"))
-    confirm_task = ImageTemplate(str(LAB_IMAGE_ROOT / "confirm-task.png"))
-    completed = ImageTemplate(str(LAB_IMAGE_ROOT / "completed.png"))
-    return Script(
-        name="visual-lab-real-smoke",
-        window=ScreenWindow(),
-        steps=(
-            _wait_for(open_tasks, min_confidence=min_confidence),
-            Click(ImageTarget(open_tasks, min_confidence=min_confidence)),
-            _wait_for(target_task, min_confidence=min_confidence),
-            Click(ImageTarget(target_task, min_confidence=min_confidence)),
-            _wait_for(confirm_task, min_confidence=min_confidence),
-            Click(ImageTarget(confirm_task, min_confidence=min_confidence)),
-            _wait_for(completed, min_confidence=min_confidence),
-        ),
-    )
-
-
-def _wait_for(template: ImageTemplate, *, min_confidence: float) -> WaitUntil:
-    """构造适合本机浏览器状态刷新的图片等待步骤。"""
-    return WaitUntil(
-        ImageExists(template, min_confidence=min_confidence),
-        timeout_seconds=8,
-        interval_seconds=0.2,
+def _build_smoke_task(*, min_confidence: float) -> FunctionTask:
+    """构造直接识图点击并等待完成标识的 Python 任务。"""
+    names = ("open-tasks", "target-task", "confirm-task", "completed")
+    metadata = {
+        "name": "visual-lab-real-smoke",
+        "resources": {
+            "images": {name: str(LAB_IMAGE_ROOT / f"{name}.png") for name in names},
+            "searches": {
+                name: {"image": name, "min_confidence": min_confidence}
+                for name in names
+            },
+        },
+    }
+    source = '"""执行视觉靶场验收流程，设备能力由运行用例注入。"""\n'
+    source += f"TASK = {pformat(metadata)}\n\n"
+    source += '''def run(ctx):
+    """依次点击任务入口并等待完成标识。"""
+    for name in ("open-tasks", "target-task", "confirm-task"):
+        ctx.wait_image(name, timeout=8, interval=0.2)
+        ctx.click_image(name)
+    ctx.wait_image("completed", timeout=8, interval=0.2)
+'''
+    return parse_function_task_source(
+        source,
+        path=Path(__file__).resolve(),
+        asset_root=LAB_IMAGE_ROOT,
     )
 
 

@@ -119,7 +119,9 @@ def _parse_screen_state_config(
         for search_index, search_item in enumerate(search_items):
             if not isinstance(search_item, dict):
                 raise ValueError("screen state search must be an object")
-            search_name = _screen_state_search_name(state, search_item, search_index=search_index)
+            search_name = _screen_state_search_name(
+                state, search_item, search_index=search_index
+            )
             searches.append(
                 NamedImageSearch(
                     search_name,
@@ -138,7 +140,9 @@ def _parse_screen_state_config(
                             )
                         ),
                         region=_parse_region_ref(search_item.get("region")),
-                        min_confidence=_parse_optional_confidence(search_item.get("min_confidence")),
+                        min_confidence=_parse_optional_confidence(
+                            search_item.get("min_confidence")
+                        ),
                     ),
                 )
             )
@@ -186,7 +190,9 @@ def _parse_regions(value: Any) -> tuple[NamedRegion, ...]:
     for name, region_value in value.items():
         if not isinstance(name, str) or not name.strip():
             raise ValueError("screen state region name cannot be empty")
-        regions.append(NamedRegion(name, _parse_rect(region_value, f"screen state region: {name}")))
+        regions.append(
+            NamedRegion(name, _parse_rect(region_value, f"screen state region: {name}"))
+        )
     return tuple(regions)
 
 
@@ -220,7 +226,9 @@ def _parse_optional_confidence(value: Any) -> float | None:
         return None
     confidence = float(value)
     if not 0 < confidence <= 1:
-        raise ValueError("screen state search min_confidence must be greater than 0 and at most 1")
+        raise ValueError(
+            "screen state search min_confidence must be greater than 0 and at most 1"
+        )
     return confidence
 
 
@@ -244,7 +252,11 @@ def _resolve_asset_image(
     try:
         candidate.relative_to(resolved_asset_root)
     except ValueError as exc:
-        raise ValueError("screen state search image must stay inside assets folder") from exc
+        raise ValueError(
+            "screen state search image must stay inside assets folder"
+        ) from exc
     if not candidate.is_file() or candidate.suffix.lower() not in supported_suffixes:
-        raise ValueError("screen state search image does not exist or has unsupported suffix")
+        raise ValueError(
+            "screen state search image does not exist or has unsupported suffix"
+        )
     return candidate

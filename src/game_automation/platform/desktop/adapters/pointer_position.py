@@ -42,6 +42,6 @@ class PyAutoGuiPointerPositionReader(PointerPositionReader):
         except ModuleNotFoundError as exc:
             raise RuntimeError(
                 "pyautogui is required for coordinate recording. "
-                "Install dependencies with: pip install -e \".[dev]\""
+                'Install dependencies with: pip install -e ".[dev]"'
             ) from exc
         return pyautogui

@@ -3,22 +3,32 @@
 本模块拥有会话资源，提供源证明与坐标边界；不解释脚本步骤、不复用观察界面的缓存。
 显式原生后端失败时不会退回桌面输入或截图。
 """
+
 from __future__ import annotations
 
+import threading
+import time
 from contextlib import contextmanager
 from enum import Enum, auto
 from pathlib import Path
-import threading
-import time
 
+from game_automation.platform.macos.adapters.window_identity import (
+    BoundWindow,
+    WindowPresentationUnavailable,
+    logical_bounds,
+)
+from game_automation.platform.macos.adapters.window_stream import (
+    WindowFramePending,
+    WindowStreamSource,
+)
 from game_automation.portable.application.capture_errors import WindowCaptureError
 from game_automation.portable.application.runtime_ports import RuntimePorts
-from game_automation.portable.application.window_state_rules import load_window_state_rules
+from game_automation.portable.application.window_state_rules import (
+    load_window_state_rules,
+)
 from game_automation.portable.domain import AreaWindow
 from game_automation.portable.engine.cancellation import ScriptCancelledError
 from game_automation.portable.preparation.models import DesktopWindow
-from game_automation.platform.macos.adapters.window_identity import BoundWindow, WindowPresentationUnavailable, logical_bounds
-from game_automation.platform.macos.adapters.window_stream import WindowFramePending, WindowStreamSource
 
 
 class NativeRuntimeLease:
@@ -35,9 +45,11 @@ class NativeRuntimeLease:
         """关闭失败后拒绝所有工作区和工厂，直到后台进程重启。"""
         with self._lock:
             if self._close_error is not None:
-                raise RuntimeError(f'macos-window session unavailable: {self._close_error}; 请重新启动后台后重试')
+                raise RuntimeError(
+                    f"macos-window session unavailable: {self._close_error}; 请重新启动后台后重试"
+                )
             if self._leased:
-                raise RuntimeError('已有原生脚本运行，请等待当前会话停止')
+                raise RuntimeError("已有原生脚本运行，请等待当前会话停止")
             self._leased = True
 
     def release(self):
@@ -58,8 +70,16 @@ _PROCESS_LEASE = NativeRuntimeLease()
 class MacOSRuntimeFactory:
     """一次只拥有一个原生会话，停流失败后保留租约直到应用重启。"""
 
-    def __init__(self, workspace: Path, *, backend_factory=None, binding_factory=BoundWindow,
-                 source_factory=WindowStreamSource, session_factory=None, lease=None):
+    def __init__(
+        self,
+        workspace: Path,
+        *,
+        backend_factory=None,
+        binding_factory=BoundWindow,
+        source_factory=WindowStreamSource,
+        session_factory=None,
+        lease=None,
+    ):
         """保存工作区与系统边界；构造工厂本身不触发系统权限。"""
         self.workspace = Path(workspace)
         self._backend_factory = backend_factory
@@ -75,32 +95,65 @@ class MacOSRuntimeFactory:
         session = None
         try:
             if not target.uses_native_window:
-                raise ValueError('macOS runtime requires an explicit native-window backend')
+                raise ValueError(
+                    "macOS runtime requires an explicit native-window backend"
+                )
             rules = load_window_state_rules(self.workspace)
             if (rules.width, rules.height) != (target.width, target.height):
-                raise ValueError('目标窗口尺寸与状态素材不符')
+                raise ValueError("目标窗口尺寸与状态素材不符")
             if self._backend_factory is None:
-                from game_automation.platform.macos.adapters.accessibility_window_backend import MacOSAccessibilityWindowBackend
+                from game_automation.platform.macos.adapters.accessibility_window_backend import (
+                    MacOSAccessibilityWindowBackend,
+                )
+
                 backend = MacOSAccessibilityWindowBackend()
             else:
                 backend = self._backend_factory()
-            matches = [w for w in backend.list_windows(target.application) if w.title == target.window_title]
+            matches = [
+                w
+                for w in backend.list_windows(target.application)
+                if w.title == target.window_title
+            ]
             if len(matches) != 1:
-                raise WindowCaptureError('目标窗口标题必须唯一且可见，请打开指定游戏窗口')
+                raise WindowCaptureError(
+                    "目标窗口标题必须唯一且可见，请打开指定游戏窗口"
+                )
             selected = matches[0]
-            if (selected.rect.width, selected.rect.height) != (target.width, target.height):
-                raise ValueError('目标窗口尺寸与脚本素材不符，请恢复窗口尺寸后重试')
-            window = DesktopWindow(f'{selected.pid}:{selected.window_number}', target.application,
-                                   selected.title, selected.rect)
+            if (selected.rect.width, selected.rect.height) != (
+                target.width,
+                target.height,
+            ):
+                raise ValueError("目标窗口尺寸与脚本素材不符，请恢复窗口尺寸后重试")
+            window = DesktopWindow(
+                f"{selected.pid}:{selected.window_number}",
+                target.application,
+                selected.title,
+                selected.rect,
+            )
             binding = self._binding_factory(window)
-            factory = MacOSWindowSession if self._session_factory is None else self._session_factory
+            factory = (
+                MacOSWindowSession
+                if self._session_factory is None
+                else self._session_factory
+            )
             # 先登记会话，再分配可能启动的资源，失败也必须进入同一关闭路径。
-            session = factory(window, binding, rules, cancellation=cancellation, logger=logger, backend=target.backend)
-            source = self._source_factory(window, (rules.pixel_width, rules.pixel_height), hz=5, binding=binding)
+            session = factory(
+                window,
+                binding,
+                rules,
+                cancellation=cancellation,
+                logger=logger,
+                backend=target.backend,
+            )
+            source = self._source_factory(
+                window, (rules.pixel_width, rules.pixel_height), hz=5, binding=binding
+            )
             session.attach_source(source)
             if logger is not None:
-                logger.log(f'runtime backend={target.backend} pid={selected.pid} window_id={binding.number} '
-                           f'title={window.title!r} fixed_rect={window.rect} pixel_size={(rules.pixel_width, rules.pixel_height)} hz=5')
+                logger.log(
+                    f"runtime backend={target.backend} pid={selected.pid} window_id={binding.number} "
+                    f"title={window.title!r} fixed_rect={window.rect} pixel_size={(rules.pixel_width, rules.pixel_height)} hz=5"
+                )
             yield session.ports(requirements)
         finally:
             try:
@@ -113,9 +166,9 @@ class MacOSRuntimeFactory:
                 self._lease.release()
 
 
-
 class _InputPhase(Enum):
     """区分可重新定位的准备与不可重放的已尝试按下。"""
+
     PREPARING = auto()
     COMMITTED = auto()
 
@@ -131,10 +184,23 @@ class _InputNotCommitted(WindowCaptureError):
 
 class MacOSWindowSession:
     """统一固定窗口身份、输入后新帧门槛与唯一源所有权。"""
-    capture_mode = 'window_stream'
 
-    def __init__(self, window, binding, rules, *, cancellation=None, logger=None,
-                 clock=time.monotonic, sleep=time.sleep, freshness_seconds=1.0, capture_timeout=2.0, backend='macos-window'):
+    capture_mode = "window_stream"
+
+    def __init__(
+        self,
+        window,
+        binding,
+        rules,
+        *,
+        cancellation=None,
+        logger=None,
+        clock=time.monotonic,
+        sleep=time.sleep,
+        freshness_seconds=1.0,
+        capture_timeout=2.0,
+        backend="macos-window",
+    ):
         """保存固定几何，系统源在工厂登记会话之后注入。"""
         self.window, self.binding, self.rules = window, binding, rules
         self.backend = backend
@@ -153,28 +219,41 @@ class MacOSWindowSession:
     def attach_source(self, source):
         """仅绑定本会话独占的源，禁止运行中替换。"""
         if self._source is not None:
-            raise RuntimeError('native capture source already attached')
+            raise RuntimeError("native capture source already attached")
         self._source = source
 
     def ports(self, requirements):
         """按本轮需求装配端口，全部只引用同一会话。"""
-        from game_automation.platform.macos.adapters.window_input import MacOSWindowInputDevice
-        from game_automation.platform.macos.adapters.window_vision import WindowColorReader, WindowImageLocator, WindowStateReader
-        if self.backend == 'macos-window-background':
-            from game_automation.platform.macos.adapters.window_background_input import MacOSBackgroundWindowInputDevice
+        from game_automation.platform.macos.adapters.window_input import (
+            MacOSWindowInputDevice,
+        )
+        from game_automation.platform.macos.adapters.window_vision import (
+            WindowColorReader,
+            WindowImageLocator,
+            WindowStateReader,
+        )
+
+        if self.backend == "macos-window-background":
+            from game_automation.platform.macos.adapters.window_background_input import (
+                MacOSBackgroundWindowInputDevice,
+            )
+
             device = MacOSBackgroundWindowInputDevice(self)
         else:
             device = MacOSWindowInputDevice(self)
-        return RuntimePorts(AreaWindow(self.window.rect), device,
-                            WindowColorReader(self) if requirements.needs_color_reader else None,
-                            WindowImageLocator(self) if requirements.needs_image_locator else None,
-                            WindowStateReader(self) if requirements.needs_screen_state_reader else None,
-                            control=self if self.backend == 'macos-window-background' else None)
+        return RuntimePorts(
+            AreaWindow(self.window.rect),
+            device,
+            WindowColorReader(self) if requirements.needs_color_reader else None,
+            WindowImageLocator(self) if requirements.needs_image_locator else None,
+            WindowStateReader(self) if requirements.needs_screen_state_reader else None,
+            control=self if self.backend == "macos-window-background" else None,
+        )
 
     def check_cancelled(self):
         """在每次系统边界与有界等待间保留取消优先。"""
         if self.cancellation is not None and self.cancellation.is_cancelled():
-            raise ScriptCancelledError('script run cancelled')
+            raise ScriptCancelledError("script run cancelled")
 
     def task_time(self):
         """只从任务预算扣除已识别的暂停，不改变系统事件时钟。"""
@@ -203,30 +282,39 @@ class MacOSWindowSession:
         """核对固定身份和完整原矩形，不读取或等待源画面。"""
         self.check_cancelled()
         if self._closed:
-            raise WindowCaptureError('原生运行会话已经关闭')
+            raise WindowCaptureError("原生运行会话已经关闭")
         item = self.binding.check()
         q = self.binding.quartz
         rect = self.window.rect
         expected = (rect.left, rect.top, rect.width, rect.height)
         current = logical_bounds(item.get(q.kCGWindowBounds, {}))
         if current != expected:
-            advice = '请恢复原窗口' if self.backend == 'macos-window-background' else '请停止后重新运行'
+            advice = (
+                "请恢复原窗口"
+                if self.backend == "macos-window-background"
+                else "请停止后重新运行"
+            )
             raise WindowPresentationUnavailable(
-                f'运行中目标窗口位置已变化，原窗口={expected}，当前窗口={current}，{advice}'
+                f"运行中目标窗口位置已变化，原窗口={expected}，当前窗口={current}，{advice}"
             )
         return item
 
     def _check_window_once(self):
         """先核对完整矩形，后台另读轻量源证明并复核首帧超时。"""
         item = self._check_geometry()
-        if self.backend == 'macos-window-background' and self._source is not None:
+        if self.backend == "macos-window-background" and self._source is not None:
             try:
                 proof = self._source.check_available()
             except WindowFramePending:
                 self._check_geometry()
                 raise
-            if proof is None or not 0 <= self._clock() - proof.captured_at <= self._freshness:
-                raise WindowPresentationUnavailable('窗口流暂未提供有效新画面，等待恢复')
+            if (
+                proof is None
+                or not 0 <= self._clock() - proof.captured_at <= self._freshness
+            ):
+                raise WindowPresentationUnavailable(
+                    "窗口流暂未提供有效新画面，等待恢复"
+                )
         return item
 
     def check_window(self):
@@ -239,7 +327,7 @@ class MacOSWindowSession:
 
     def _presentation_unavailable(self, cause):
         """准备区退出后重新定位，其余调用在原位置等待恢复。"""
-        if self.backend != 'macos-window-background':
+        if self.backend != "macos-window-background":
             raise cause
         self._begin_pause(cause)
         if self._input_phase is _InputPhase.PREPARING:
@@ -252,7 +340,7 @@ class MacOSWindowSession:
             self._paused_at = self._clock()
             self.proof = None
             if self.logger is not None:
-                self.logger.log(f'runtime paused backend={self.backend} reason={cause}')
+                self.logger.log(f"runtime paused backend={self.backend} reason={cause}")
 
     def _recover(self, cause):
         """保留唯一源，等原几何和恢复之后的源事件再继续。"""
@@ -262,7 +350,7 @@ class MacOSWindowSession:
             try:
                 self._check_window_once()
                 restored_at = self._clock()
-                sequence = getattr(getattr(self._source, 'proof', None), 'sequence', 0)
+                sequence = getattr(getattr(self._source, "proof", None), "sequence", 0)
                 with self._read_frame(after_time=restored_at, after_sequence=sequence):
                     pass
             except WindowPresentationUnavailable:
@@ -272,20 +360,26 @@ class MacOSWindowSession:
             self._paused_total += paused_seconds
             self._paused_at = None
             if self.logger is not None:
-                self.logger.log(f'runtime resumed backend={self.backend} paused_seconds={paused_seconds:.3f}')
+                self.logger.log(
+                    f"runtime resumed backend={self.backend} paused_seconds={paused_seconds:.3f}"
+                )
             return
 
     def validate_point(self, point):
         """校验全局逻辑点必须在已绑定窗口内。"""
         self.check_window()
         r = self.window.rect
-        if not (r.left <= point.x < r.left + r.width and r.top <= point.y < r.top + r.height):
-            raise ValueError('输入或取色坐标超出固定目标窗口')
+        if not (
+            r.left <= point.x < r.left + r.width and r.top <= point.y < r.top + r.height
+        ):
+            raise ValueError("输入或取色坐标超出固定目标窗口")
 
     def input_finished(self):
         """输入结束后要求新的系统源事件，重复缓存不能证明输入结果。"""
-        source_proof = getattr(self._source, 'proof', None)
-        self._after_sequence = max(self._after_sequence, getattr(source_proof, 'sequence', 0))
+        source_proof = getattr(self._source, "proof", None)
+        self._after_sequence = max(
+            self._after_sequence, getattr(source_proof, "sequence", 0)
+        )
         self._after_input = self._clock()
 
     def screenshot(self):
@@ -305,12 +399,23 @@ class MacOSWindowSession:
             try:
                 self._check_window_once()
                 if image.size != (self.rules.pixel_width, self.rules.pixel_height):
-                    raise WindowPresentationUnavailable('窗口截图像素尺寸与素材不符')
-                proof = getattr(self._source, 'proof', None)
+                    raise WindowPresentationUnavailable("窗口截图像素尺寸与素材不符")
+                proof = getattr(self._source, "proof", None)
                 now = self._clock()
-                fresh = proof is not None and 0 <= now - proof.captured_at <= self._freshness
-                after_input = self._after_input is None or (proof is not None and proof.sequence > self._after_sequence and proof.captured_at > self._after_input)
-                after_recovery = after_time is None or (proof is not None and proof.sequence > after_sequence and proof.captured_at > after_time)
+                fresh = (
+                    proof is not None
+                    and 0 <= now - proof.captured_at <= self._freshness
+                )
+                after_input = self._after_input is None or (
+                    proof is not None
+                    and proof.sequence > self._after_sequence
+                    and proof.captured_at > self._after_input
+                )
+                after_recovery = after_time is None or (
+                    proof is not None
+                    and proof.sequence > after_sequence
+                    and proof.captured_at > after_time
+                )
                 if fresh and after_input and after_recovery:
                     self.proof = proof
                     self._after_input = None
@@ -320,8 +425,14 @@ class MacOSWindowSession:
                 raise
             image.close()
             if self._clock() >= deadline:
-                error = (WindowPresentationUnavailable if self.backend == 'macos-window-background' else WindowCaptureError)
-                raise error('未获得输入之后的新窗口画面，或窗口流已过期；请检查游戏和截图权限')
+                error = (
+                    WindowPresentationUnavailable
+                    if self.backend == "macos-window-background"
+                    else WindowCaptureError
+                )
+                raise error(
+                    "未获得输入之后的新窗口画面，或窗口流已过期；请检查游戏和截图权限"
+                )
             self.check_cancelled()
             self._sleep(0.02)
 

@@ -8,8 +8,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from game_automation.portable.domain.color_pattern import (
+    ColorPattern,
+    validate_point_evidence,
+)
 from game_automation.portable.domain.geometry import Point, Rect
-from game_automation.portable.domain.color_pattern import ColorPattern, validate_point_evidence
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,15 +43,24 @@ class ImageMatch:
     def point_at(self, anchor: str) -> Point:
         """按 anchor 名称返回匹配区域内的点位。"""
         points = {
-            "center": Point(self.rect.left + self.rect.width // 2, self.rect.top + self.rect.height // 2),
+            "center": Point(
+                self.rect.left + self.rect.width // 2,
+                self.rect.top + self.rect.height // 2,
+            ),
             "top_left": Point(self.rect.left, self.rect.top),
             "top_center": Point(self.rect.left + self.rect.width // 2, self.rect.top),
             "top_right": Point(self.rect.left + self.rect.width, self.rect.top),
             "left_center": Point(self.rect.left, self.rect.top + self.rect.height // 2),
-            "right_center": Point(self.rect.left + self.rect.width, self.rect.top + self.rect.height // 2),
+            "right_center": Point(
+                self.rect.left + self.rect.width, self.rect.top + self.rect.height // 2
+            ),
             "bottom_left": Point(self.rect.left, self.rect.top + self.rect.height),
-            "bottom_center": Point(self.rect.left + self.rect.width // 2, self.rect.top + self.rect.height),
-            "bottom_right": Point(self.rect.left + self.rect.width, self.rect.top + self.rect.height),
+            "bottom_center": Point(
+                self.rect.left + self.rect.width // 2, self.rect.top + self.rect.height
+            ),
+            "bottom_right": Point(
+                self.rect.left + self.rect.width, self.rect.top + self.rect.height
+            ),
         }
         try:
             return points[anchor]
@@ -96,11 +108,13 @@ class ImageSearchRequest:
     def __post_init__(self) -> None:
         """校验图片搜索请求最低置信度必须大于 0 且不超过 1。"""
         if self.pattern is not None and not isinstance(self.pattern, ColorPattern):
-            raise ValueError('image search pattern must be a ColorPattern')
+            raise ValueError("image search pattern must be a ColorPattern")
         if type(self.priority) is not int:
-            raise ValueError('image search priority must be an integer')
+            raise ValueError("image search priority must be an integer")
         if not 0 < self.min_confidence <= 1:
-            raise ValueError("image search request min_confidence must be greater than 0 and at most 1")
+            raise ValueError(
+                "image search request min_confidence must be greater than 0 and at most 1"
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -116,13 +130,20 @@ class ImageBatchMatchResult:
 
     def __post_init__(self) -> None:
         """校验批量匹配中单个模板耗时、跳过状态和最佳诊断信息。"""
-        validate_point_evidence(self.point_count, self.matched_points, skipped=self.skipped, found=self.match is not None)
+        validate_point_evidence(
+            self.point_count,
+            self.matched_points,
+            skipped=self.skipped,
+            found=self.match is not None,
+        )
         if self.elapsed_ms < 0:
             raise ValueError("image batch match elapsed_ms cannot be negative")
         if self.skipped and self.match is not None:
             raise ValueError("skipped image batch result cannot contain a match")
         if self.skipped and self.best_confidence is not None:
-            raise ValueError("skipped image batch result cannot contain best confidence")
+            raise ValueError(
+                "skipped image batch result cannot contain best confidence"
+            )
         if self.skipped and self.best_rect is not None:
             raise ValueError("skipped image batch result cannot contain best rect")
         if self.best_confidence is not None and not 0 <= self.best_confidence <= 1:
@@ -133,7 +154,7 @@ class ImageBatchMatchResult:
             object.__setattr__(self, "best_rect", self.match.rect)
 
     @classmethod
-    def skipped_result(cls, template: ImageTemplate) -> "ImageBatchMatchResult":
+    def skipped_result(cls, template: ImageTemplate) -> ImageBatchMatchResult:
         """构造批量匹配中未执行的模板结果。"""
         return cls(template=template, match=None, elapsed_ms=0, skipped=True)
 

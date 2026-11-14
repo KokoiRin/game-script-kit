@@ -37,6 +37,6 @@ class PyAutoGuiPixelColorReader(PixelColorReader):
         except ModuleNotFoundError as exc:
             raise RuntimeError(
                 "pyautogui is required for screen color sampling. "
-                "Install dependencies with: pip install -e \".[dev]\""
+                'Install dependencies with: pip install -e ".[dev]"'
             ) from exc
         return pyautogui

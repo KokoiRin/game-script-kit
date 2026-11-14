@@ -11,7 +11,11 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from game_automation.portable.domain import Color, Point
-from game_automation.portable.engine.ports import KeyStateReader, PixelColorReader, PointerPositionReader
+from game_automation.portable.engine.ports import (
+    KeyStateReader,
+    PixelColorReader,
+    PointerPositionReader,
+)
 
 Sleeper = Callable[[float], None]
 Clock = Callable[[], float]

@@ -1,8 +1,10 @@
 # 循环内局部恢复与任务组织
 
-- 状态：讨论稿（proposed），未采纳、未实现
+- 状态为历史讨论稿，步骤树语法候选随 [ADR 0015](../adr/0015-python-only-tasks.md) 退役
 - 日期：2026-10-18
 - 本文不定义必须实现的语法、默认策略或开发门禁
+
+2026-11-14 已采纳的 Python 函数任务使用普通异常处理组织局部恢复，当前接口见 [函数任务说明](../task-functions.md)。本文保留早期恢复方案的讨论背景。
 
 ## 要讨论的问题
 
@@ -10,12 +12,12 @@
 
 [由 Agent 创建和维护任务](../adr/0001-agent-authored-tasks.md) 已确定为协作方向；下列控制流和创建细节仍是候选，不因进入仓库而视为采纳。
 
-## 当前代码实际怎样运行
+## 当时的步骤树怎样运行
 
-- [`ScriptRunner.run`](../../src/game_automation/portable/engine/runner.py) 已返回执行结果；[`run_script`](../../src/game_automation/portable/application/script_run.py) 和 [Run Plan](../../src/game_automation/portable/application/run_plan.py) 已有结果归一化与汇总。
+- 当时的 `ScriptRunner.run` 返回执行结果，运行用例和 Run Plan 已有结果归一化与汇总。
 - 图片点击缺图、`WaitUntil` 超时会抛出 `ScriptStoppedNormally`，在最外层转为 `stopped_unmet_condition`，因而会退出整个脚本。
 - `Repeat` 只接住自己 `break_if` 触发的局部中断，不接住上述条件停止。`If` 条件为假则选择 else，本身不终止脚本。
-- 现有嵌套循环与 `break_if_image` 可组合出部分局部退出，见 [循环作用域测试](../../tests/test_repeat_break_image.py)；它仍不是对任意缺图或超时的局部恢复机制。
+- 当时的嵌套循环与 `break_if_image` 可组合出部分局部退出，缺图或超时的恢复还需要另外设计。
 
 因此缺口主要是局部恢复边界及恢复后的画面确认，并非系统完全没有返回结果。现有取消和窗口坐标限制另见 [当前状态](../current-state.md)。
 

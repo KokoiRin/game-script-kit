@@ -9,7 +9,7 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
-from game_automation.portable.domain import Script
+from game_automation.portable.domain.task import FunctionTask
 
 
 @dataclass(frozen=True, slots=True)
@@ -17,7 +17,7 @@ class ScriptPlanItem:
     """描述一轮计划里的单个脚本项。"""
 
     name: str
-    script: Script
+    script: FunctionTask
     dry_run_images: tuple[str, ...] = ()
 
 
@@ -93,7 +93,9 @@ def run_script_plan(
         incomplete = result.exit_code != 0 or result.finish_reason != "completed"
         if incomplete and first_incomplete_reason == "completed":
             first_incomplete_reason = (
-                result.finish_reason if result.finish_reason != "completed" else "failed"
+                result.finish_reason
+                if result.finish_reason != "completed"
+                else "failed"
             )
         if result.exit_code != 0:
             if first_error_code == 0:

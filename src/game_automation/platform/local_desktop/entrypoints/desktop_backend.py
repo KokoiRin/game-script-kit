@@ -5,15 +5,16 @@ PNG 通过独占临时文件交付，协议输出固定写入宿主传入的原�
 """
 
 import argparse
-from dataclasses import asdict
 import json
 import math
 import os
-from pathlib import Path
 import signal
 import sys
 import tempfile
-from typing import Callable, TextIO
+from collections.abc import Callable
+from dataclasses import asdict
+from pathlib import Path
+from typing import TextIO
 
 from game_automation.portable.domain.geometry import Point, Rect
 
@@ -27,6 +28,7 @@ class WorkspaceLock:
     def __enter__(self):
         """通过内核文件锁拒绝同一工作区的第二个后台。"""
         import fcntl
+
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._file = self.path.open("a+")
         try:
@@ -45,13 +47,24 @@ class WorkspaceLock:
 
 
 class DesktopBackend:
-    def __init__(self, workspace: Path, *, preparation=None, control_factory: Callable | None = None, permissions=None, observation_factory=None) -> None:
+    def __init__(
+        self,
+        workspace: Path,
+        *,
+        preparation=None,
+        control_factory: Callable | None = None,
+        permissions=None,
+        observation_factory=None,
+    ) -> None:
         """装配独立准备服务，延迟加载执行服务并创建单帧缓存。"""
         self.workspace = workspace.resolve()
         if not self.workspace.is_dir():
             raise ValueError("workspace must be an existing directory")
         if preparation is None:
-            from game_automation.platform.local_desktop.preparation_composition import build_preparation_service
+            from game_automation.platform.local_desktop.preparation_composition import (
+                build_preparation_service,
+            )
+
             preparation = build_preparation_service(self.workspace)
         self.preparation = preparation
         self._observation_factory = observation_factory
@@ -70,14 +83,22 @@ class DesktopBackend:
             if self._control_factory is not None:
                 self._control_app = self._control_factory()
             else:
-                from game_automation.platform.local_desktop.composition import build_local_control_application
-                self._control_app = build_local_control_application(project_root=self.workspace, include_builtin_scripts=False)
+                from game_automation.platform.local_desktop.composition import (
+                    build_local_control_application,
+                )
+
+                self._control_app = build_local_control_application(
+                    project_root=self.workspace
+                )
         return self._control_app
 
     def _observer(self):
         """延迟创建只读观察会话，不加载脚本目录。"""
         if self._observation is None:
-            from game_automation.portable.application.state_observation import StateObservation
+            from game_automation.portable.application.state_observation import (
+                StateObservation,
+            )
+
             self._observation = StateObservation()
         return self._observation
 
@@ -85,75 +106,153 @@ class DesktopBackend:
         """串行处理壳请求，运行中不允许新的素材操作或重复启动。"""
         if self.stopping:
             raise RuntimeError("desktop backend is stopping")
-        running = self._control_app is not None and self._control_app.current_script_run().running
-        if running and (method.startswith("preparation.") or method in {"script.reload", "script.start", "permissions.request"}):
-            raise RuntimeError("a script is running; stop it before preparing materials or starting another")
-        observing = self._observation is not None and self._observation.snapshot().running
-        if observing and method in {'preparation.capture', 'preparation.crop', 'observation.rule.save', 'script.start', 'permissions.request'}:
-            raise RuntimeError('请先停止实时识别，再采集素材、申请权限或运行脚本')
-        if running and method in {'observation.start', 'observation.rule.save'}:
-            raise RuntimeError('请先停止脚本，再启动实时识别或登记素材')
-        if method == 'observation.rules':
-            from game_automation.portable.application.window_state_rules import list_window_state_rules
+        running = (
+            self._control_app is not None
+            and self._control_app.current_script_run().running
+        )
+        if running and (
+            method.startswith("preparation.")
+            or method in {"script.reload", "script.start", "permissions.request"}
+        ):
+            raise RuntimeError(
+                "a script is running; stop it before preparing materials or starting another"
+            )
+        observing = (
+            self._observation is not None and self._observation.snapshot().running
+        )
+        if observing and method in {
+            "preparation.capture",
+            "preparation.crop",
+            "observation.rule.save",
+            "script.start",
+            "permissions.request",
+        }:
+            raise RuntimeError("请先停止实时识别，再采集素材、申请权限或运行脚本")
+        if running and method in {"observation.start", "observation.rule.save"}:
+            raise RuntimeError("请先停止脚本，再启动实时识别或登记素材")
+        if method == "observation.rules":
+            from game_automation.portable.application.window_state_rules import (
+                list_window_state_rules,
+            )
+
             return list_window_state_rules(self.workspace)
-        if method == 'observation.rule.save':
-            from game_automation.portable.application.window_state_rules import save_window_state_rule
-            crop = _rect(params.get('region'))
-            search = params.get('search_region')
-            return save_window_state_rule(self.workspace, self.preparation, frame_id=_text(params, 'frame_id'),
-                crop=crop, name=_text(params, 'name'), state=_text(params, 'state'),
-                min_confidence=params.get('min_confidence', 0.9), search_region=None if search is None else _rect(search), priority=params.get('priority'))
-        if method == 'observation.start':
-            from game_automation.portable.application.window_state_rules import load_window_state_rules
-            application, window_id = _text(params, 'application'), _text(params, 'window_id')
-            hz, confirmations = params.get('hz', 2), params.get('confirmations', 2)
-            from game_automation.portable.application.state_observation import ObservationSettings
+        if method == "observation.rule.save":
+            from game_automation.portable.application.window_state_rules import (
+                save_window_state_rule,
+            )
+
+            crop = _rect(params.get("region"))
+            search = params.get("search_region")
+            return save_window_state_rule(
+                self.workspace,
+                self.preparation,
+                frame_id=_text(params, "frame_id"),
+                crop=crop,
+                name=_text(params, "name"),
+                state=_text(params, "state"),
+                min_confidence=params.get("min_confidence", 0.9),
+                search_region=None if search is None else _rect(search),
+                priority=params.get("priority"),
+            )
+        if method == "observation.start":
+            from game_automation.portable.application.window_state_rules import (
+                load_window_state_rules,
+            )
+
+            application, window_id = (
+                _text(params, "application"),
+                _text(params, "window_id"),
+            )
+            hz, confirmations = params.get("hz", 2), params.get("confirmations", 2)
+            from game_automation.portable.application.state_observation import (
+                ObservationSettings,
+            )
+
             settings = ObservationSettings(hz, confirmations)
             if observing:
-                raise RuntimeError('实时识别已经运行，请先停止')
+                raise RuntimeError("实时识别已经运行，请先停止")
             rules = load_window_state_rules(self.workspace)
-            window = next((w for w in self.preparation.list_windows(application) if w.id == window_id), None)
+            window = next(
+                (
+                    w
+                    for w in self.preparation.list_windows(application)
+                    if w.id == window_id
+                ),
+                None,
+            )
             if window is None:
-                raise RuntimeError('目标窗口已关闭，请重新读取窗口')
+                raise RuntimeError("目标窗口已关闭，请重新读取窗口")
             if self._observation_factory is None:
-                from game_automation.platform.macos.adapters.window_state_probe import MacOSWindowStateProbe
+                from game_automation.platform.macos.adapters.window_state_probe import (
+                    MacOSWindowStateProbe,
+                )
+
                 probe = MacOSWindowStateProbe(window, rules, hz=settings.hz)
             else:
                 probe = self._observation_factory(window, rules)
             try:
-                return observation_wire(self._observer().start(probe, settings=settings))
+                return observation_wire(
+                    self._observer().start(probe, settings=settings)
+                )
             except BaseException:
                 probe.close()
                 raise
-        if method == 'observation.status':
+        if method == "observation.status":
             return observation_wire(self._observer().snapshot())
-        if method == 'observation.stop':
+        if method == "observation.stop":
             return observation_wire(self._observer().request_stop())
         if method in {"permissions.status", "permissions.request"}:
             if self._permissions is None:
-                from game_automation.platform.macos.adapters.desktop_permissions import MacOSDesktopPermissions
+                from game_automation.platform.macos.adapters.desktop_permissions import (
+                    MacOSDesktopPermissions,
+                )
+
                 self._permissions = MacOSDesktopPermissions()
             if method == "permissions.request":
                 return self._permissions.request(_text(params, "kind"))
             return self._permissions.status()
         if method == "session.info":
-            return {"protocol": 1, "workspace": str(self.workspace), "pid": os.getpid(), "process_group": os.getpgrp()}
+            return {
+                "protocol": 1,
+                "workspace": str(self.workspace),
+                "pid": os.getpid(),
+                "process_group": os.getpgrp(),
+            }
         if method == "session.shutdown":
             self.stopping = True
             return {"stopping": True}
         if method == "preparation.windows":
-            return {"windows": [asdict(window) for window in self.preparation.list_windows(_text(params, "application"))]}
+            return {
+                "windows": [
+                    asdict(window)
+                    for window in self.preparation.list_windows(
+                        _text(params, "application")
+                    )
+                ]
+            }
         if method == "preparation.capture":
             if self._frame_path is not None:
                 self._frame_path.unlink(missing_ok=True)
-            frame = self.preparation.capture_window(_text(params, "application"), _text(params, "window_id"))
+            frame = self.preparation.capture_window(
+                _text(params, "application"), _text(params, "window_id")
+            )
             self._frame_path = Path(self._cache.name) / f"{frame.id}.png"
             self._frame_path.write_bytes(frame.image.png)
-            return {"id": frame.id, "window": asdict(frame.window), "captured_at": frame.captured_at,
-                    "image": {"path": str(self._frame_path), "width": frame.image.width, "height": frame.image.height}}
+            return {
+                "id": frame.id,
+                "window": asdict(frame.window),
+                "captured_at": frame.captured_at,
+                "image": {
+                    "path": str(self._frame_path),
+                    "width": frame.image.width,
+                    "height": frame.image.height,
+                },
+            }
         if method == "preparation.point":
             relative, screen = self.preparation.locate_point(
-                _text(params, "frame_id"), Point(_integer(params, "x"), _integer(params, "y")))
+                _text(params, "frame_id"),
+                Point(_integer(params, "x"), _integer(params, "y")),
+            )
             return {"window_relative": asdict(relative), "screen": asdict(screen)}
         if method == "preparation.crop":
             region = params.get("region")
@@ -161,14 +260,24 @@ class DesktopBackend:
                 raise ValueError("region must be an object")
             name = _text(params, "name")
             image = self.preparation.save_crop(
-                _text(params, "frame_id"), Rect(*(_integer(region, key) for key in ("left", "top", "width", "height"))), name)
+                _text(params, "frame_id"),
+                Rect(
+                    *(
+                        _integer(region, key)
+                        for key in ("left", "top", "width", "height")
+                    )
+                ),
+                name,
+            )
             return {"image": image, "resources": {"images": {name: image}}}
         if method in {"script.list", "script.reload"}:
             if method == "script.reload":
                 self._control_app = None
             app = self._control()
-            return {"scripts": list(app.list_scripts()),
-                    "errors": [asdict(error) for error in app.list_script_config_errors()]}
+            return {
+                "scripts": list(app.list_scripts()),
+                "errors": [asdict(error) for error in app.list_script_config_errors()],
+            }
         if method == "script.details":
             return asdict(self._control().describe_script(_text(params, "name")))
         if method == "script.start":
@@ -178,14 +287,24 @@ class DesktopBackend:
                 raise ValueError("dry_run must be a boolean")
             app = self._control()
             details = app.describe_script(name)
-            return _run_status(app.start_named_script(
-                name, dry_run=dry_run, dry_run_color=_text(params, "dry_run_color", "#000000"),
-                dry_run_screen_state=_text(params, "dry_run_screen_state", "未知"),
-                dry_run_images=details.image_dependencies if dry_run else (),
-            ))
+            return _run_status(
+                app.start_named_script(
+                    name,
+                    dry_run=dry_run,
+                    dry_run_color=_text(params, "dry_run_color", "#000000"),
+                    dry_run_screen_state=_text(params, "dry_run_screen_state", "未知"),
+                    dry_run_images=details.image_dependencies if dry_run else (),
+                )
+            )
         if method == "script.status":
             if self._control_app is None:
-                return {"running": False, "finish_reason": "idle", "stdout": "", "stderr": "", "exit_code": None}
+                return {
+                    "running": False,
+                    "finish_reason": "idle",
+                    "stdout": "",
+                    "stderr": "",
+                    "exit_code": None,
+                }
             return _run_status(self._control_app.current_script_run())
         if method == "script.stop":
             return _run_status(self._control().stop_running_script())
@@ -209,8 +328,13 @@ class DesktopBackend:
 
 def _run_status(status) -> dict:
     """限制跨进程日志大小，不发送重复的截图或完整事件树。"""
-    return {"running": status.running, "exit_code": status.exit_code, "finish_reason": status.finish_reason,
-            "stdout": status.stdout[-65536:], "stderr": status.stderr[-8192:]}
+    return {
+        "running": status.running,
+        "exit_code": status.exit_code,
+        "finish_reason": status.finish_reason,
+        "stdout": status.stdout[-65536:],
+        "stderr": status.stderr[-8192:],
+    }
 
 
 def _text(params: dict, key: str, default=None) -> str:
@@ -224,8 +348,8 @@ def _text(params: dict, key: str, default=None) -> str:
 def _rect(value) -> Rect:
     """校验协议矩形全部字段，拒绝隐式浮点截断或布尔值。"""
     if not isinstance(value, dict):
-        raise ValueError('region must be an object')
-    return Rect(*(_integer(value, key) for key in ('left', 'top', 'width', 'height')))
+        raise ValueError("region must be an object")
+    return Rect(*(_integer(value, key) for key in ("left", "top", "width", "height")))
 
 
 def _integer(params: dict, key: str) -> int:
@@ -237,8 +361,12 @@ def _integer(params: dict, key: str) -> int:
 
 
 def run_stdio(
-    session: DesktopBackend, source: TextIO, output: TextIO, errors: TextIO,
-    *, process_events: Callable[[], None] | None = None,
+    session: DesktopBackend,
+    source: TextIO,
+    output: TextIO,
+    errors: TextIO,
+    *,
+    process_events: Callable[[], None] | None = None,
 ) -> int:
     """处理 JSON-RPC 行协议；关闭、管道 EOF 和中断统一回收后台。"""
     exit_code = 0
@@ -263,18 +391,36 @@ def run_stdio(
                 params = request.get("params", {})
                 if not isinstance(params, dict):
                     raise ValueError("params must be an object")
-                reply = {"jsonrpc": "2.0", "id": request_id, "result": session.dispatch(method, params)}
+                reply = {
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "result": session.dispatch(method, params),
+                }
             except Exception as exc:
-                code = -32700 if isinstance(exc, json.JSONDecodeError) else -32602 if isinstance(exc, (ValueError, TypeError)) else -32601 if isinstance(exc, KeyError) else -32000
-                reply = {"jsonrpc": "2.0", "id": request_id, "error": {"code": code, "message": str(exc)}}
+                code = (
+                    -32700
+                    if isinstance(exc, json.JSONDecodeError)
+                    else -32602
+                    if isinstance(exc, (ValueError, TypeError))
+                    else -32601
+                    if isinstance(exc, KeyError)
+                    else -32000
+                )
+                reply = {
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "error": {"code": code, "message": str(exc)},
+                }
             # 不使用 print/sys.stdout：运行线程可能临时重定向全局标准输出。
             output.write(json.dumps(reply, ensure_ascii=False, allow_nan=False) + "\n")
             output.flush()
-    except (KeyboardInterrupt, BrokenPipeError):
+    except KeyboardInterrupt, BrokenPipeError:
         pass
     finally:
         if not session.close():
-            errors.write("desktop shutdown timed out while waiting for the input adapter\n")
+            errors.write(
+                "desktop shutdown timed out while waiting for the input adapter\n"
+            )
             errors.flush()
             exit_code = 1
     return exit_code
@@ -300,49 +446,109 @@ def main(argv: list[str] | None = None) -> int:
     try:
         process_events = None
         if sys.platform == "darwin":
-            from game_automation.platform.macos.adapters.application_events import process_application_events
+            from game_automation.platform.macos.adapters.application_events import (
+                process_application_events,
+            )
+
             process_events = process_application_events
         with WorkspaceLock(root):
-            return run_stdio(DesktopBackend(root), sys.stdin, sys.stdout, sys.stderr, process_events=process_events)
+            return run_stdio(
+                DesktopBackend(root),
+                sys.stdin,
+                sys.stdout,
+                sys.stderr,
+                process_events=process_events,
+            )
     except (OSError, RuntimeError, ValueError) as exc:
         print(str(exc), file=sys.stderr)
         return 1
-
-
 
 
 def observation_wire(value) -> dict:
     """只在线协议边界展开不可变观察快照与领域证据。"""
     sample = value.sample
     stats = value.performance
-    evidence = [] if sample is None else [
-        {'state': item.candidate.name, 'name': item.candidate.search_name or item.candidate.name,
-         'found': item.found, 'skipped': item.skipped, 'priority': item.priority, 'score': item.best_confidence,
-         'method': 'points' if item.point_count is not None else 'template',
-         'matched_points': item.matched_points, 'point_count': item.point_count,
-         'rect': None if item.best_rect is None else {
-             'left': item.best_rect.left, 'top': item.best_rect.top,
-             'width': item.best_rect.width, 'height': item.best_rect.height}}
-        for item in sample.result.candidates]
-    return {'running': value.running, 'phase': value.phase.value, 'current_state': value.current_state,
-            'candidate_state': value.candidate_state, 'sequence': value.sequence,
-            'observed_at': None if sample is None else sample.observed_at,
-            'elapsed_ms': 0 if sample is None else (sample.completed - (sample.capture_started if sample.read_started is None else sample.read_started)) * 1000,
-            'hz': value.settings.hz, 'actual_hz': 0 if sample is None else sample.actual_hz,
-            'age_ms': value.age_ms, 'error': value.error, 'evidence': evidence,
-            'performance': {'attempts': stats.attempts, 'failures': stats.failures,
-                'over_budget': stats.over_budget, 'stale_results': stats.stale_results,
-                'duplicate_results': stats.duplicate_results, 'capture_mode': stats.capture_mode,
-                'source_age_ms': stats.source_age_ms,
-                'source_age_p95_ms': None if not stats.source_ages_ms else sorted(stats.source_ages_ms)[math.ceil(len(stats.source_ages_ms)*.95)-1],
-                'checked_count': stats.checked_count, 'skipped_count': stats.skipped_count,
-                'material_count': stats.material_count, 'screenshot_ms': stats.screenshot_ms,
-                'last_failure_message': stats.last_failure_message, 'last_failure_at': stats.last_failure_at,
-                'recognition_ms': stats.recognition_ms, 'round_ms': stats.round_ms,
-                'window_limit': 120, 'sample_count': len(stats.rounds_ms),
-                'p50_ms': stats.percentile(0.5), 'p95_ms': stats.percentile(0.95),
-                'max_ms': max(stats.rounds_ms) if stats.rounds_ms else None},
-            'history': [{'at': item.at, 'previous': item.previous, 'state': item.state} for item in value.history]}
+    evidence = (
+        []
+        if sample is None
+        else [
+            {
+                "state": item.candidate.name,
+                "name": item.candidate.search_name or item.candidate.name,
+                "found": item.found,
+                "skipped": item.skipped,
+                "priority": item.priority,
+                "score": item.best_confidence,
+                "method": "points" if item.point_count is not None else "template",
+                "matched_points": item.matched_points,
+                "point_count": item.point_count,
+                "rect": None
+                if item.best_rect is None
+                else {
+                    "left": item.best_rect.left,
+                    "top": item.best_rect.top,
+                    "width": item.best_rect.width,
+                    "height": item.best_rect.height,
+                },
+            }
+            for item in sample.result.candidates
+        ]
+    )
+    return {
+        "running": value.running,
+        "phase": value.phase.value,
+        "current_state": value.current_state,
+        "candidate_state": value.candidate_state,
+        "sequence": value.sequence,
+        "observed_at": None if sample is None else sample.observed_at,
+        "elapsed_ms": 0
+        if sample is None
+        else (
+            sample.completed
+            - (
+                sample.capture_started
+                if sample.read_started is None
+                else sample.read_started
+            )
+        )
+        * 1000,
+        "hz": value.settings.hz,
+        "actual_hz": 0 if sample is None else sample.actual_hz,
+        "age_ms": value.age_ms,
+        "error": value.error,
+        "evidence": evidence,
+        "performance": {
+            "attempts": stats.attempts,
+            "failures": stats.failures,
+            "over_budget": stats.over_budget,
+            "stale_results": stats.stale_results,
+            "duplicate_results": stats.duplicate_results,
+            "capture_mode": stats.capture_mode,
+            "source_age_ms": stats.source_age_ms,
+            "source_age_p95_ms": None
+            if not stats.source_ages_ms
+            else sorted(stats.source_ages_ms)[
+                math.ceil(len(stats.source_ages_ms) * 0.95) - 1
+            ],
+            "checked_count": stats.checked_count,
+            "skipped_count": stats.skipped_count,
+            "material_count": stats.material_count,
+            "screenshot_ms": stats.screenshot_ms,
+            "last_failure_message": stats.last_failure_message,
+            "last_failure_at": stats.last_failure_at,
+            "recognition_ms": stats.recognition_ms,
+            "round_ms": stats.round_ms,
+            "window_limit": 120,
+            "sample_count": len(stats.rounds_ms),
+            "p50_ms": stats.percentile(0.5),
+            "p95_ms": stats.percentile(0.95),
+            "max_ms": max(stats.rounds_ms) if stats.rounds_ms else None,
+        },
+        "history": [
+            {"at": item.at, "previous": item.previous, "state": item.state}
+            for item in value.history
+        ],
+    }
 
 
 if __name__ == "__main__":

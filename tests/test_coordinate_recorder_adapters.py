@@ -18,7 +18,9 @@ def test_pyautogui_pointer_reader_returns_point_from_tuple() -> None:
     """验证 pyautogui tuple 坐标会转换为 Point。"""
     backend = SimpleNamespace(position=lambda: (12, 34))
 
-    assert PyAutoGuiPointerPositionReader(backend=backend).current_position() == Point(12, 34)
+    assert PyAutoGuiPointerPositionReader(backend=backend).current_position() == Point(
+        12, 34
+    )
 
 
 def test_pyautogui_pointer_reader_wraps_errors() -> None:
@@ -39,7 +41,9 @@ def test_terminal_key_reader_requires_interactive_terminal() -> None:
         TerminalKeyStateReader(stream=stream)
 
 
-def test_coordinate_recorder_cli_help_does_not_load_platform_dependencies(capsys) -> None:
+def test_coordinate_recorder_cli_help_does_not_load_platform_dependencies(
+    capsys,
+) -> None:
     """验证 CLI help 不会加载真实鼠标或键盘依赖。"""
     with pytest.raises(SystemExit) as exc:
         main(["recorder", "--help"])

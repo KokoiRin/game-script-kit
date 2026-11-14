@@ -18,6 +18,6 @@ class OffsetTarget:
     base: Point | PointRef | ImageTarget
     offset: Point
 
-    def offset_by(self, *, x: int = 0, y: int = 0) -> "OffsetTarget":
+    def offset_by(self, *, x: int = 0, y: int = 0) -> OffsetTarget:
         """返回累计偏移后的新偏移目标。"""
         return OffsetTarget(self.base, self.offset.offset(x=x, y=y))

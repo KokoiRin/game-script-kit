@@ -17,7 +17,11 @@ from game_automation.portable.domain import (
     ScreenStateCandidateResult,
     ScreenStateProbeResult,
 )
-from game_automation.portable.engine.ports import RunLogger, ScreenImageBatchLocator, ScreenImageLocator
+from game_automation.portable.engine.ports import (
+    RunLogger,
+    ScreenImageBatchLocator,
+    ScreenImageLocator,
+)
 
 
 def probe_screen_state(
@@ -35,7 +39,10 @@ def probe_screen_state(
     total_started_at = clock()
     if batch_image_locator is not None:
         batch_results = batch_image_locator.locate_requests(
-            tuple(_search_request_from_candidate(candidate, min_confidence) for candidate in candidates),
+            tuple(
+                _search_request_from_candidate(candidate, min_confidence)
+                for candidate in candidates
+            ),
             logger=logger,
             stop_on_first_match=True,
         )
@@ -104,7 +111,9 @@ def _search_request_from_candidate(
 ) -> ImageSearchRequest:
     """把状态候选的搜索规格转换为批量图片定位请求。"""
     if not isinstance(candidate.search.image, ImageTemplate):
-        raise RuntimeError("screen state candidate image must be resolved before probing")
+        raise RuntimeError(
+            "screen state candidate image must be resolved before probing"
+        )
     return ImageSearchRequest(
         template=candidate.search.image,
         region=candidate.search.region,

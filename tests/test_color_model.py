@@ -44,7 +44,9 @@ def test_color_rejects_invalid_rgb_hex(value: str) -> None:
         (0, 0, 256),
     ],
 )
-def test_color_rejects_channels_outside_byte_range(red: int, green: int, blue: int) -> None:
+def test_color_rejects_channels_outside_byte_range(
+    red: int, green: int, blue: int
+) -> None:
     """验证颜色通道必须在 0 到 255 之间。"""
     with pytest.raises(ValueError, match="between 0 and 255"):
         Color(red=red, green=green, blue=blue)

@@ -19,8 +19,7 @@ from game_automation.portable.domain import (
     Rect,
 )
 
-
-_InputResult = TypeVar('_InputResult')
+_InputResult = TypeVar("_InputResult")
 
 
 class RuntimeControl(Protocol):

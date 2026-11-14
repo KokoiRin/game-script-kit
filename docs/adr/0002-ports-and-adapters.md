@@ -4,6 +4,8 @@
 - 日期：2026-10-18（记录并沿用既有架构原则，不推定最初决定日期）
 - 性质：既有代码边界与职责取舍
 
+任务执行随后按 [ADR 0014](0014-core-first-execution.md) 收拢到直接运行上下文，按 [ADR 0015](0015-python-only-tasks.md) 移除步骤树，本文所述依赖方向继续沿用。
+
 ## 背景
 
 游戏规则、桌面输入、图像识别和 CLI/UI 的变化原因不同。若脚本或执行器直接依赖 macOS 与页面控制逻辑，规则测试需要真实桌面，迁移平台也会牵动业务代码。
@@ -32,6 +34,6 @@
 
 ## 依据
 
-- [领域步骤](../../src/game_automation/portable/domain/actions.py)、[执行器](../../src/game_automation/portable/engine/runner.py)。
+- [任务定义](../../src/game_automation/portable/domain/task.py)、[执行核心](../../src/game_automation/portable/engine/task_context.py)。
 - [运行 ports](../../src/game_automation/portable/engine/ports.py)、[单脚本应用用例](../../src/game_automation/portable/application/script_run.py)。
 - [本地桌面装配](../../src/game_automation/platform/local_desktop/composition.py)。

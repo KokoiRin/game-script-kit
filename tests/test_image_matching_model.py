@@ -4,7 +4,15 @@ from __future__ import annotations
 
 import pytest
 
-from game_automation.portable.domain import ImageBatchMatchResult, ImageLookupResult, ImageMatch, ImageTemplate, Point, Rect
+from game_automation.portable.domain import (
+    ImageBatchMatchResult,
+    ImageLookupResult,
+    ImageMatch,
+    ImageTarget,
+    ImageTemplate,
+    Point,
+    Rect,
+)
 
 
 def test_image_template_preserves_path() -> None:
@@ -111,3 +119,46 @@ def test_image_batch_match_result_distinguishes_skipped_from_missing() -> None:
     assert skipped.found is False
     assert skipped.skipped is True
     assert skipped.elapsed_ms == 0
+
+
+def test_image_target_preserves_template_and_defaults() -> None:
+    """验证图片目标会保留模板并默认继承搜索置信度。"""
+    target = ImageTarget(ImageTemplate("assets/start.png"))
+
+    assert target.template == ImageTemplate("assets/start.png")
+    assert target.region is None
+    assert target.min_confidence is None
+    assert target.offset == Point(0, 0)
+    assert target.anchor == "center"
+
+
+def test_image_target_preserves_region_confidence_and_offset() -> None:
+    """验证图片目标会保留搜索区域、置信度和中心偏移。"""
+    target = ImageTarget(
+        ImageTemplate("assets/start.png"),
+        region=Rect(10, 20, 30, 40),
+        min_confidence=0.8,
+        offset=Point(5, -3),
+        anchor="right_center",
+    )
+
+    assert target.region == Rect(10, 20, 30, 40)
+    assert target.min_confidence == 0.8
+    assert target.offset == Point(5, -3)
+    assert target.anchor == "right_center"
+
+
+@pytest.mark.parametrize("min_confidence", [0.0, -0.1, 1.1])
+def test_image_target_rejects_invalid_min_confidence(min_confidence: float) -> None:
+    """验证图片目标拒绝非法最低匹配置信度。"""
+    with pytest.raises(ValueError, match="image target min_confidence"):
+        ImageTarget(
+            ImageTemplate("assets/start.png"),
+            min_confidence=min_confidence,
+        )
+
+
+def test_image_target_rejects_unknown_anchor() -> None:
+    """验证图片目标拒绝未知 anchor。"""
+    with pytest.raises(ValueError, match="unknown image anchor: diagonal"):
+        ImageTarget(ImageTemplate("assets/start.png"), anchor="diagonal")

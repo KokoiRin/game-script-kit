@@ -1,5 +1,7 @@
 """验证脚本窗口的坐标解析规则。"""
 
+import pytest
+
 from game_automation.portable.domain import AreaWindow, Point, Rect, ScreenWindow
 
 
@@ -44,3 +46,12 @@ def test_area_window_offsets_explicit_image_search_region() -> None:
     window = AreaWindow(Rect(left=100, top=200, width=800, height=600))
 
     assert window.resolve_region(Rect(10, 20, 30, 40)) == Rect(110, 220, 30, 40)
+
+
+def test_rect_rejects_non_positive_size() -> None:
+    """验证非法矩形尺寸会被拒绝。"""
+    with pytest.raises(ValueError, match="width"):
+        Rect(0, 0, 0, 1)
+
+    with pytest.raises(ValueError, match="height"):
+        Rect(0, 0, 1, 0)

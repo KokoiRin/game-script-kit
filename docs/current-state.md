@@ -1,6 +1,6 @@
 # Star 当前实现快照
 
-快照日期：2026-11-08。本文供接手项目、讨论下一步或修改相关行为时快速定位。
+快照日期为 2026-11-14。本文供接手项目、讨论下一步或修改相关行为时快速定位。
 它描述当前代码与已获得的证据；架构约束见 [architecture.md](architecture.md)，运行方法见 [README](../README.md)。
 实现变化后更新对应条目；缺口解决后删除旧问题，保留必要的验证证据。
 
@@ -8,12 +8,12 @@
 
 - 用户已明确：由用户描述任务和结果要求，Agent 负责观察目标画面、补齐流程、生成并维护脚本。
 - 当前使用目标是完成一款游戏的实际日常任务；具体业务脚本、素材与进度由外部本地工作区维护。
-- 手写 JSON 是现有存储和加载方式，并不意味着用户需要亲自学习全部 JSON 语法。
+- 函数任务使用 Python 文件中的 `TASK` 字面量与同步 `run(ctx)`，全部活动任务和通用示例使用这一格式。任务由 Agent 编写维护。
 - 用户选择 macOS 原生优先。SwiftUI/AppKit 壳组合素材准备与脚本运行，Python 后台通过本地管道提供独立用例，旧网页入口和 HTTP UI 已移除；边界见 [ADR 0008](adr/0008-native-macos-desktop.md)。
 - 准备用例提供选窗、冻结截图、点击取点和框选保存模板，不依赖脚本执行；服务边界见 [ADR 0007](adr/0007-preparation-and-execution.md)。
 - 创建、编辑、保存脚本仍通过文件完成；原生壳可显式重新加载脚本，也可在空闲时通过关闭旧后台切换工作区。没有完整编辑器或自动热加载。
 - 本机原生应用已完成 SDK 构建与基础窗口、权限和截图验证。实时识别的最新自动化与原生验证分别记录在本文末尾。
-- 方向与阶段讨论见 [重启计划](restart-plan.md)；恢复能力尚在 [设计草案](design/local-recovery.md) 中讨论。
+- 方向与阶段讨论见 [重启计划](restart-plan.md)。函数任务支持局部异常恢复，恢复讨论的历史背景见 [设计草案](design/local-recovery.md)。
 - 本文记录的实现限制和债务不构成未来架构要求；已决定事项另见 [ADR 索引](adr/README.md)。
 
 ## 从任务描述到执行
@@ -22,19 +22,19 @@
 
 1. 明确起始画面、前置条件、动作、可观察的完成标志和停止条件。
 2. 选定仓库外的任务工作区，准备其中的 `assets/` 模板图片；固定点位可由坐标记录器辅助获取。
-3. Agent 在该根创建 `scripts/*.json`，声明局部资源、步骤及可选目标窗口；桌面后端的状态条件使用同根 `assets/screen-states.json`，显式原生后端使用 `assets/window-states.json`。
-4. 通过全局 `--workspace PATH` 使用 `list` 列出脚本、报告坏文件，使用 `details` 展示步骤与依赖摘要。
+3. Agent 在该根创建 `scripts/*.py`，声明 `TASK` 并实现 `run(ctx)`；桌面后端的状态条件使用同根 `assets/screen-states.json`，显式原生后端使用 `assets/window-states.json`。
+4. 通过全局 `--workspace PATH` 使用 `list` 列出脚本、报告坏文件，使用 `details` 展示入口与声明依赖。
 5. 模拟运行检查一组固定假条件下的执行路径；随后在真实目标中核对操作和任务结果。
 6. 根据真实失败点修改脚本或资源，再分别报告自动化验证与真实任务验证。
 
-[项目脚本装配](../src/game_automation/portable/application/project_scripts.py) 在显式工作区模式下只加载该根的顶层 `scripts/*.json`，不混入内置脚本；无参数时使用仓库根的通用文件示例与内置示例。
-JSON 文件按文件名排序加载，不递归读取子目录；脚本名来自 JSON 的 `name`，与文件名可以不同。
-单个文件格式错误、动作不支持或名称重复会被隔离，其他有效脚本继续可用。
+[项目脚本装配](../src/game_automation/portable/application/project_scripts.py) 读取所选根 `scripts/` 顶层的 Python 任务文件，无参数时使用仓库根的通用示例。
+工作区按文件名排序加载任务。名称来自 `TASK.name`，与文件名可以不同。遗留 JSON 任务显示迁移提示。Python 辅助文件可使用以下划线开头的名称，任务通过相对导入复用。
+单个文件格式错误或名称重复会被隔离，其他有效脚本继续可用。
 `star --workspace PATH list/details/run/run-plan/ui` 选择已存在的目录，参数放在子命令之前。路径解析与入口传递见 [CLI](../src/game_automation/platform/local_desktop/entrypoints/cli.py)，同根资源约定见 [project_assets.py](../src/game_automation/portable/application/project_assets.py) 和 [ADR 0006](adr/0006-local-task-workspaces.md)。
 
 | 入口 | 可用控制 | 生命周期与边界 |
 | --- | --- | --- |
-| CLI `list/details/run` | 查列表、查依赖、单脚本运行；CLI 默认真实运行，需显式选择模拟 | 每次调用重新读取脚本 JSON |
+| CLI `list/details/run` | 查列表、查依赖、单任务运行；CLI 默认真实运行，需显式选择模拟 | 每次调用重新发现 Python 元信息 |
 | CLI `run-plan` | 按顺序运行多个已有脚本，选择停止或继续策略 | 每项开始前重新激活并绑定所选窗口 |
 | CLI `recorder` | 打印鼠标屏幕坐标和颜色；终端保持焦点，按 `1` 记录、`Q` 结束 | 只打印结果，不创建 JSON 或模板 |
 | 原生壳 `ui` / `star-desktop` | 工作区选择、素材准备、脚本详情、模拟/真实运行、停止和诊断 | macOS 13+；后台单实例，工作区切换先回收旧进程；本机原生基础验证已完成，新增能力以验证记录为准 |
@@ -89,41 +89,26 @@ JSON 文件按文件名排序加载，不递归读取子目录；脚本名来自
 - 原生壳先等待后台有序退出，超过 7 秒发送 SIGTERM，再等 2 秒才强制回收已确认的后台进程组。强制回收需核对最后一次操作，不能当作业务成功。
 - 当前 `.app` 开发构建绑定 checkout 和 Python 环境，进行本地临时签名，尚未打包 Python、使用发布签名或公证。Swift 语法检查不代替 SDK 类型检查，真实 Mac 验收仍待执行。
 
-## JSON 与 Python 的能力边界
+## Python 函数任务
 
-[JSON loader](../src/game_automation/portable/application/config_script_loader.py) 只接受以下 8 类步骤；每个步骤对象只能有一个步骤类型。
-脚本要求非空 `name` 与非空 `steps`；`resources` 可省略。嵌套步骤仍使用同一语法。
+同步 `run(ctx)` 直接使用 Python 函数、分支、循环、返回值和局部异常处理。`TaskContext` 直接拥有输入、定位、轮询、期限和事件。一次任务复用同一原生窗口会话。旧格式解析、控制节点、条件对象和解释器已经移除，迁移决策见 [ADR 0015](adr/0015-python-only-tasks.md)。作者接口见 [函数任务说明](task-functions.md)，整体接入顺序见 [核心优先设计](design/core-first-execution.md)。
 
-| 步骤 | 当前 JSON 能表达的内容 | 主要参数边界 |
-| --- | --- | --- |
-| `wait` | 固定等待秒数 | 数字且不小于 0 |
-| `click` | 点位别名、图片别名或搜索别名；点击后连续组合键 | `offset` 可选；图片点击中心；`then_hotkeys` 为键列表的列表 |
-| `hotkey` | 依次按下并逆序释放一组按键 | 非空、无重复；字母、数字及有限功能键集合 |
-| `repeat` | 有限或无限重复；按图片条件或经过时间中断当前层 | `times` 为正整数或显式 `null`；可选 `break_if_image`；`max_seconds` 为正的有限秒数 |
-| `if_state` | 按界面状态选择分支 | 非空 `then`；可选非空 `else`；可指定置信度 |
-| `if_image` | 按本次图片或命名搜索是否命中选择分支 | `search` 或 `image`；图片可带内联 `region`；可选 `min_confidence`；非空 `then`、可选非空 `else`，支持嵌套 |
-| `wait_until_state` | 等待指定状态 | `timeout` 与 `interval` 必填且大于 0；此语法不接受无限超时 |
-| `wait_until_image` | 等图片或命名搜索目标出现 | `timeout` 为正数或显式 `null`；`interval` 必填且大于 0 |
+等待超时可局部捕获 `TaskTimeout`，直接图片点击缺图可捕获 `TargetNotFound`。用户停止通过独立信号穿过普通异常恢复，任务目录内的 Python 循环和模块顶层均检查取消。第三方阻塞调用仍需等待返回。显式期限在上下文调用及等待轮询中检查，平台暂停使用已有任务时钟扣除暂停区间。
 
-`null` 必须显式填写；省略 `times` 或 `timeout` 会产生配置错误。
-`hotkey` 支持字母、数字及 `command/ctrl/alt/shift/enter/tab/esc/space`，不读取或设置剪贴板。
-`click.point` 是资源名称，当前 JSON 不接受内联 `{x,y}` 点击目标。
-`click.image` 可带内联 region；复用命名区域时通过 `resources.searches` 组合。
-单纯图片搜索未声明置信度时默认 1.0；命名搜索可继承资源阈值，步骤显式阈值优先。
+函数任务的目标和资源来自字面量，本地命名资源自动进入依赖检查，共享搜索和状态通过 `requires` 声明。详情展示入口与声明依赖，实际动态路径来自动作事件。主仓提供 `function-task-demo`，具体业务任务继续保存在外部工作区。
 
-JSON 的 `if_image` 映射为既有 `If(ImageExists(...))`，只判断当前画面，不隐式等待或重试。所有分支沿既有资源预校验、依赖摘要及 fake/dry-run 路径执行。Python 领域模型另有 `Drag`、`ColorIs`、图片 anchor 和 `AreaWindow`，JSON 没有对应全部语法。
-Python 内置脚本需要在 [catalog.py](../src/game_automation/portable/scripts_manager/catalog.py) 导入并注册，尚无用户 Python 文件自动发现。
-JSON 也没有变量、通用函数/脚本调用、文本输入、剪贴板赋值、通用重试或复合条件语法。
-看到 Python 示例或领域类型时，先确认 loader 分支，避免把它们当作 JSON 已支持能力。
+任务目录统一隔离读取、编码和语法错误，包含失效文件链接。静态任务分析统一产出引用与能力事实，详情和端口装配消费同一声明。期限事件属于各自作用域，空作用域和已成功动作后的到期具有独立记录。
+
+原生客户端以 `RunPhase` 区分运行和停止中，后续运行回复保留停止意图。停止请求幂等，停止中允许显式重启。重启复用现有后台关闭监督，确认旧进程实际退出和待处理请求清理后启动新代次。
 
 ## 资源、状态与坐标
 
 | 概念 | 当前表达 | 生命周期或限制 |
 | --- | --- | --- |
-| 点位 | `resources.points` 的命名 `{x,y}` | JSON 加载时保存；运行前校验别名，点击时解析坐标 |
+| 点位 | `resources.points` 的命名 `{x,y}` | 任务发现时保存；运行前校验声明，点击时解析坐标 |
 | 图片 | `resources.images` 的名称到文件路径 | 路径相对所选根的 `assets/`，允许子目录；loader 本身不检查文件存在 |
 | 区域 | `resources.regions` 的命名矩形 | 必须有正宽高；用于搜索范围 |
-| 搜索 | `resources.searches` 组合图片、区域、置信度 | 可在步骤中引用搜索名称 |
+| 搜索 | `resources.searches` 组合图片、区域、置信度 | 通过上下文查询和点击时引用名称 |
 | 桌面脚本状态 | `assets/screen-states.json` 的 groups/searches | 顺序代表优先级，首次命中停止；每次状态读取重新加载配置并识别当前画面 |
 | 原生脚本状态 | `assets/window-states.json` 的窗口模板/多点规则 | 每轮运行加载规则并绑定尺寸；同一运行源按规则优先级截断，输入后必须获取新系统画面 |
 | 共享资源 | 状态配置提供的 regions/searches | 仅当被引用的搜索或区域不能由局部资源解析时加载；局部同名资源覆盖共享资源 |
@@ -131,17 +116,17 @@ JSON 也没有变量、通用函数/脚本调用、文本输入、剪贴板赋�
 共享资源装配见 [script_resources.py](../src/game_automation/portable/application/script_resources.py)，桌面状态读取见 [screen_state_reader.py](../src/game_automation/portable/application/screen_state_reader.py)，原生状态读取复用 [window_state_probe.py](../src/game_automation/platform/macos/adapters/window_state_probe.py)。
 默认桌面后端的纯按键、固定点位和资源自足图片脚本，不因无关状态模板缺失或状态 JSON 损坏而阻断；真实状态读取按每次最新配置校验。显式原生会话需要窗口规则的逻辑/像素尺寸，即使本轮不读取状态也会先校验这份配置。需要共享搜索时仍解析对应的共享配置并报告错误。
 
-`details` 的 readiness 覆盖点位、图片和状态；发现 `missing` 时返回退出码 2，CLI/UI 仍展示步骤和依赖检查，`unknown` 不作为已确认缺失。
-单脚本运行在激活目标应用和创建设备前校验全部分支的点位、图片、搜索和区域别名，未知引用返回 `2/configuration_failed`，不会先执行前序动作。该校验不要求模拟模板文件存在，也不代替真实识图或业务验收。
-基础 Python catalog 的命名图片资源及搜索中的直接模板在 catalog 装配时按工作区根绑定（例如 `assets/start.png`）；JSON 图片路径仍相对 `assets/`。两个通用图片示例通过资源引用使用绑定后的路径，避免依赖启动目录。
+`details` 的 readiness 覆盖点位、图片和状态；发现 `missing` 时返回退出码 2，CLI/UI 仍展示入口和依赖检查，`unknown` 不作为已确认缺失。
+单脚本运行在激活目标应用和创建设备前校验声明的点位、图片、搜索和区域别名，未知引用返回 `2/configuration_failed`，不会先执行前序动作。该校验不要求模拟模板文件存在，也不代替真实识图或业务验收。
+任务局部图片路径相对所选工作区的 `assets/`，通用示例也遵循这一规则。
 状态配置与共享资源均读取所选工作区的 `assets/`，不回退到主仓。默认桌面 reader 缺少状态配置时，保留按该根 `assets/` 顶层图片文件名推断状态名称的兼容路径；显式原生 reader 要求窗口规则，不采用此回退。
 候选配置自己的阈值优先于状态读取参数；状态读取默认阈值为 0.8。
 
-- 未声明target的JSON初始使用 `ScreenWindow`，默认点位和搜索区域是屏幕绝对坐标。
+- 未声明 `target` 的任务初始使用 `ScreenWindow`，默认点位和搜索区域是屏幕绝对坐标。
 - CLI 指定目标窗口后，脚本点位和显式搜索 region 按窗口左上角偏移；默认图片搜索限制在该窗口内。
 - 目标窗口在每个脚本开始时读取一次；单脚本中途移动窗口不会自动重新绑定。
 - 全局状态 reader 尚不接收窗口，状态区域仍使用屏幕绝对坐标，不随目标窗口移动。
-- 文件脚本可声明target应用、窗口标题及预期逻辑尺寸；CLI和原生真实运行均在开始时激活并绑定当前窗口，尺寸不符时在输入设备创建前失败。旧文件保持屏幕坐标。显式CLI目标参数优先于文件声明，保持原覆盖行为。
+- 文件脚本可声明target应用、窗口标题及预期逻辑尺寸；CLI和原生真实运行均在开始时激活并绑定当前窗口，尺寸不符时在输入设备创建前失败。未声明目标时使用屏幕坐标。显式CLI目标参数优先于文件声明，保持原覆盖行为。
 - adapter 处理截图像素与鼠标坐标的比例换算；模板没有自动缩放匹配，界面缩放/主题变化仍可能影响识别。
 
 坐标规则见 [windows.py](../src/game_automation/portable/domain/windows.py)，窗口准备见 [script_run.py](../src/game_automation/portable/application/script_run.py)，匹配实现见 [image_matching.py](../src/game_automation/platform/desktop/adapters/image_matching.py)。
@@ -155,7 +140,7 @@ UI 自动把所选脚本解析出的图片依赖全部视为找到；CLI 通过�
 因此模拟运行只执行“固定假画面下的一条路径”，不能演练状态迁移：
 
 - 脚本依次要求“状态 A → 状态 B”时，任一固定模拟状态都无法走完整条成功路径。
-- 图片全部模拟命中时，`break_if_image` 可能立即退出循环；这不代表真实流程分支正确。
+- 图片全部模拟命中时，循环退出检查可能立即命中；这不代表真实流程分支正确。
 - 无限循环配合模拟等待仍会持续快速运行和产生日志，模拟不保证自动结束。
 - 模拟匹配位置来自假矩形，不能验证真实点击点、模板质量、目标应用响应或业务完成。
 
@@ -168,8 +153,8 @@ UI 自动把所选脚本解析出的图片依赖全部视为找到；CLI 通过�
 | --- | --- | --- |
 | 按所选分支与循环规则正常结束 | `exit_code=0, completed` | 分支或循环中断可跳过静态步骤，业务结果需独立证据 |
 | 点击图片未找到 | `exit_code=0, stopped_unmet_condition` | 整个脚本停止，跳过后续步骤 |
-| `WaitUntil` 有限等待到期仍未满足 | `exit_code=0, stopped_unmet_condition` | 同样停止整个脚本；不是自动重试或继续 |
-| `break_if_image` 命中 | 退出对应层 Repeat，无独立脚本结束原因 | 循环后的步骤继续；外层中断仍能穿透嵌套循环 |
+| 未捕获 `TaskTimeout` | `exit_code=1, timed_out` | 任务停止，局部恢复可在函数中显式捕获 |
+| Python 循环退出或局部期限被本层处理 | 由任务函数继续执行 | 检查点可在等待中退出所属流程，外层期限按身份传播 |
 | UI 用户停止被执行器观察到 | `exit_code=130, cancelled` | 当前脚本取消；已发生的输入不会回滚 |
 | 运行配置/初始化/动作失败 | 分别为 `configuration_failed/setup_failed/failed` | 返回错误原因，后台会话结束并可再次运行 |
 | Run Plan 默认遇到未完整执行项 | 普通失败保留首个未完成原因和首个非零退出码 | 停止后续脚本，即使该项退出码为 0 |
@@ -179,19 +164,19 @@ UI 自动把所选脚本解析出的图片依赖全部视为找到；CLI 通过�
 
 取消是协作式检查：步骤边界、真正点击前、图片等待轮询、每组连续按键前会检查。
 后台真实等待通过可取消设备包装每最多 50ms 检查取消；正在进行的平台原子调用仍可能延迟停止，原生宿主提供有界的进程回收。
-`click.then_hotkeys` 之间检查用户取消，但不再次检查循环图片 guard。
-实现见 [runner.py](../src/game_automation/portable/engine/runner.py) 与 [run_plan.py](../src/game_automation/portable/application/run_plan.py)。
-相关行为测试见 [test_runner.py](../tests/test_runner.py)、[test_repeat_break_image.py](../tests/test_repeat_break_image.py)、[test_run_plan.py](../tests/test_run_plan.py) 和 [test_local_control.py](../tests/test_local_control.py)。
+`ctx.click(..., then_hotkeys=...)` 的连续组合键之间检查用户取消和期限。
+实现见 [task_context.py](../src/game_automation/portable/engine/task_context.py) 与 [run_plan.py](../src/game_automation/portable/application/run_plan.py)。
+相关行为测试见 [test_execution_core.py](../tests/test_execution_core.py)、[test_task_context.py](../tests/test_task_context.py)、[test_run_plan.py](../tests/test_run_plan.py) 和 [test_local_control.py](../tests/test_local_control.py)。
 
 ## 框架示例与本地业务资料
 
-主仓保留 8 个通用 Python 示例，以及 [文件格式示例](../scripts/file-script-demo.json) 和 [粘贴示例](../scripts/paste.json)。固定个人坐标点击示例与专用离开重试示例已从内置目录删除。
+主仓 `scripts/` 保存直接 Python 示例，包括动作、循环、颜色与状态判断、等待、[函数任务示例](../scripts/function-task-demo.py)、[文件任务示例](../scripts/file-script-demo.py) 和 [粘贴示例](../scripts/paste.py)。固定个人坐标点击示例与专用离开重试示例已从内置目录删除。
 
 业务脚本、图像与玩法上下文已移至仓库外的本地任务工作区。主仓不再维护业务素材表或操作进度；继续任务时读取对应工作区的说明、记录和证据。选定根只控制数据来源，不构成操作系统沙箱。
 
 [视觉靶场](../src/star_visual_lab/server.py) 保留为独立开发验收目标，通过真值接口核对结果；它不证明真实任务已完成。本轮工作区隔离不新增真实业务完成证据。
 
-未合并的任务路由与子脚本调用实验不属于主线能力；本地归档保留实验，主线不因此支持 `run-task` 或 `call`。
+未合并的任务路由与子脚本调用实验不属于主线能力；本地归档保留实验，任务组合直接使用 Python 函数。
 
 ## 已知缺口与证据等级
 
@@ -199,13 +184,19 @@ UI 自动把所选脚本解析出的图片依赖全部视为找到；CLI 通过�
 
 **静态代码核查所得，尚未独立复现：**
 
-- JSON 局部图片路径仅拼接 assets；状态配置却严格限制路径位于 assets，路径约束不一致。
+- 任务局部图片路径仅拼接 assets；状态配置却严格限制路径位于 assets，路径约束不一致。
 - loader 对多余字段通常不报错，部分可选字段拼写错误可能被忽略；缺少统一严格校验入口。
 
 校验实现见 [script_dependencies.py](../src/game_automation/portable/application/script_dependencies.py)；当前测试覆盖并不消除上述遗漏。
-恢复/重试方向仍是讨论稿，见 [local-recovery.md](design/local-recovery.md)，本文不把草案能力写成已实现。
+函数任务通过普通 Python 异常处理组织局部恢复。历史步骤树恢复方案已随旧格式退役，进一步自动恢复需由具体任务证据驱动。
 
 ## 验证记录
+
+- **2026-11-14 窄版运行页与 Ruff 整理**。脚本运行和实时识别共用约 520×820 点的侧边窗口，素材准备页按当前屏幕范围恢复宽布局。实际 Star 界面验证了运行页的分行控件、长路径换行，以及准备页展开后返回运行页收窄。完整回归 `803 passed`，Ruff 检查、格式检查与 `git diff --check` 通过，11 个通用示例通过 CLI 模拟运行。规范整理显式保留 Quartz 桥接登记与 pytest fixture 注册，并覆盖桥接加载顺序。任务输入与画面验证使用替身，本轮界面操作限定在 Star。
+
+- **2026-11-14 Python 任务完整迁移**。完整回归 `801 passed`，删除旧格式专属测试并将仍适用的模型不变量、无限等待取消、连续输入和嵌套偏移迁入函数任务或模型测试。四个本地工作区的 12 个活动任务和主仓 11 个示例统一使用 Python，66 个旧新同场景回放的输入、坐标、画面结果和虚拟时间一致，三个有限等待失败场景按新约定显示 `timed_out`。独立差分回放与边界审查通过。工作区列表和全部任务详情通过，原件备份保存在各工作区 `.star/migrations/2026-11-14-python-tasks/`。迁移版原生应用完成 SDK 编译与固定签名校验。本轮使用替身和受控后台，真实游戏流程尚未重新验收。
+
+- **2026-11-14 核心优先重构阶段**。当时完整回归 `928 passed`，Swift 全量 SDK 类型检查与 `git diff --check` 通过。独立核心使用 fake 设备、时间与观察验证，旧步骤树、目录发现、统一依赖、CLI 和后台协议已接入。实际 Swift 会话代码的十个隔离场景覆盖停止确认、显式重启、退出撤销待重启、迟到回复、实际退出屏障和监督回收。独立审查补出的执行与清理错误保留、检查点取消优先及重启退出竞态均先复现后修复并复核。本轮未进行 GUI 操作或真实游戏输入，业务任务迁移与目标应用完成证据另行验收。职责图和阶段顺序见 [核心优先设计](design/core-first-execution.md)。
 
 - **2026-11-06 实时窗口观察与固定签名**：Mac/Python3.14 完整测试 **595 passed**，`git diff --check`通过，Swift SDK编译及固定证书跨内容签名验证通过。实机素材准备完成两份状态素材及窗口相对ROI登记；按用户明确的头像打开/关闭路径验证“主页→人物属性→主页”，新状态连续两帧确认，切换中先未知，停止撤销状态与证据。右侧Star实际520×820点(X950,Y33)、游戏856×674点(X0,Y33)，置顶只影响Star。固定本机证书签名迁移后，多次重建均保留窗口及截图权限。性能统计按采样更新、停止保留、新观察清空在UI验证。2Hz累计441轮无失败/超预算，最近120轮整轮p95 252.2ms；5Hz短测770轮有5次短暂观察失败、11次超过200ms预算，已恢复但原原因未留存，不能确认与频率的因果关系；现已增加有界最近失败历史。离线真实来源帧上2/10/50/100条重复请求全部完成且零失败，ROI与整窗对比详见外部工作区性能记录；不当作不同真实模板或实机全流程数据。最终安装版2Hz已观察101轮，失败/超预算0、主页命中1.000；仅只读观察，未验证自动动作或完整游戏任务。后台卡住后的进程回收由自动化及代码审查覆盖，本轮未在真实游戏上故意触发强制回收。
 
@@ -245,6 +236,6 @@ UI 自动把所选脚本解析出的图片依赖全部视为找到；CLI 通过�
 
 本机旧版已复现前台拒绝及调度中心动画尺寸变化后直接失败。修复版活动页实机循环完成12次标题确认并经历暂停恢复。最终版通过项目已有激活入口自行验证前台点击关闭登录页连接提示，并在调度中心只等待探针中经历856×674到276×217再恢复，记录暂停约2.197秒后正常完成。此时游戏连接服务器失败，前台探针限定于登录页无消耗按钮，完整游戏任务未重新运行。
 
-## 2026-11-08 循环时间上限
+## 局部任务时间上限
 
-`Repeat.max_seconds`/JSON `repeat.max_seconds` 从进入循环开始按单调时钟计时，包含识图和输入耗时。达到次数、图片中断或时间上限中的任一条件即结束该层循环，后续步骤继续；到期事件为 `repeat_interrupted` 并显示时间上限原因。嵌套循环和无限图片等待消费最早外层期限；固定等待与轮询等待会裁短到剩余时间。输入前（含图片定位后、连续组合键之间）检查期限，不会在已观察到到期后启动下一次输入；正在进行的平台调用与必要释放不保证准点结束。用户取消保持优先。UI/CLI详情显示秒数，dry-run的模拟等待推进虚拟时钟，仍只验证固定假条件下的路径。
+任务通过 `ctx.deadline(seconds)` 给一段代码设置有效任务时间预算。期限包含识图和输入耗时，平台暂停期间扣除暂停时间。等待裁短到最早期限，输入前再次检查。到期抛出带作用域身份的 `TaskTimeout`，任务可捕获自己拥有的期限并继续。已开始的平台调用和必要释放可能晚于期限返回。模拟等待推进虚拟时钟，仍只验证固定假画面下的路径。

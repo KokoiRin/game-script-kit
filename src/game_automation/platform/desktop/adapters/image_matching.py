@@ -6,9 +6,6 @@
 
 from __future__ import annotations
 
-from game_automation.portable.application.capture_errors import WindowCaptureError
-from game_automation.portable.engine.cancellation import ScriptCancelledError
-
 import threading
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -19,10 +16,22 @@ from PIL import Image
 
 from game_automation.platform.desktop.adapters.screen_capture import (
     CapturedScreen,
+)
+from game_automation.platform.desktop.adapters.screen_capture import (
     capture_screen as _capture_screen,
+)
+from game_automation.platform.desktop.adapters.screen_capture import (
     crop_captured_screen as _crop_captured_screen,
 )
-from game_automation.portable.domain import ImageBatchMatchResult, ImageMatch, ImageSearchRequest, ImageTemplate, Rect
+from game_automation.portable.application.capture_errors import WindowCaptureError
+from game_automation.portable.domain import (
+    ImageBatchMatchResult,
+    ImageMatch,
+    ImageSearchRequest,
+    ImageTemplate,
+    Rect,
+)
+from game_automation.portable.engine.cancellation import ScriptCancelledError
 from game_automation.portable.engine.ports import RunLogger, ScreenImageLocator
 
 
@@ -78,7 +87,9 @@ class PyAutoGuiScreenImageLocator(ScreenImageLocator):
             )
             return match
         except Exception as exc:
-            if isinstance(exc, (WindowCaptureError, ScriptCancelledError)) or _is_setup_error(exc):
+            if isinstance(
+                exc, (WindowCaptureError, ScriptCancelledError)
+            ) or _is_setup_error(exc):
                 raise exc
             raise RuntimeError(
                 "failed to perform screen image matching. Check template path, "
@@ -119,7 +130,9 @@ class PyAutoGuiScreenImageLocator(ScreenImageLocator):
     ) -> tuple[ImageBatchMatchResult, ...]:
         """在一次截图中查找多条图片搜索请求。"""
         if stop_on_first_match and stop_on_priority_match:
-            raise ValueError('first-match and priority-match modes are mutually exclusive')
+            raise ValueError(
+                "first-match and priority-match modes are mutually exclusive"
+            )
         try:
             total_started_at = perf_counter()
             cv_started_at = perf_counter()
@@ -128,20 +141,39 @@ class PyAutoGuiScreenImageLocator(ScreenImageLocator):
             screenshot_started_at = perf_counter()
             screenshot = _capture_screen(self._backend, region=None)
             screenshot_ms = _elapsed_ms(screenshot_started_at)
-            results = [replace(ImageBatchMatchResult.skipped_result(r.template), point_count=None if r.pattern is None else len(r.pattern.points)) for r in requests]
-            order = sorted(range(len(requests)), key=lambda i: -requests[i].priority) if stop_on_priority_match else range(len(requests))
+            results = [
+                replace(
+                    ImageBatchMatchResult.skipped_result(r.template),
+                    point_count=None if r.pattern is None else len(r.pattern.points),
+                )
+                for r in requests
+            ]
+            order = (
+                sorted(range(len(requests)), key=lambda i: -requests[i].priority)
+                if stop_on_priority_match
+                else range(len(requests))
+            )
             matched_priority = None
             template_load_ms = 0.0
             match_ms = 0.0
             screenshot_array = None
             for index in order:
                 request = requests[index]
-                if stop_on_priority_match and matched_priority is not None and request.priority < matched_priority:
+                if (
+                    stop_on_priority_match
+                    and matched_priority is not None
+                    and request.priority < matched_priority
+                ):
                     break
                 if request.pattern is not None:
-                    from game_automation.platform.desktop.adapters.color_matching import locate_color_pattern
+                    from game_automation.platform.desktop.adapters.color_matching import (
+                        locate_color_pattern,
+                    )
+
                     point_started = perf_counter()
-                    located = locate_color_pattern(screenshot, request.template, request.pattern)
+                    located = locate_color_pattern(
+                        screenshot, request.template, request.pattern
+                    )
                     one_match_ms = _elapsed_ms(point_started)
                     results[index] = replace(located, elapsed_ms=one_match_ms)
                     match_ms += one_match_ms
@@ -167,7 +199,11 @@ class PyAutoGuiScreenImageLocator(ScreenImageLocator):
                     if request.region is None
                     else _crop_captured_screen(screenshot, region=request.region)
                 )
-                search_array = screenshot_array if request.region is None else numpy.array(search_screen.image)
+                search_array = (
+                    screenshot_array
+                    if request.region is None
+                    else numpy.array(search_screen.image)
+                )
                 match_started_at = perf_counter()
                 located = _locate_template(
                     cv2=cv2,
@@ -181,12 +217,12 @@ class PyAutoGuiScreenImageLocator(ScreenImageLocator):
                 one_match_ms = _elapsed_ms(match_started_at)
                 match_ms += one_match_ms
                 results[index] = ImageBatchMatchResult(
-                        template=template,
-                        match=match,
-                        elapsed_ms=one_match_ms,
-                        best_confidence=located.best_confidence,
-                        best_rect=located.best_rect,
-                    )
+                    template=template,
+                    match=match,
+                    elapsed_ms=one_match_ms,
+                    best_confidence=located.best_confidence,
+                    best_rect=located.best_rect,
+                )
                 if stop_on_priority_match and match is not None:
                     matched_priority = request.priority
                 if stop_on_first_match and match is not None:
@@ -205,7 +241,9 @@ class PyAutoGuiScreenImageLocator(ScreenImageLocator):
             )
             return batch_results
         except Exception as exc:
-            if isinstance(exc, (WindowCaptureError, ScriptCancelledError)) or _is_setup_error(exc):
+            if isinstance(
+                exc, (WindowCaptureError, ScriptCancelledError)
+            ) or _is_setup_error(exc):
                 raise exc
             raise RuntimeError(
                 "failed to perform screen image matching. Check template path, "
@@ -219,11 +257,13 @@ class PyAutoGuiScreenImageLocator(ScreenImageLocator):
         except ModuleNotFoundError as exc:
             raise RuntimeError(
                 "pyautogui is required for screen image matching. "
-                "Install dependencies with: pip install -e \".[dev]\""
+                'Install dependencies with: pip install -e ".[dev]"'
             ) from exc
         return pyautogui
 
-    def _load_template_image(self, template: ImageTemplate, numpy: ModuleType) -> LoadedTemplateImage:
+    def _load_template_image(
+        self, template: ImageTemplate, numpy: ModuleType
+    ) -> LoadedTemplateImage:
         """读取并缓存模板图片和 OpenCV 数组。"""
         template_path = Path(template.path)
         with _TEMPLATE_CACHE_LOCK:
@@ -286,7 +326,9 @@ def _load_cv_modules() -> tuple[ModuleType, ModuleType]:
     return cv2, numpy
 
 
-def _load_template_image(template: ImageTemplate, numpy: ModuleType) -> LoadedTemplateImage:
+def _load_template_image(
+    template: ImageTemplate, numpy: ModuleType
+) -> LoadedTemplateImage:
     """读取模板图片并转换为 OpenCV 可匹配的 RGB 图。"""
     with Image.open(Path(template.path)) as image:
         template_image = image.convert("RGB")
@@ -303,7 +345,10 @@ def _locate_template(
     screenshot_array: object | None = None,
 ) -> LocatedTemplate:
     """用 OpenCV 模板匹配返回满足阈值的最佳匹配。"""
-    if template.image.width > screenshot.image.width or template.image.height > screenshot.image.height:
+    if (
+        template.image.width > screenshot.image.width
+        or template.image.height > screenshot.image.height
+    ):
         return LocatedTemplate(match=None, best_confidence=None, best_rect=None)
 
     if screenshot_array is None:
@@ -320,7 +365,9 @@ def _locate_template(
         height=round(template.image.height / screenshot.pixels_per_point_y),
     )
     if confidence < min_confidence:
-        return LocatedTemplate(match=None, best_confidence=confidence, best_rect=best_rect)
+        return LocatedTemplate(
+            match=None, best_confidence=confidence, best_rect=best_rect
+        )
 
     match = ImageMatch(
         rect=best_rect,
@@ -412,4 +459,6 @@ def _is_setup_error(exc: Exception) -> bool:
 def _validate_min_confidence(min_confidence: float) -> None:
     """校验最低匹配置信度必须大于 0 且不超过 1。"""
     if not 0 < min_confidence <= 1:
-        raise ValueError("minimum image match confidence must be greater than 0 and at most 1")
+        raise ValueError(
+            "minimum image match confidence must be greater than 0 and at most 1"
+        )

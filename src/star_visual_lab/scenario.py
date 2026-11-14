@@ -6,11 +6,10 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from dataclasses import dataclass
 import threading
 import time
-
+from collections.abc import Callable
+from dataclasses import dataclass
 
 SUPPORTED_MODES = ("normal", "slow", "missing_target")
 DEFAULT_LOADING_DELAYS = {

@@ -4,11 +4,12 @@ import SwiftUI
 struct WorkspaceView: View {
     @ObservedObject var session: DesktopSession
     @State var tab = "observe"
-    @State var compact = true
     @State var floating = true
     let chooseWorkspace: () -> Void
-    let changeObservationMode: (Bool) -> Void
+    let changeCompactLayout: (Bool) -> Void
     let changeFloating: (Bool) -> Void
+
+    private var compact: Bool { usesCompactLayout(for: tab) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: compact ? 10 : 16) {
@@ -17,33 +18,28 @@ struct WorkspaceView: View {
                 Spacer()
                 Text((compact ? session.workspace?.lastPathComponent : session.workspace?.path) ?? "尚未选择工作区").foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle).help(session.workspace?.path ?? "请选择任务工作区")
                 Button("选择工作区…", action: chooseWorkspace)
-                    .disabled(session.busy || session.runRunning || session.observationRunning || session.phase == .starting || session.phase == .stopping)
+                    .disabled(!session.canSwitchWorkspace)
             }
             HStack {
-                Button(compact ? "展开准备" : "并排观察") {
-                    compact.toggle()
-                    tab = compact ? "observe" : "prepare"
-                    floating = compact
-                    changeObservationMode(compact)
-                    changeFloating(floating)
-                    if compact && session.canOperate { session.reloadObservationRules() }
-                }
+                Picker("页面", selection: $tab) {
+                    Text("素材准备").tag("prepare")
+                    Text("实时识别").tag("observe")
+                    Text("脚本运行").tag("run")
+                }.pickerStyle(.segmented).labelsHidden()
                 Spacer()
                 Toggle("置顶", isOn: $floating).toggleStyle(.checkbox)
                     .onChange(of: floating) { changeFloating($0) }
             }
             permissions
             Group {
-                if compact {
-                    ObservationView(session: session, compact: true)
-                } else {
-                    TabView(selection: $tab) {
-                        preparation.tabItem { Label("素材准备", systemImage: "viewfinder") }.tag("prepare")
-                        ObservationView(session: session).tabItem { Label("实时识别", systemImage: "eye") }.tag("observe")
-                        execution.tabItem { Label("脚本运行", systemImage: "play.circle") }.tag("run")
-                    }
+                switch tab {
+                case "run": execution
+                case "observe": ObservationView(session: session, compact: true)
+                default: preparation
                 }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .onChange(of: compact) { changeCompactLayout($0) }
             .onChange(of: tab) { value in
                 if value == "run" && session.scripts.isEmpty && session.canOperate { session.reloadScripts() }
                 if value == "observe" && session.canOperate { session.reloadObservationRules() }
@@ -55,20 +51,21 @@ struct WorkspaceView: View {
                 }
             }
             HStack {
-                if session.busy || session.phase == .starting || session.phase == .stopping {
+                if session.showsProgress {
                     ProgressView().controlSize(.small)
                 }
                 Text(session.status).font(.callout).foregroundStyle(.secondary)
                     .lineLimit(compact ? 2 : nil).help(session.status)
                 Spacer()
                 if session.observationRunning {
-                    Button("停止识别", action: session.stopObservation).disabled(session.phase != .ready)
+                    Button("停止识别", action: session.stopObservation).disabled(!session.canStopObservation)
                 }
                 if session.runRunning {
-                    Button("停止脚本", action: session.stopScript).disabled(session.busy || session.phase != .ready)
+                    Button(session.runPhase == .stopping ? "正在停止" : "停止脚本", action: session.stopScript)
+                        .disabled(!session.canStopScript)
                 }
-                if session.phase == .failed && !session.processRunning {
-                    Button("重启后台", action: session.restart)
+                if session.runPhase == .stopping || session.phase == .failed {
+                    Button("重启后台", action: session.restartBackend).disabled(!session.canRestartBackend)
                 }
             }
             if !session.errorMessage.isEmpty {
@@ -95,7 +92,7 @@ struct WorkspaceView: View {
                 Label("窗口与截图已授权", systemImage: "checkmark.circle").font(.caption).foregroundStyle(.secondary)
                 Spacer()
                 Button("检测", action: session.refreshPermissions)
-                    .disabled(!session.canOperate || session.checkingPermissions)
+                    .disabled(!session.canCheckPermissions)
             }
         } else {
             GroupBox("系统权限") {
@@ -106,7 +103,7 @@ struct WorkspaceView: View {
                             .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                         HStack {
                             Button("打开隐私设置", action: session.openPrivacySettings)
-                            Button("重启后台", action: session.restartBackend).disabled(!session.canOperate)
+                            Button("重启后台", action: session.restartBackend).disabled(!session.canRestartBackend)
                         }
                     }
                 }.padding(4)
@@ -119,16 +116,16 @@ struct WorkspaceView: View {
             VStack(alignment: .leading, spacing: 8) {
                 accessibilityControl
                 screenRecordingControl
-                Button("重新检测", action: session.refreshPermissions).disabled(session.checkingPermissions)
-            }.disabled(!session.canOperate)
+                Button("重新检测", action: session.refreshPermissions)
+            }.disabled(!session.canCheckPermissions)
         } else {
             HStack {
                 accessibilityControl
                 Spacer()
                 screenRecordingControl
                 Spacer()
-                Button("重新检测", action: session.refreshPermissions).disabled(session.checkingPermissions)
-            }.disabled(!session.canOperate)
+                Button("重新检测", action: session.refreshPermissions)
+            }.disabled(!session.canCheckPermissions)
         }
     }
 
@@ -208,9 +205,12 @@ struct WorkspaceView: View {
                     ForEach(session.scripts, id: \.self) { Text($0).tag($0) }
                 }.onChange(of: session.selectedScript) { _ in session.describeScript() }
                 Button("重新加载", action: session.reloadScripts).disabled(!session.canOperate)
+            }.disabled(!session.canOperate)
+            HStack {
                 Toggle("模拟运行", isOn: $session.dryRun).toggleStyle(.checkbox)
+                Spacer()
                 Button("运行", action: session.startScript).disabled(!session.canOperate || session.selectedScript.isEmpty)
-            }.disabled(session.busy || session.runRunning || session.phase != .ready)
+            }.disabled(!session.canOperate)
             if session.dryRun {
                 HStack {
                     TextField("模拟颜色 #000000", text: $session.dryRunColor)
@@ -220,16 +220,18 @@ struct WorkspaceView: View {
                 Text("真实运行会控制当前桌面；当前点位和状态区域仍按脚本及运行配置解析。")
                     .font(.caption).foregroundStyle(.secondary)
             }
-            GroupBox("步骤与依赖") {
-                ScrollView { Text(session.scriptDetails.isEmpty ? "读取脚本后显示步骤和依赖。" : session.scriptDetails)
-                    .font(.system(.caption, design: .monospaced)).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }
+            GroupBox("入口与依赖") {
+                ScrollView { Text(session.scriptDetails.isEmpty ? "读取脚本后显示入口和依赖。" : session.scriptDetails)
+                    .font(.system(.caption, design: .monospaced)).textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading).fixedSize(horizontal: false, vertical: true) }
                     .frame(height: 150)
             }
             GroupBox("运行记录") {
                 ScrollView { Text(session.runLog.isEmpty ? "暂无运行记录。" : session.runLog)
-                    .font(.system(.caption, design: .monospaced)).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }
+                    .font(.system(.caption, design: .monospaced)).textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading).fixedSize(horizontal: false, vertical: true) }
                     .frame(maxHeight: .infinity)
             }
-        }.padding(14)
+        }.padding(compact ? 0 : 14)
     }
 }

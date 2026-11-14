@@ -3,11 +3,10 @@
 import pytest
 
 from game_automation.portable.domain import (
-    ImageExists,
     ImageRef,
     ImageSearchSpec,
-    ImageTemplate,
     ImageTarget,
+    ImageTemplate,
     NamedImage,
     NamedImageSearch,
     NamedRegion,
@@ -37,14 +36,20 @@ def test_named_image_rejects_blank_name() -> None:
 
 def test_target_catalog_resolves_image_ref() -> None:
     """验证资源目录能把图片引用解析为图片模板。"""
-    catalog = TargetCatalog(images=(NamedImage("开始按钮", ImageTemplate("assets/start.png")),))
+    catalog = TargetCatalog(
+        images=(NamedImage("开始按钮", ImageTemplate("assets/start.png")),)
+    )
 
-    assert catalog.resolve_image(ImageRef("开始按钮")) == ImageTemplate("assets/start.png")
+    assert catalog.resolve_image(ImageRef("开始按钮")) == ImageTemplate(
+        "assets/start.png"
+    )
 
 
 def test_target_catalog_resolves_region_ref() -> None:
     """验证资源目录能把区域引用解析为搜索区域。"""
-    catalog = TargetCatalog(regions=(NamedRegion("右上弹窗", Rect(1800, 120, 700, 500)),))
+    catalog = TargetCatalog(
+        regions=(NamedRegion("右上弹窗", Rect(1800, 120, 700, 500)),)
+    )
 
     assert catalog.resolve_region(RegionRef("右上弹窗")) == Rect(1800, 120, 700, 500)
 
@@ -93,15 +98,10 @@ def test_target_catalog_reports_unknown_image_search_name() -> None:
     """验证未知图片搜索名称会给出可读错误。"""
     catalog = TargetCatalog()
 
-    with pytest.raises(UnknownImageSearchNameError, match="unknown image search target: 离开按钮"):
+    with pytest.raises(
+        UnknownImageSearchNameError, match="unknown image search target: 离开按钮"
+    ):
         catalog.resolve_search(SearchRef("离开按钮"))
-
-
-def test_image_exists_can_hold_image_ref() -> None:
-    """验证图片存在条件可以保留图片引用。"""
-    condition = ImageExists(ImageRef("开始按钮"))
-
-    assert condition.template == ImageRef("开始按钮")
 
 
 def test_image_target_can_hold_image_ref() -> None:

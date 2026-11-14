@@ -1,7 +1,11 @@
 import Foundation
 import CoreGraphics
 
-func sideObservationFrame(in visibleFrame: CGRect) -> CGRect {
+func usesCompactLayout(for tab: String) -> Bool {
+    tab == "observe" || tab == "run"
+}
+
+func sidePanelFrame(in visibleFrame: CGRect) -> CGRect {
     let size = CGSize(width: min(520, visibleFrame.width), height: min(820, visibleFrame.height))
     return CGRect(x: visibleFrame.maxX - size.width, y: visibleFrame.maxY - size.height,
                   width: size.width, height: size.height)

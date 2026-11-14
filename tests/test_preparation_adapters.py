@@ -5,15 +5,20 @@
 
 import io
 
-from PIL import Image
 import pytest
+from PIL import Image
 
-from game_automation.platform.desktop.adapters.preparation import DesktopFrameCapture, PillowImageEditor, WorkspaceTemplateStore
+from game_automation.platform.desktop.adapters.preparation import (
+    DesktopFrameCapture,
+    PillowImageEditor,
+    WorkspaceTemplateStore,
+)
 from game_automation.portable.domain.geometry import Rect
 
 
 def test_preparation_capture_reuses_desktop_pixel_scaling():
     """窗口逻辑坐标与二倍像素截图之间应正确转换。"""
+
     class Backend:
         def screenshot(self):
             """返回二倍像素桌面。"""
@@ -44,7 +49,9 @@ def test_preparation_store_saves_under_assets_without_overwriting(tmp_path):
     assert (tmp_path / "assets" / "任务入口.png").read_bytes() == b"original"
 
 
-@pytest.mark.parametrize("name", ["", "../outside", "/tmp/outside", "a/b", "a\\b", ".", ".."])
+@pytest.mark.parametrize(
+    "name", ["", "../outside", "/tmp/outside", "a/b", "a\\b", ".", ".."]
+)
 def test_preparation_store_rejects_non_template_names(tmp_path, name):
     """用户输入只作为模板名称，不能变成工作区外的文件路径。"""
     with pytest.raises(ValueError, match="template name"):

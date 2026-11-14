@@ -17,10 +17,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         sourceRoot = configuredURL("STAR_SOURCE_ROOT", bundleKey: "StarSourceRoot") ?? developmentRoot()
         python = configuredURL("STAR_PYTHON", bundleKey: "StarPython") ?? sourceRoot?.appendingPathComponent(".venv/bin/python")
         let initialTab = argument("--tab") ?? "observe"
-        let compact = initialTab == "observe"
-        let view = WorkspaceView(session: session, tab: initialTab, compact: compact, floating: compact,
+        let compact = usesCompactLayout(for: initialTab)
+        let floating = initialTab == "observe"
+        let view = WorkspaceView(session: session, tab: initialTab, floating: floating,
                                  chooseWorkspace: { [weak self] in self?.chooseWorkspace() },
-                                 changeObservationMode: { [weak self] in self?.setObservationMode($0) },
+                                 changeCompactLayout: { [weak self] in self?.setCompactLayout($0) },
                                  changeFloating: { [weak self] floating in self?.window?.level = floating ? .floating : .normal })
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1100, height: 850),
                               styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
@@ -36,8 +37,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             wideFrame = windowFrame(CGRect(x: visible.midX - 550, y: visible.midY - 425,
                                            width: 1100, height: 850), fitting: visible)
         }
-        setObservationMode(compact)
-        window.level = compact ? .floating : .normal
+        setCompactLayout(compact)
+        window.level = floating ? .floating : .normal
         installMenus()
         installSignals()
         window.makeKeyAndOrderFront(nil)
@@ -48,13 +49,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         } else { chooseWorkspace() }
     }
 
-    private func setObservationMode(_ compact: Bool) {
+    private func setCompactLayout(_ compact: Bool) {
         guard let window, let screen = window.screen ?? NSScreen.main else { return }
         let visible = screen.visibleFrame
         if compact {
             if window.frame.width >= min(980, visible.width) { wideFrame = window.frame }
             window.minSize = NSSize(width: min(460, visible.width), height: min(620, visible.height))
-            window.setFrame(sideObservationFrame(in: visible), display: true)
+            window.setFrame(sidePanelFrame(in: visible), display: true)
         } else {
             window.minSize = NSSize(width: min(980, visible.width), height: min(750, visible.height))
             let restored = wideFrame ?? CGRect(x: visible.minX, y: visible.minY, width: 1100, height: 850)
@@ -83,7 +84,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     @objc private func chooseWorkspace() {
         guard !terminating else { return }
-        guard !session.busy, !session.runRunning, !session.observationRunning, session.phase != .starting, session.phase != .stopping else {
+        guard session.canSwitchWorkspace else {
             session.errorMessage = "请先停止当前任务，再切换工作区。"
             return
         }

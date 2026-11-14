@@ -6,8 +6,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Mapping
 
 from game_automation.portable.domain.geometry import Point, Rect
 from game_automation.portable.domain.image_matching import ImageTemplate
@@ -134,7 +134,9 @@ class ImageSearchSpec:
     def __post_init__(self) -> None:
         """校验图片搜索规格的可选最低置信度。"""
         if self.min_confidence is not None and not 0 < self.min_confidence <= 1:
-            raise ValueError("image search min_confidence must be greater than 0 and at most 1")
+            raise ValueError(
+                "image search min_confidence must be greater than 0 and at most 1"
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -219,7 +221,9 @@ class TargetCatalog:
             try:
                 search = self._search_map[ref.name]
             except KeyError as exc:
-                raise UnknownImageSearchNameError(f"unknown image search target: {ref.name}") from exc
+                raise UnknownImageSearchNameError(
+                    f"unknown image search target: {ref.name}"
+                ) from exc
         return ImageSearchSpec(
             image=self.resolve_image(search.image),
             region=self.resolve_region(search.region),

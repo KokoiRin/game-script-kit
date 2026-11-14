@@ -3,70 +3,76 @@
 原生工作队列另做实机smoke，这里以driver替身覆盖失败和迟到发布。
 """
 
+import time
 from contextlib import nullcontext
 from types import SimpleNamespace
-import time
 
 import pytest
 
-from game_automation.platform.macos.adapters.window_stream import LatestWindowFrame, StreamPixels, WindowStreamSource, NativeWindowStream
+from game_automation.platform.macos.adapters.window_stream import (
+    LatestWindowFrame,
+    NativeWindowStream,
+    StreamPixels,
+    WindowStreamSource,
+)
 from game_automation.portable.domain import Rect
 from game_automation.portable.preparation.models import DesktopWindow
 
 
 def pixels():
     """提供独立BGRA红色像素，检验通道及实际输出。"""
-    return StreamPixels(bytes([0, 0, 255, 255])*16, 4, 4, 16)
+    return StreamPixels(bytes([0, 0, 255, 255]) * 16, 4, 4, 16)
 
 
 def test_slot_only_latest_and_idle_needs_real_new_source_time():
     """系统idle可以确认未变化；无时间与重复时间不制造新证据。"""
     slot = LatestWindowFrame()
-    slot.publish('idle', 1)
-    with pytest.raises(RuntimeError, match='完整画面'):
+    slot.publish("idle", 1)
+    with pytest.raises(RuntimeError, match="完整画面"):
         slot.take(0)
-    slot.publish('complete', 2, pixels())
+    slot.publish("complete", 2, pixels())
     first = slot.take(0)
-    slot.publish('idle', None)
-    slot.publish('idle', 2)
+    slot.publish("idle", None)
+    slot.publish("idle", 2)
     assert slot.take(0) == first
-    slot.publish('idle', 3)
+    slot.publish("idle", 3)
     frame, proof = slot.take(0)
     assert frame is first[0]
-    assert proof.sequence == 2 and proof.kind == 'idle' and proof.captured_at == 3
-    slot.publish('complete', 4, pixels())
+    assert proof.sequence == 2 and proof.kind == "idle" and proof.captured_at == 3
+    slot.publish("complete", 4, pixels())
     assert slot.take(0)[1].sequence == 3
 
 
 def test_invalidated_or_closed_slot_never_replays_pixels():
     """空白或停止后的迟到回调不能恢复缓存证据。"""
     slot = LatestWindowFrame()
-    slot.publish('complete', 1, pixels())
-    slot.invalidate('窗口暂停')
-    slot.publish('idle', 2)
-    with pytest.raises(RuntimeError, match='窗口暂停'):
+    slot.publish("complete", 1, pixels())
+    slot.invalidate("窗口暂停")
+    slot.publish("idle", 2)
+    with pytest.raises(RuntimeError, match="窗口暂停"):
         slot.take(0)
-    slot.publish('complete', 3, pixels())
+    slot.publish("complete", 3, pixels())
     assert slot.take(0)[1].captured_at == 3
     slot.close()
-    slot.publish('complete', 4, pixels())
-    with pytest.raises(RuntimeError, match='已停止'):
+    slot.publish("complete", 4, pixels())
+    with pytest.raises(RuntimeError, match="已停止"):
         slot.take(0)
 
 
-@pytest.mark.parametrize('stamp', [None, float('nan'), float('inf'), -1])
+@pytest.mark.parametrize("stamp", [None, float("nan"), float("inf"), -1])
 def test_invalid_complete_source_time_revokes_old_pixels(stamp):
     """不能把未知系统时间替换为回调时间或零年龄。"""
     slot = LatestWindowFrame()
-    slot.publish('complete', 1, pixels())
-    slot.publish('complete', stamp, pixels())
-    with pytest.raises(RuntimeError, match='源时间'):
+    slot.publish("complete", 1, pixels())
+    slot.publish("complete", stamp, pixels())
+    with pytest.raises(RuntimeError, match="源时间"):
         slot.take(0)
 
 
 class Binding:
     """模拟固定窗口身份，允许显式注入失效。"""
-    window = DesktopWindow('42:1', 'App', '页面', Rect(0, 0, 2, 2))
+
+    window = DesktopWindow("42:1", "App", "页面", Rect(0, 0, 2, 2))
 
     def __init__(self):
         """保存窗口可用性。"""
@@ -89,19 +95,21 @@ class Driver:
         """提供一张完整帧并记录用户频率。"""
         self.started = True
         self.hz, self.slot = hz, slot
-        slot.publish('complete', time.monotonic(), pixels())
+        slot.publish("complete", time.monotonic(), pixels())
 
     def close(self):
         """模拟停止时仍存在迟到回调。"""
-        self.slot.publish('complete', time.monotonic(), pixels())
+        self.slot.publish("complete", time.monotonic(), pixels())
         self.closed = True
 
 
-@pytest.mark.parametrize('hz', [2, 5])
+@pytest.mark.parametrize("hz", [2, 5])
 def test_source_starts_lazily_at_selected_hz_and_preserves_proof(hz):
     """工作线程首次读才启动，频率不偷偷提升到15且RGB与源时间同槽。"""
     binding, driver = Binding(), Driver()
-    source = WindowStreamSource(binding.window, (4, 4), hz=hz, binding=binding, driver_factory=lambda: driver)
+    source = WindowStreamSource(
+        binding.window, (4, 4), hz=hz, binding=binding, driver_factory=lambda: driver
+    )
     assert not driver.started
     try:
         with source.screenshot() as image:
@@ -110,27 +118,31 @@ def test_source_starts_lazily_at_selected_hz_and_preserves_proof(hz):
         with source.screenshot():
             assert source.proof == first
         assert driver.hz == hz
-        binding.error = '窗口尺寸已变化'
-        with pytest.raises(RuntimeError, match='尺寸已变化'):
+        binding.error = "窗口尺寸已变化"
+        with pytest.raises(RuntimeError, match="尺寸已变化"):
             source.screenshot()
     finally:
         source.close()
     assert driver.closed
-    with pytest.raises(RuntimeError, match='已停止'):
+    with pytest.raises(RuntimeError, match="已停止"):
         source.screenshot()
 
 
 def test_startup_failure_is_not_silently_restarted_and_still_closes():
     """失败启动不另开并行流，保留已创建driver供统一回收。"""
+
     class Failing(Driver):
         def start(self, binding, size, hz, slot):
             """模拟系统部分创建成功后失败。"""
             super().start(binding, size, hz, slot)
-            raise RuntimeError('启动超时')
+            raise RuntimeError("启动超时")
+
     binding, driver = Binding(), Failing()
-    source = WindowStreamSource(binding.window, (4, 4), binding=binding, driver_factory=lambda: driver)
+    source = WindowStreamSource(
+        binding.window, (4, 4), binding=binding, driver_factory=lambda: driver
+    )
     for _ in range(2):
-        with pytest.raises(RuntimeError, match='启动超时'):
+        with pytest.raises(RuntimeError, match="启动超时"):
             source.screenshot()
     source.close()
     assert driver.closed
@@ -141,7 +153,9 @@ def test_native_close_waits_for_stop_and_callback_barrier():
     native = NativeWindowStream.__new__(NativeWindowStream)
     native.closed = False
     native.objc = SimpleNamespace(autorelease_pool=nullcontext)
-    native.stream = SimpleNamespace(stopCaptureWithCompletionHandler_=lambda cb: cb(None))
+    native.stream = SimpleNamespace(
+        stopCaptureWithCompletionHandler_=lambda cb: cb(None)
+    )
     native.sink = SimpleNamespace(owner=native)
     sink = native.sink
     native.queue = object()
@@ -155,9 +169,11 @@ def test_native_stop_failure_is_visible_and_keeps_resources_owned():
     native = NativeWindowStream.__new__(NativeWindowStream)
     native.closed = False
     native.objc = SimpleNamespace(autorelease_pool=nullcontext)
-    native.stream = SimpleNamespace(stopCaptureWithCompletionHandler_=lambda cb: cb('停止失败'))
+    native.stream = SimpleNamespace(
+        stopCaptureWithCompletionHandler_=lambda cb: cb("停止失败")
+    )
     native.sink = SimpleNamespace(owner=native)
-    with pytest.raises(RuntimeError, match='停止失败'):
+    with pytest.raises(RuntimeError, match="停止失败"):
         native.close()
     assert not native.closed and native.sink.owner is native
 
@@ -167,8 +183,16 @@ def test_repeated_raw_system_timestamp_cannot_gain_new_proof_from_clock_jitter()
     native = NativeWindowStream.__new__(NativeWindowStream)
     native._last_display_time = 0
     native.objc = SimpleNamespace(autorelease_pool=nullcontext)
-    native.sc = SimpleNamespace(SCStreamOutputTypeScreen=0, SCStreamFrameInfoStatus='status', SCStreamFrameInfoDisplayTime='time')
-    native.cm = SimpleNamespace(CMSampleBufferGetSampleAttachmentsArray=lambda *args: [{'status': 0, 'time': 200}])
+    native.sc = SimpleNamespace(
+        SCStreamOutputTypeScreen=0,
+        SCStreamFrameInfoStatus="status",
+        SCStreamFrameInfoDisplayTime="time",
+    )
+    native.cm = SimpleNamespace(
+        CMSampleBufferGetSampleAttachmentsArray=lambda *args: [
+            {"status": 0, "time": 200}
+        ]
+    )
     values = iter([10.0001, 10.0002])
     native._source_time = lambda meta: next(values)
     native._copy_pixels = lambda *args: pixels()
@@ -179,33 +203,41 @@ def test_repeated_raw_system_timestamp_cannot_gain_new_proof_from_clock_jitter()
     assert native.slot.take(0) == first
 
 
-@pytest.mark.parametrize('change', ['scale', 'factor', 'rect', 'pixels'])
+@pytest.mark.parametrize("change", ["scale", "factor", "rect", "pixels"])
 def test_stream_rejects_fixed_surface_that_hides_changed_content_geometry(change):
     """输出像素固定时仍拒绝内容范围和缩放变化。"""
     native = NativeWindowStream.__new__(NativeWindowStream)
     native.binding = Binding()
     native.pixel_size = (4, 4)
-    native.sc = SimpleNamespace(SCStreamFrameInfoContentRect='rect', SCStreamFrameInfoContentScale='scale', SCStreamFrameInfoScaleFactor='factor')
+    native.sc = SimpleNamespace(
+        SCStreamFrameInfoContentRect="rect",
+        SCStreamFrameInfoContentScale="scale",
+        SCStreamFrameInfoScaleFactor="factor",
+    )
     native.cm = SimpleNamespace(CMSampleBufferGetImageBuffer=lambda sample: object())
-    native.q = SimpleNamespace(CVPixelBufferGetWidth=lambda image: 5 if change == 'pixels' else 4,
-                              CVPixelBufferGetHeight=lambda image: 4)
-    meta = {'rect': {'X': 0, 'Y': 0, 'Width': 2, 'Height': 2}, 'scale': 1, 'factor': 2}
-    if change in ('scale', 'factor'):
+    native.q = SimpleNamespace(
+        CVPixelBufferGetWidth=lambda image: 5 if change == "pixels" else 4,
+        CVPixelBufferGetHeight=lambda image: 4,
+    )
+    meta = {"rect": {"X": 0, "Y": 0, "Width": 2, "Height": 2}, "scale": 1, "factor": 2}
+    if change in ("scale", "factor"):
         meta[change] = 1.5
-    elif change == 'rect':
-        meta['rect']['Width'] = 20
-    with pytest.raises(RuntimeError, match='范围|比例'):
+    elif change == "rect":
+        meta["rect"]["Width"] = 20
+    with pytest.raises(RuntimeError, match="范围|比例"):
         native._copy_pixels(None, meta)
 
 
 def test_availability_check_keeps_screenshot_pixels_and_proof_paired():
     """轻量可用性读取不能把新证明绑定到旧RGB画面。"""
     binding, driver = Binding(), Driver()
-    source = WindowStreamSource(binding.window, (4, 4), binding=binding, driver_factory=lambda: driver)
+    source = WindowStreamSource(
+        binding.window, (4, 4), binding=binding, driver_factory=lambda: driver
+    )
     try:
         with source.screenshot():
             original = source.proof
-        driver.slot.publish('complete', original.captured_at + 1, pixels())
+        driver.slot.publish("complete", original.captured_at + 1, pixels())
         assert source.check_available().sequence > original.sequence
         assert source.proof is original
     finally:
@@ -214,49 +246,66 @@ def test_availability_check_keeps_screenshot_pixels_and_proof_paired():
 
 def test_terminal_stop_cannot_be_revived_by_late_frames_or_pauses():
     """真正停流后迟到complete和暂停事件均不能覆盖终止原因。"""
-    from game_automation.platform.macos.adapters.window_identity import WindowPresentationUnavailable
+    from game_automation.platform.macos.adapters.window_identity import (
+        WindowPresentationUnavailable,
+    )
+
     slot = LatestWindowFrame()
-    slot.publish('complete', 1, pixels())
-    slot.invalidate('stream stopped', terminal=True)
-    slot.publish('complete', 2, pixels())
-    slot.invalidate(WindowPresentationUnavailable('paused'))
-    with pytest.raises(RuntimeError, match='stream stopped'):
+    slot.publish("complete", 1, pixels())
+    slot.invalidate("stream stopped", terminal=True)
+    slot.publish("complete", 2, pixels())
+    slot.invalidate(WindowPresentationUnavailable("paused"))
+    with pytest.raises(RuntimeError, match="stream stopped"):
         slot.take(0)
 
 
 def test_slot_preserves_temporary_presentation_error_type():
     """暂态原因穿过采集槽保持类型，供会话恢复。"""
-    from game_automation.platform.macos.adapters.window_identity import WindowPresentationUnavailable
+    from game_automation.platform.macos.adapters.window_identity import (
+        WindowPresentationUnavailable,
+    )
+
     slot = LatestWindowFrame()
-    slot.invalidate(WindowPresentationUnavailable('paused'))
+    slot.invalidate(WindowPresentationUnavailable("paused"))
     with pytest.raises(WindowPresentationUnavailable):
         slot.take(0)
-    slot.publish('complete', 2, pixels())
+    slot.publish("complete", 2, pixels())
     assert slot.take(0)[1].captured_at == 2
 
 
 def test_first_frame_timeout_rechecks_window_before_reporting_failure():
     """等首帧期间进入调度中心，超时后按当前几何报告可恢复暂态。"""
-    from game_automation.platform.macos.adapters.window_identity import WindowPresentationUnavailable
+    from game_automation.platform.macos.adapters.window_identity import (
+        WindowPresentationUnavailable,
+    )
     from game_automation.portable.application.capture_errors import WindowCaptureError
+
     binding = Binding()
     with pytest.raises(WindowCaptureError) as pending:
         LatestWindowFrame().take(0)
+
     class PausingDriver(Driver):
         def start(self, binding, size, hz, slot):
             """模拟首帧等待期间系统开始缩小窗口。"""
             self.slot = slot
+
             def wait_for_first_frame():
                 """在系统等待边界改变几何并报告尚无完整帧。"""
+
                 def changed():
                     """原窗口身份保留，但当前展示尺寸缩小。"""
-                    raise WindowPresentationUnavailable('same window shrunk')
+                    raise WindowPresentationUnavailable("same window shrunk")
+
                 binding.check = changed
                 raise pending.value
+
             slot.take = wait_for_first_frame
-    source = WindowStreamSource(binding.window, (4,4), binding=binding, driver_factory=PausingDriver)
+
+    source = WindowStreamSource(
+        binding.window, (4, 4), binding=binding, driver_factory=PausingDriver
+    )
     try:
-        with pytest.raises(WindowPresentationUnavailable, match='shrunk'):
+        with pytest.raises(WindowPresentationUnavailable, match="shrunk"):
             source.check_available()
     finally:
         source.close()
@@ -264,20 +313,29 @@ def test_first_frame_timeout_rechecks_window_before_reporting_failure():
 
 def test_first_frame_timeout_on_stable_window_is_still_terminal():
     """稳定窗口没有首帧仍报告采集失败，不能无限吞掉权限或源故障。"""
-    from game_automation.platform.macos.adapters.window_identity import WindowPresentationUnavailable
+    from game_automation.platform.macos.adapters.window_identity import (
+        WindowPresentationUnavailable,
+    )
     from game_automation.portable.application.capture_errors import WindowCaptureError
+
     binding = Binding()
     with pytest.raises(WindowCaptureError) as pending:
         LatestWindowFrame().take(0)
+
     class EmptyDriver(Driver):
         def start(self, binding, size, hz, slot):
             """让首帧等待有界结束，窗口保持稳定。"""
             self.slot = slot
+
             def timeout():
                 """报告无帧，不改变窗口身份或几何。"""
                 raise pending.value
+
             slot.take = timeout
-    source = WindowStreamSource(binding.window, (4,4), binding=binding, driver_factory=EmptyDriver)
+
+    source = WindowStreamSource(
+        binding.window, (4, 4), binding=binding, driver_factory=EmptyDriver
+    )
     try:
         with pytest.raises(WindowCaptureError) as caught:
             source.check_available()

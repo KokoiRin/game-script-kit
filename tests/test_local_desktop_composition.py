@@ -6,11 +6,17 @@ import json
 
 import game_automation.platform.desktop.adapters as desktop
 from game_automation.platform.local_desktop import composition
-from game_automation.portable.application.config_script_loader import ScriptConfigError
-from game_automation.portable.application.project_scripts import ProjectScriptCatalogResult
-from game_automation.portable.domain import (
-    Click, ImageBatchMatchResult, ImageMatch, Point, Rect, ScreenWindow, Script,
+from game_automation.portable.application.project_scripts import (
+    ProjectScriptCatalogResult,
 )
+from game_automation.portable.application.task_discovery import TaskLoadError
+from game_automation.portable.domain import (
+    ImageBatchMatchResult,
+    ImageMatch,
+    Rect,
+    ScreenWindow,
+)
+from tests.support.function_tasks import function_task
 
 
 def test_build_real_screen_image_locator_uses_desktop_adapter(monkeypatch) -> None:
@@ -19,6 +25,7 @@ def test_build_real_screen_image_locator_uses_desktop_adapter(monkeypatch) -> No
 
     class FakeScreenImageLocator:
         def __init__(self) -> None:
+            """记录本例创建的识图替身。"""
             created["locator"] = self
 
     monkeypatch.setattr(desktop, "PyAutoGuiScreenImageLocator", FakeScreenImageLocator)
@@ -28,14 +35,12 @@ def test_build_real_screen_image_locator_uses_desktop_adapter(monkeypatch) -> No
     assert locator is created["locator"]
 
 
-def test_run_script_on_local_desktop_passes_screen_image_locator_factory(monkeypatch) -> None:
+def test_run_script_on_local_desktop_passes_screen_image_locator_factory(
+    monkeypatch,
+) -> None:
     """验证本地桌面运行脚本会把图像定位 factory 交给应用层。"""
     captured = {}
-    script = Script(
-        name="plain",
-        window=ScreenWindow(),
-        steps=(Click(Point(1, 2)),),
-    )
+    script = function_task("plain", "ctx.click(Point(1, 2))", window=ScreenWindow())
 
     def fake_run_script(*args, **kwargs):
         """记录本地桌面 composition 传给应用层的参数。"""
@@ -48,13 +53,20 @@ def test_run_script_on_local_desktop_passes_screen_image_locator_factory(monkeyp
     result = composition.run_script_on_local_desktop(script, dry_run=True)
 
     assert result == "result"
-    assert captured["kwargs"]["real_image_locator_factory"] is composition.build_real_screen_image_locator
+    assert (
+        captured["kwargs"]["real_image_locator_factory"]
+        is composition.build_real_screen_image_locator
+    )
 
 
-def test_run_script_on_local_desktop_passes_target_application_activator(monkeypatch) -> None:
+def test_run_script_on_local_desktop_passes_target_application_activator(
+    monkeypatch,
+) -> None:
     """验证本地桌面运行会把目标应用和激活 factory 交给应用层。"""
     captured = {}
-    script = Script("target-app", ScreenWindow(), (Click(Point(1, 2)),))
+    script = function_task(
+        "target-app", "ctx.click(Point(1, 2))", window=ScreenWindow()
+    )
 
     def fake_run_script(*args, **kwargs):
         """记录本地桌面 composition 传给应用层的目标应用参数。"""
@@ -95,10 +107,14 @@ def test_build_real_application_activator_uses_macos_adapter(monkeypatch) -> Non
     assert activator is created["activator"]
 
 
-def test_run_script_on_local_desktop_passes_target_window_controller(monkeypatch) -> None:
+def test_run_script_on_local_desktop_passes_target_window_controller(
+    monkeypatch,
+) -> None:
     """验证本地桌面运行会把窗口标题和控制 factory 交给应用层。"""
     captured = {}
-    script = Script("target-window", ScreenWindow(), (Click(Point(1, 2)),))
+    script = function_task(
+        "target-window", "ctx.click(Point(1, 2))", window=ScreenWindow()
+    )
 
     def fake_run_script(*args, **kwargs):
         """记录 composition 传给应用层的选窗参数。"""
@@ -122,7 +138,9 @@ def test_run_script_on_local_desktop_passes_target_window_controller(monkeypatch
     )
 
 
-def test_build_real_application_window_controller_uses_macos_adapter(monkeypatch) -> None:
+def test_build_real_application_window_controller_uses_macos_adapter(
+    monkeypatch,
+) -> None:
     """验证本地桌面窗口控制 factory 会延迟创建 macOS adapter。"""
     import game_automation.platform.macos.adapters as macos
 
@@ -140,14 +158,12 @@ def test_build_real_application_window_controller_uses_macos_adapter(monkeypatch
     assert controller is created["controller"]
 
 
-def test_run_script_on_local_desktop_passes_screen_state_reader_factory(monkeypatch, tmp_path) -> None:
+def test_run_script_on_local_desktop_passes_screen_state_reader_factory(
+    monkeypatch, tmp_path
+) -> None:
     """验证本地桌面运行脚本会把界面状态 reader factory 交给应用层。"""
     captured = {}
-    script = Script(
-        name="plain",
-        window=ScreenWindow(),
-        steps=(Click(Point(1, 2)),),
-    )
+    script = function_task("plain", "ctx.click(Point(1, 2))", window=ScreenWindow())
 
     def fake_run_script(*args, **kwargs):
         """记录本地桌面 composition 传给应用层的参数。"""
@@ -155,15 +171,23 @@ def test_run_script_on_local_desktop_passes_screen_state_reader_factory(monkeypa
         return "result"
 
     monkeypatch.setattr(composition, "run_script", fake_run_script)
-    monkeypatch.setattr(composition, "build_real_screen_state_reader", lambda **kwargs: kwargs["project_root"])
+    monkeypatch.setattr(
+        composition,
+        "build_real_screen_state_reader",
+        lambda **kwargs: kwargs["project_root"],
+    )
 
-    result = composition.run_script_on_local_desktop(script, dry_run=False, project_root=tmp_path)
+    result = composition.run_script_on_local_desktop(
+        script, dry_run=False, project_root=tmp_path
+    )
 
     assert result == "result"
     assert captured["kwargs"]["real_screen_state_reader_factory"]() == tmp_path
 
 
-def test_build_real_screen_state_reader_is_independent_of_local_control(monkeypatch) -> None:
+def test_build_real_screen_state_reader_is_independent_of_local_control(
+    monkeypatch,
+) -> None:
     """脚本状态 reader 直接接平台识图能力，不创建 UI 应用或加载脚本目录。"""
     created = {}
 
@@ -176,18 +200,30 @@ def test_build_real_screen_state_reader_is_independent_of_local_control(monkeypa
         """阻止状态读取路径反向装配 UI。"""
         raise AssertionError("state reader must not construct local control")
 
-    monkeypatch.setattr(composition, "ProjectScreenStateReader", FakeProjectScreenStateReader)
-    monkeypatch.setattr(composition, "build_local_control_application", reject_ui_construction)
+    monkeypatch.setattr(
+        composition, "ProjectScreenStateReader", FakeProjectScreenStateReader
+    )
+    monkeypatch.setattr(
+        composition, "build_local_control_application", reject_ui_construction
+    )
 
     reader = composition.build_real_screen_state_reader()
 
     assert isinstance(reader, FakeProjectScreenStateReader)
     assert created["kwargs"]["project_root"] == composition.PROJECT_ROOT
-    assert created["kwargs"]["real_image_locator_factory"] is composition.build_real_screen_image_locator
-    assert created["kwargs"]["real_image_batch_locator_factory"] is composition.build_real_screen_image_batch_locator
+    assert (
+        created["kwargs"]["real_image_locator_factory"]
+        is composition.build_real_screen_image_locator
+    )
+    assert (
+        created["kwargs"]["real_image_batch_locator_factory"]
+        is composition.build_real_screen_image_batch_locator
+    )
 
 
-def test_build_local_control_application_passes_batch_image_locator_factory(monkeypatch) -> None:
+def test_build_local_control_application_passes_batch_image_locator_factory(
+    monkeypatch,
+) -> None:
     """验证本地控制 UI 会装配批量图像定位 factory。"""
     captured = {}
 
@@ -196,16 +232,26 @@ def test_build_local_control_application_passes_batch_image_locator_factory(monk
             """记录 composition 传入的 application 依赖。"""
             captured["kwargs"] = kwargs
 
-    monkeypatch.setattr(composition, "LocalControlApplication", FakeLocalControlApplication)
+    monkeypatch.setattr(
+        composition, "LocalControlApplication", FakeLocalControlApplication
+    )
 
     app = composition.build_local_control_application()
 
     assert isinstance(app, FakeLocalControlApplication)
-    assert captured["kwargs"]["real_image_locator_factory"] is composition.build_real_screen_image_locator
-    assert captured["kwargs"]["real_image_batch_locator_factory"] is composition.build_real_screen_image_batch_locator
+    assert (
+        captured["kwargs"]["real_image_locator_factory"]
+        is composition.build_real_screen_image_locator
+    )
+    assert (
+        captured["kwargs"]["real_image_batch_locator_factory"]
+        is composition.build_real_screen_image_batch_locator
+    )
 
 
-def test_build_local_control_application_passes_project_script_catalog(monkeypatch) -> None:
+def test_build_local_control_application_passes_project_script_catalog(
+    monkeypatch,
+) -> None:
     """验证本地控制 UI 会装配包含项目脚本的 catalog。"""
     captured = {}
 
@@ -219,20 +265,30 @@ def test_build_local_control_application_passes_project_script_catalog(monkeypat
         captured["project_root"] = project_root
         return ProjectScriptCatalogResult(
             catalog="catalog",
-            script_config_errors=(ScriptConfigError("bad.json", "bad"),),
+            script_config_errors=(TaskLoadError("bad.json", "bad"),),
         )
 
-    monkeypatch.setattr(composition, "LocalControlApplication", FakeLocalControlApplication)
-    monkeypatch.setattr(composition, "load_project_script_catalog_result", fake_load_project_script_catalog_result)
+    monkeypatch.setattr(
+        composition, "LocalControlApplication", FakeLocalControlApplication
+    )
+    monkeypatch.setattr(
+        composition,
+        "load_project_script_catalog_result",
+        fake_load_project_script_catalog_result,
+    )
 
     composition.build_local_control_application()
 
     assert captured["kwargs"]["catalog"] == "catalog"
-    assert captured["kwargs"]["script_config_errors"] == (ScriptConfigError("bad.json", "bad"),)
+    assert captured["kwargs"]["script_config_errors"] == (
+        TaskLoadError("bad.json", "bad"),
+    )
     assert captured["project_root"] == composition.PROJECT_ROOT
 
 
-def test_real_screen_state_reader_reads_each_requested_workspace_configuration(tmp_path, monkeypatch) -> None:
+def test_real_screen_state_reader_reads_each_requested_workspace_configuration(
+    tmp_path, monkeypatch
+) -> None:
     """真实 reader 装配配合 fake 识图读取各自配置，不回落默认工作区或复用前一次目录。"""
     requests_seen = []
 
@@ -243,7 +299,9 @@ def test_real_screen_state_reader_reads_each_requested_workspace_configuration(t
             assert stop_on_first_match is True
             return tuple(
                 ImageBatchMatchResult(
-                    request.template, ImageMatch(Rect(10, 20, 30, 40), 0.95), elapsed_ms=1,
+                    request.template,
+                    ImageMatch(Rect(10, 20, 30, 40), 0.95),
+                    elapsed_ms=1,
                 )
                 for request in requests
             )
@@ -253,7 +311,9 @@ def test_real_screen_state_reader_reads_each_requested_workspace_configuration(t
         raise AssertionError("screen state reader must not load a script catalog")
 
     monkeypatch.setattr(desktop, "PyAutoGuiScreenImageLocator", MatchingLocator)
-    monkeypatch.setattr(composition, "load_project_script_catalog_result", reject_catalog_loading)
+    monkeypatch.setattr(
+        composition, "load_project_script_catalog_result", reject_catalog_loading
+    )
 
     for index, name in enumerate(("first", "second"), start=1):
         workspace = tmp_path / name
@@ -262,13 +322,28 @@ def test_real_screen_state_reader_reads_each_requested_workspace_configuration(t
         image = assets / f"{name}-state.png"
         image.write_bytes(b"fake")
         region = {"left": index * 10, "top": 20, "width": 100, "height": 80}
-        (assets / "screen-states.json").write_text(json.dumps({
-            "regions": {"工作区区域": region},
-            "groups": [{"state": f"{name}主页", "searches": [{
-                "name": f"{name}标识", "image": image.name,
-                "region": "工作区区域", "min_confidence": 0.83,
-            }]}],
-        }, ensure_ascii=False), encoding="utf-8")
+        (assets / "screen-states.json").write_text(
+            json.dumps(
+                {
+                    "regions": {"工作区区域": region},
+                    "groups": [
+                        {
+                            "state": f"{name}主页",
+                            "searches": [
+                                {
+                                    "name": f"{name}标识",
+                                    "image": image.name,
+                                    "region": "工作区区域",
+                                    "min_confidence": 0.83,
+                                }
+                            ],
+                        }
+                    ],
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
 
         reader = composition.build_real_screen_state_reader(project_root=workspace)
 

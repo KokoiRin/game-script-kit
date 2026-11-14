@@ -12,8 +12,8 @@ from game_automation.platform.macos.adapters.application_window import (
     MacOSWindowBackend,
     MacOSWindowCandidate,
 )
-from game_automation.portable.domain import Rect
 from game_automation.portable.application.ports import FocusedApplicationWindow
+from game_automation.portable.domain import Rect
 
 
 class MacOSAccessibilityWindowBackend(MacOSWindowBackend):
@@ -44,10 +44,16 @@ class MacOSAccessibilityWindowBackend(MacOSWindowBackend):
         application_pids = self._resolve_application_pids(application)
         candidates = []
         for pid in sorted(application_pids):
-            for window_index, ax_window in enumerate(self._read_ax_windows(pid), start=1):
-                if self._read_ax_bool(ax_window, self._accessibility.kAXMinimizedAttribute):
+            for window_index, ax_window in enumerate(
+                self._read_ax_windows(pid), start=1
+            ):
+                if self._read_ax_bool(
+                    ax_window, self._accessibility.kAXMinimizedAttribute
+                ):
                     continue
-                title = self._read_ax_text(ax_window, self._accessibility.kAXTitleAttribute)
+                title = self._read_ax_text(
+                    ax_window, self._accessibility.kAXTitleAttribute
+                )
                 if not title:
                     continue
                 rect = self._read_ax_window_rect(ax_window)
@@ -68,13 +74,16 @@ class MacOSAccessibilityWindowBackend(MacOSWindowBackend):
         accessibility = self._accessibility
         application = accessibility.AXUIElementCreateApplication(pid)
         error, window = accessibility.AXUIElementCopyAttributeValue(
-            application, accessibility.kAXFocusedWindowAttribute, None)
+            application, accessibility.kAXFocusedWindowAttribute, None
+        )
         if error != accessibility.kAXErrorSuccess or window is None:
-            raise RuntimeError(f'无法读取绑定进程的焦点窗口：pid={pid} ax_error={error}')
+            raise RuntimeError(
+                f"无法读取绑定进程的焦点窗口：pid={pid} ax_error={error}"
+            )
         title = self._read_ax_text(window, accessibility.kAXTitleAttribute)
         rect = self._read_ax_window_rect(window)
         if not title or rect is None:
-            raise RuntimeError('绑定进程焦点窗口缺少有效标题或完整几何')
+            raise RuntimeError("绑定进程焦点窗口缺少有效标题或完整几何")
         return FocusedApplicationWindow(title, rect)
 
     def raise_window(self, window: MacOSWindowCandidate) -> None:
@@ -86,7 +95,10 @@ class MacOSAccessibilityWindowBackend(MacOSWindowBackend):
                 accessibility.kAXTitleAttribute,
                 None,
             )
-            if title_error != accessibility.kAXErrorSuccess or str(title) != window.title:
+            if (
+                title_error != accessibility.kAXErrorSuccess
+                or str(title) != window.title
+            ):
                 continue
             raise_error = accessibility.AXUIElementPerformAction(
                 ax_window,
@@ -180,7 +192,9 @@ class MacOSAccessibilityWindowBackend(MacOSWindowBackend):
     def _resolve_application_pids(self, application: str) -> frozenset[int]:
         """按本地化名、bundle id 或可执行文件名解析运行应用 pid。"""
         requested = application.casefold()
-        running_applications = self._appkit.NSWorkspace.sharedWorkspace().runningApplications()
+        running_applications = (
+            self._appkit.NSWorkspace.sharedWorkspace().runningApplications()
+        )
         pids = []
         for running_application in running_applications:
             names = (
@@ -188,7 +202,9 @@ class MacOSAccessibilityWindowBackend(MacOSWindowBackend):
                 _optional_objc_text(running_application, "bundleIdentifier"),
                 _running_application_executable_name(running_application),
             )
-            if any(_application_name_matches(name, requested) for name in names if name):
+            if any(
+                _application_name_matches(name, requested) for name in names if name
+            ):
                 pids.append(int(_objc_value(running_application, "processIdentifier")))
         return frozenset(pids)
 

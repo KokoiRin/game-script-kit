@@ -16,7 +16,9 @@ from game_automation.portable.application.project_assets import (
     image_asset_root,
     screen_state_config_path,
 )
-from game_automation.portable.application.screen_state_config import load_screen_state_candidates
+from game_automation.portable.application.screen_state_config import (
+    load_screen_state_candidates,
+)
 from game_automation.portable.domain import ImageTemplate, ScreenStateCandidate
 from game_automation.portable.engine.ports import (
     RunLogger,

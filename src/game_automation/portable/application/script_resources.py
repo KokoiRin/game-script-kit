@@ -1,30 +1,37 @@
 """组装脚本运行前可复用的资源目录。
 
-本 module 负责把项目配置中的共享资源合并到 Script 上；它不解释脚本步骤、
+本 module 负责把项目配置中的共享资源合并到函数任务上；它不解释脚本步骤、
 不执行脚本，也不创建平台 adapter。
 """
 
 from __future__ import annotations
 
-from pathlib import Path
 from dataclasses import replace
+from pathlib import Path
 
 from game_automation.portable.application.project_assets import (
     IMAGE_ASSET_SUFFIXES,
     image_asset_root,
     screen_state_config_path,
 )
+from game_automation.portable.application.screen_state_config import (
+    load_screen_state_target_catalog,
+)
+from game_automation.portable.application.script_dependencies import (
+    script_needs_shared_resources,
+)
 from game_automation.portable.application.window_state_rules import rules_path
-from game_automation.portable.application.screen_state_config import load_screen_state_target_catalog
-from game_automation.portable.application.script_dependencies import script_needs_shared_resources
-from game_automation.portable.domain import Script, TargetCatalog
+from game_automation.portable.domain import TargetCatalog
+from game_automation.portable.domain.task import FunctionTask
 
 
-def prepare_script_resources(script: Script, project_root: Path) -> Script:
+def prepare_script_resources(script: FunctionTask, project_root: Path) -> FunctionTask:
     """仅在局部资源不足时加载共享搜索，隔离无关状态配置错误。"""
     if not script_needs_shared_resources(script):
         return script
-    return script_with_shared_resources(script, load_shared_script_resources(project_root))
+    return script_with_shared_resources(
+        script, load_shared_script_resources(project_root)
+    )
 
 
 def load_shared_script_resources(project_root: Path) -> TargetCatalog | None:
@@ -36,7 +43,9 @@ def load_shared_script_resources(project_root: Path) -> TargetCatalog | None:
     )
 
 
-def script_with_shared_resources(script: Script, shared: TargetCatalog | None) -> Script:
+def script_with_shared_resources(
+    script: FunctionTask, shared: TargetCatalog | None
+) -> FunctionTask:
     """把共享资源合并进脚本，脚本局部资源保留覆盖权。"""
     if shared is None:
         return script
@@ -62,7 +71,7 @@ def _merge_named_resources(shared, local):
     return (*tuple(item for item in shared if item.name not in local_names), *local)
 
 
-def script_state_config_path(script: Script, project_root: Path) -> Path:
+def script_state_config_path(script: FunctionTask, project_root: Path) -> Path:
     """按脚本后端选取状态规则，供 CLI 和控制台的依赖检查一致使用。"""
     if script.target is not None and script.target.uses_native_window:
         return rules_path(project_root)

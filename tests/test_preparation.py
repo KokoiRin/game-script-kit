@@ -3,10 +3,11 @@
 本 module 通过窗口、截图、裁图与存储端口替身验证坐标和冻结帧契约。
 """
 
-import pytest
 import subprocess
 import sys
 from pathlib import Path
+
+import pytest
 
 from game_automation.portable.domain.geometry import Point, Rect
 from game_automation.portable.preparation.models import DesktopWindow, ImageData
@@ -52,7 +53,9 @@ class PreparationBackend:
 def preparation():
     """创建不依赖脚本 catalog 或 runner 的素材准备会话。"""
     backend = PreparationBackend()
-    return PreparationService(windows=backend, capture=backend, images=backend, templates=backend), backend
+    return PreparationService(
+        windows=backend, capture=backend, images=backend, templates=backend
+    ), backend
 
 
 def test_preparation_lists_windows_without_capturing(preparation):
@@ -72,7 +75,8 @@ def test_capture_and_crop_use_the_same_frozen_frame(preparation):
     assert frame.captured_at > 0
     assert crop == "任务入口.png"
     assert backend.calls == [
-        ("focus", "Game", "42:1"), ("capture", Rect(100, 200, 80, 60)),
+        ("focus", "Game", "42:1"),
+        ("capture", Rect(100, 200, 80, 60)),
         ("crop", b"frame", Rect(20, 40, 30, 20)),
     ]
     assert backend.saved == [("任务入口", b"crop")]
@@ -82,10 +86,15 @@ def test_point_converts_image_pixels_to_window_and_screen_coordinates(preparatio
     """两倍像素截图取点得到窗口相对坐标及屏幕坐标。"""
     service, _ = preparation
     frame = service.capture_window("Game", "42:1")
-    assert service.locate_point(frame.id, Point(40, 60)) == (Point(20, 30), Point(120, 230))
+    assert service.locate_point(frame.id, Point(40, 60)) == (
+        Point(20, 30),
+        Point(120, 230),
+    )
 
 
-@pytest.mark.parametrize("region", [Rect(-1, 0, 10, 10), Rect(150, 0, 20, 10), Rect(0, 115, 10, 10)])
+@pytest.mark.parametrize(
+    "region", [Rect(-1, 0, 10, 10), Rect(150, 0, 20, 10), Rect(0, 115, 10, 10)]
+)
 def test_crop_rejects_out_of_bounds_without_writing(preparation, region):
     """越界框选不能以补黑边的方式生成误导性模板。"""
     service, backend = preparation
@@ -134,6 +143,10 @@ for suffix in ('engine.runner', 'application.script_run', 'application.local_con
     assert name not in sys.modules, name
 assert 'pyautogui' not in sys.modules
 """
-    result = subprocess.run([sys.executable, "-c", code], cwd=Path(__file__).resolve().parents[1],
-                            capture_output=True, text=True)
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=Path(__file__).resolve().parents[1],
+        capture_output=True,
+        text=True,
+    )
     assert result.returncode == 0, result.stderr

@@ -10,13 +10,22 @@ from uuid import uuid4
 
 from game_automation.portable.domain.geometry import Point, Rect
 from game_automation.portable.preparation.models import DesktopWindow, PreparedFrame
-from game_automation.portable.preparation.ports import FrameCapture, ImageEditor, PreparationWindows, TemplateStore
+from game_automation.portable.preparation.ports import (
+    FrameCapture,
+    ImageEditor,
+    PreparationWindows,
+    TemplateStore,
+)
 
 
 class PreparationService:
     def __init__(
-        self, *, windows: PreparationWindows, capture: FrameCapture,
-        images: ImageEditor, templates: TemplateStore,
+        self,
+        *,
+        windows: PreparationWindows,
+        capture: FrameCapture,
+        images: ImageEditor,
+        templates: TemplateStore,
     ) -> None:
         """注入准备端口，创建服务时不访问任何设备或脚本。"""
         self._windows = windows
@@ -52,21 +61,28 @@ class PreparationService:
         """把冻结图像中的像素点转换为窗口相对坐标和屏幕坐标。"""
         with self._lock:
             frame = self._require_frame(frame_id)
-            if not (0 <= pixel.x < frame.image.width and 0 <= pixel.y < frame.image.height):
+            if not (
+                0 <= pixel.x < frame.image.width and 0 <= pixel.y < frame.image.height
+            ):
                 raise ValueError("point is outside the captured image")
             relative = Point(
                 pixel.x * frame.window.rect.width // frame.image.width,
                 pixel.y * frame.window.rect.height // frame.image.height,
             )
-            return relative, relative.offset(x=frame.window.rect.left, y=frame.window.rect.top)
+            return relative, relative.offset(
+                x=frame.window.rect.left, y=frame.window.rect.top
+            )
 
     def save_crop(self, frame_id: str, region: Rect, name: str) -> str:
         """从指定冻结帧裁图并保存，校验完成前不写模板。"""
         with self._lock:
             frame = self._require_frame(frame_id)
-            if (region.left < 0 or region.top < 0
-                    or region.left + region.width > frame.image.width
-                    or region.top + region.height > frame.image.height):
+            if (
+                region.left < 0
+                or region.top < 0
+                or region.left + region.width > frame.image.width
+                or region.top + region.height > frame.image.height
+            ):
                 raise ValueError("crop region is outside the captured image")
             crop = self._images.crop(frame.image, region)
             return self._templates.save_png(name, crop.png)

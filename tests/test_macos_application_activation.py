@@ -38,23 +38,35 @@ def test_macos_application_activator_runs_open_and_waits() -> None:
 
 def test_macos_application_activator_wraps_nonzero_result() -> None:
     """验证系统找不到应用时 adapter 返回可读错误。"""
+
     def run_command(command, **kwargs):
         """返回系统命令失败结果。"""
-        return CompletedProcess(command, returncode=1, stdout="", stderr="application not found")
+        return CompletedProcess(
+            command, returncode=1, stdout="", stderr="application not found"
+        )
 
-    activator = MacOSApplicationActivator(command_runner=run_command, sleeper=lambda _: None)
+    activator = MacOSApplicationActivator(
+        command_runner=run_command, sleeper=lambda _: None
+    )
 
-    with pytest.raises(RuntimeError, match="failed to activate macOS application 'Missing App'"):
+    with pytest.raises(
+        RuntimeError, match="failed to activate macOS application 'Missing App'"
+    ):
         activator.activate("Missing App")
 
 
 def test_macos_application_activator_wraps_command_error() -> None:
     """验证系统命令无法执行时 adapter 统一错误边界。"""
+
     def run_command(command, **kwargs):
         """模拟系统命令不可执行。"""
         raise OSError("open unavailable")
 
-    activator = MacOSApplicationActivator(command_runner=run_command, sleeper=lambda _: None)
+    activator = MacOSApplicationActivator(
+        command_runner=run_command, sleeper=lambda _: None
+    )
 
-    with pytest.raises(RuntimeError, match="failed to activate macOS application 'Safari'"):
+    with pytest.raises(
+        RuntimeError, match="failed to activate macOS application 'Safari'"
+    ):
         activator.activate("Safari")

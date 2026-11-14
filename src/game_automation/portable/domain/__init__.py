@@ -4,9 +4,7 @@
 也不承载应用编排逻辑。
 """
 
-from game_automation.portable.domain.actions import Click, ClickTarget, Drag, Hotkey, If, PrimitiveAction, Repeat, Step, Wait, WaitUntil
 from game_automation.portable.domain.color import Color
-from game_automation.portable.domain.conditions import ColorIs, Condition, ImageExists, ScreenStateIs
 from game_automation.portable.domain.geometry import Point, Rect
 from game_automation.portable.domain.image_matching import (
     ImageBatchMatchResult,
@@ -31,7 +29,6 @@ from game_automation.portable.domain.point_aliases import (
     UnknownPointNameError,
     UnknownRegionNameError,
 )
-from game_automation.portable.domain.script import Script
 from game_automation.portable.domain.screen_state import (
     UNKNOWN_SCREEN_STATE,
     ScreenStateCandidate,
@@ -40,19 +37,19 @@ from game_automation.portable.domain.screen_state import (
 )
 from game_automation.portable.domain.target_offsets import OffsetTarget
 from game_automation.portable.domain.targets import ImageTarget
+from game_automation.portable.domain.task import (
+    FunctionTask,
+    ScriptTarget,
+    TaskRequirements,
+)
 from game_automation.portable.domain.windows import AreaWindow, ScreenWindow, Window
 
 __all__ = [
     "AreaWindow",
-    "Click",
-    "ClickTarget",
+    "FunctionTask",
+    "ScriptTarget",
+    "TaskRequirements",
     "Color",
-    "ColorIs",
-    "Condition",
-    "Drag",
-    "Hotkey",
-    "If",
-    "ImageExists",
     "ImageBatchMatchResult",
     "ImageLookupResult",
     "ImageMatch",
@@ -68,25 +65,18 @@ __all__ = [
     "OffsetTarget",
     "Point",
     "PointRef",
-    "PrimitiveAction",
     "Rect",
-    "Repeat",
     "ScreenWindow",
-    "ScreenStateIs",
     "ScreenStateCandidate",
     "ScreenStateCandidateResult",
     "ScreenStateProbeResult",
     "RegionRef",
     "SearchRef",
-    "Script",
-    "Step",
     "TargetCatalog",
     "UNKNOWN_SCREEN_STATE",
     "UnknownImageNameError",
     "UnknownImageSearchNameError",
     "UnknownPointNameError",
     "UnknownRegionNameError",
-    "Wait",
-    "WaitUntil",
     "Window",
 ]

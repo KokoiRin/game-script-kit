@@ -1,70 +1,115 @@
-"""验证应用层脚本运行 module 会组装 runner、调用 runner 并归一化错误。
+"""验证应用层函数任务运行装配及结果归一化。
 
 这些测试直接覆盖 portable run_script 的 interface，真实平台 adapter 通过工厂注入。
 """
 
+from pathlib import Path
+
 import pytest
 
-from game_automation.portable.application.script_run import run_script
 from game_automation.portable.application.ports import FocusedApplicationWindow
+from game_automation.portable.application.project_scripts import (
+    load_project_script_catalog,
+)
+from game_automation.portable.application.script_run import run_script
 from game_automation.portable.domain import (
-    Click,
-    Hotkey,
     Color,
-    ImageExists,
     ImageMatch,
-    ImageTemplate,
-    ImageTarget,
     ImageRef,
     ImageSearchSpec,
-    PointRef,
-    RegionRef,
+    ImageTarget,
+    ImageTemplate,
+    NamedImageSearch,
     Point,
+    PointRef,
     Rect,
+    RegionRef,
     ScreenWindow,
-    ScreenStateIs,
-    Script,
     SearchRef,
-    Wait,
-    WaitUntil,
+    TargetCatalog,
 )
+from game_automation.portable.domain.task import FunctionTask, TaskRequirements
 from game_automation.portable.engine.ports import InputDevice
-from game_automation.portable.scripts_manager import (
-    CONDITIONAL_COLOR_DEMO_SCRIPT,
-    WAIT_UNTIL_COLOR_DEMO_SCRIPT,
-)
+from tests.support.function_tasks import function_task
+
+_EXAMPLES = load_project_script_catalog(Path(__file__).resolve().parents[1])
+CONDITIONAL_COLOR_DEMO_SCRIPT = _EXAMPLES.get("conditional-color-demo")
+WAIT_UNTIL_COLOR_DEMO_SCRIPT = _EXAMPLES.get("wait-until-color-demo")
 
 
 IMAGE_TEMPLATE_PATH = "assets/start.png"
 
 
-@pytest.mark.parametrize("target", [
-    PointRef("missing"),
-    PointRef("missing").offset(x=10),
-    ImageTarget(ImageRef("missing")),
-    ImageTarget(SearchRef("missing")),
-    ImageTarget(ImageSearchSpec(ImageTemplate("fake.png"), region=RegionRef("missing"))),
-])
+@pytest.mark.parametrize(
+    "target, requires, resources",
+    [
+        (PointRef("missing"), TaskRequirements(points=("missing",)), TargetCatalog()),
+        (
+            PointRef("missing").offset(x=10),
+            TaskRequirements(points=("missing",)),
+            TargetCatalog(),
+        ),
+        (
+            ImageTarget(ImageRef("missing")),
+            TaskRequirements(images=("missing",)),
+            TargetCatalog(),
+        ),
+        (
+            ImageTarget(SearchRef("missing")),
+            TaskRequirements(searches=("missing",)),
+            TargetCatalog(),
+        ),
+        (
+            ImageTarget(SearchRef("inline")),
+            TaskRequirements(searches=("inline",)),
+            TargetCatalog(
+                searches=(
+                    NamedImageSearch(
+                        "inline",
+                        ImageSearchSpec(
+                            ImageTemplate("fake.png"), region=RegionRef("missing")
+                        ),
+                    ),
+                )
+            ),
+        ),
+    ],
+)
 @pytest.mark.parametrize("dry_run", [False, True])
-def test_run_rejects_missing_references_before_side_effects(target, dry_run) -> None:
+def test_run_rejects_missing_references_before_side_effects(
+    target, requires, resources, dry_run
+) -> None:
     """未定义的资源引用必须在初始化桌面或发送任何动作前报告。"""
+
     def unexpected_factory():
         """配置无效时不允许激活应用或初始化设备。"""
         raise AssertionError("desktop touched before validation")
 
     logger = FakeRunLogger()
-    script = Script("invalid", ScreenWindow(), (Hotkey(("command", "v")), Click(target)))
+    script = function_task(
+        "invalid",
+        f"ctx.hotkey(*{('command', 'v')!r})\nctx.click({target!r})",
+        window=ScreenWindow(),
+        requires=requires,
+        resources=resources,
+    )
 
     result = run_script(
-        script, dry_run=dry_run, target_application="TextEdit",
+        script,
+        dry_run=dry_run,
+        target_application="TextEdit",
         real_device_factory=unexpected_factory,
         real_application_activator_factory=unexpected_factory,
-        logger=logger, emit_step_events=True,
+        logger=logger,
+        emit_step_events=True,
     )
 
     assert (result.exit_code, result.finish_reason) == (2, "configuration_failed")
     assert "unknown" in result.error_message
-    assert [event.event_type for event in logger.events] == ["run_started", "run_finished"]
+    assert [event.event_type for event in logger.events] == [
+        "run_started",
+        "run_finished",
+    ]
 
 
 class FakeRunLogger:
@@ -87,18 +132,23 @@ class FakeRunLogger:
 def test_hotkey_run_logs_performed_keys() -> None:
     """组合键执行成功后，运行日志应给出实际执行的键组合，供 CLI/UI 展示。"""
     logger = FakeRunLogger()
-    script = Script("paste", ScreenWindow(), (Hotkey(("command", "v")),))
+    script = function_task(
+        "paste", "ctx.hotkey(*('command', 'v'))", window=ScreenWindow()
+    )
 
     result = run_script(script, dry_run=True, logger=logger, emit_step_events=True)
 
     assert result.finish_reason == "completed"
-    performed = [event for event in logger.events if event.event_type == "hotkey_performed"]
+    performed = [
+        event for event in logger.events if event.event_type == "hotkey_performed"
+    ]
     assert len(performed) == 1
     assert performed[0].details == {"keys": "command+v"}
 
 
 def test_hotkey_failure_stops_script_without_success_event() -> None:
     """输入设备拒绝粘贴时，脚本应报告失败、停止后续步骤，且不记录组合键成功。"""
+
     class FailingKeyboard(InputDevice):
         def hotkey(self, keys: tuple[str, ...]) -> None:
             """模拟设备按键失败。"""
@@ -109,10 +159,19 @@ def test_hotkey_failure_stops_script_without_success_event() -> None:
             raise AssertionError("continued after hotkey failure")
 
     logger = FakeRunLogger()
-    script = Script("paste", ScreenWindow(), (Hotkey(("command", "v")), Wait(1)))
+    script = function_task(
+        "paste",
+        "ctx.hotkey(*('command', 'v'))\nctx.wait(1)",
+        window=ScreenWindow(),
+    )
 
-    result = run_script(script, dry_run=False, real_device_factory=FailingKeyboard,
-                        logger=logger, emit_step_events=True)
+    result = run_script(
+        script,
+        dry_run=False,
+        real_device_factory=FailingKeyboard,
+        logger=logger,
+        emit_step_events=True,
+    )
 
     assert result.exit_code == 1
     assert result.finish_reason == "failed"
@@ -122,6 +181,7 @@ def test_hotkey_failure_stops_script_without_success_event() -> None:
 
 def test_cancelled_script_does_not_send_hotkey() -> None:
     """执行前已取消的脚本应返回 cancelled，不向设备发送粘贴按键。"""
+
     class Cancelled:
         def is_cancelled(self) -> bool:
             """模拟用户已请求取消。"""
@@ -133,62 +193,59 @@ def test_cancelled_script_does_not_send_hotkey() -> None:
             raise AssertionError("sent hotkey after cancellation")
 
     result = run_script(
-        Script("paste", ScreenWindow(), (Hotkey(("command", "v")),)),
-        dry_run=False, real_device_factory=UnexpectedKeyboard, cancellation_token=Cancelled(),
+        function_task("paste", "ctx.hotkey(*('command', 'v'))", window=ScreenWindow()),
+        dry_run=False,
+        real_device_factory=UnexpectedKeyboard,
+        cancellation_token=Cancelled(),
     )
 
     assert result.exit_code == 130
     assert result.finish_reason == "cancelled"
 
 
-def build_plain_action_script() -> Script:
+def build_plain_action_script() -> FunctionTask:
     """构造不依赖个人坐标和素材的通用动作测试脚本。"""
-    return Script(
-        name="plain-actions-test",
+    return function_task(
+        "plain-actions-test",
+        "ctx.wait(0.25)\n"
+        "ctx.click(Point(10, 20))\n"
+        "ctx.wait(0.5)\n"
+        "ctx.click(Point(30, 40))",
         window=ScreenWindow(),
-        steps=(Wait(0.25), Click(Point(10, 20)), Wait(0.5), Click(Point(30, 40))),
     )
 
 
-def build_wait_until_image_script() -> Script:
+def build_wait_until_image_script() -> FunctionTask:
     """构造应用层测试用图片等待脚本。"""
-    return Script(
-        name="wait-until-image-test",
+    return function_task(
+        "wait-until-image-test",
+        f"ctx.wait_for(lambda: ctx.find({ImageTemplate(IMAGE_TEMPLATE_PATH)!r}, min_confidence={None!r}) is not None, timeout={1!r}, interval={0.5!r})\nctx.click({Point(100, 200)!r})",
         window=ScreenWindow(),
-        steps=(
-            WaitUntil(
-                condition=ImageExists(ImageTemplate(IMAGE_TEMPLATE_PATH)),
-                timeout_seconds=1,
-                interval_seconds=0.5,
-            ),
-            Click(Point(100, 200)),
-        ),
+        templates=(ImageTemplate(IMAGE_TEMPLATE_PATH),),
     )
 
 
-def build_click_image_script() -> Script:
+def build_click_image_script() -> FunctionTask:
     """构造应用层测试用图片目标点击脚本。"""
-    return Script(
-        name="click-image-test",
+    return function_task(
+        "click-image-test",
+        f"ctx.click({ImageTarget(ImageTemplate(IMAGE_TEMPLATE_PATH))!r})",
         window=ScreenWindow(),
-        steps=(Click(ImageTarget(ImageTemplate(IMAGE_TEMPLATE_PATH))),),
+        templates=(ImageTemplate(IMAGE_TEMPLATE_PATH),),
     )
 
 
-def build_screen_state_branch_script() -> Script:
+def build_screen_state_branch_script() -> FunctionTask:
     """构造应用层测试用界面状态分支脚本。"""
-    from game_automation.portable.domain import If
 
-    return Script(
-        name="screen-state-branch-test",
+    return function_task(
+        "screen-state-branch-test",
+        "if ctx.state(min_confidence=0.8) == '主页':\n"
+        "    ctx.click(Point(100, 200))\n"
+        "else:\n"
+        "    ctx.wait(0.5)",
         window=ScreenWindow(),
-        steps=(
-            If(
-                condition=ScreenStateIs("主页"),
-                then_steps=(Click(Point(100, 200)),),
-                else_steps=(Wait(0.5),),
-            ),
-        ),
+        requires=TaskRequirements(states=("主页",)),
     )
 
 
@@ -201,8 +258,10 @@ def test_run_script_dry_run_prints_plain_script_operations(capsys) -> None:
     assert result.finish_reason == "completed"
     assert result.error_message is None
     assert output.splitlines() == [
-        "wait 0.25s", "click Point(x=10, y=20)",
-        "wait 0.5s", "click Point(x=30, y=40)",
+        "wait 0.25s",
+        "click Point(x=10, y=20)",
+        "wait 0.5s",
+        "click Point(x=30, y=40)",
     ]
 
 
@@ -223,18 +282,19 @@ def test_run_script_reports_invalid_dry_run_color_without_running(capsys) -> Non
     )
 
 
-def test_run_script_stops_normally_when_wait_until_times_out(capsys) -> None:
-    """验证 WaitUntil 超时时应用层返回未满足条件的结束原因。"""
+def test_run_script_reports_unhandled_color_wait_timeout(capsys) -> None:
+    """直接等待到期时应用层返回 timed_out，并停止后续动作。"""
     result = run_script(WAIT_UNTIL_COLOR_DEMO_SCRIPT, dry_run=True)
 
     captured = capsys.readouterr()
-    assert captured.out.splitlines() == [
-        "wait 0.5s",
-        "wait 0.5s",
+    waits = [
+        float(line.removeprefix("wait ").removesuffix("s"))
+        for line in captured.out.splitlines()
     ]
-    assert result.exit_code == 0
-    assert result.finish_reason == "stopped_unmet_condition"
-    assert result.error_message is None
+    assert waits == pytest.approx([0.5, 0.5], abs=0.01)
+    assert result.exit_code == 1
+    assert result.finish_reason == "timed_out"
+    assert "timed out" in result.error_message
 
 
 def test_run_script_dry_run_wait_until_image_with_configured_match(capsys) -> None:
@@ -253,7 +313,7 @@ def test_run_script_dry_run_wait_until_image_with_configured_match(capsys) -> No
 
 
 def test_run_script_logs_screen_state_condition_when_logger_is_configured() -> None:
-    """验证脚本运行注入 logger 时会记录界面状态条件评估摘要。"""
+    """状态查询通过公开操作事件暴露成功结果。"""
     logger = FakeRunLogger()
 
     result = run_script(
@@ -261,28 +321,34 @@ def test_run_script_logs_screen_state_condition_when_logger_is_configured() -> N
         dry_run=True,
         dry_run_screen_state="主页",
         logger=logger,
+        emit_step_events=True,
     )
 
     assert result.exit_code == 0
     assert result.finish_reason == "completed"
     assert result.error_message is None
-    assert logger.messages == [
-        "screen state condition expected=主页 actual=主页 min_confidence=0.8 matched=True"
+    observations = [
+        event
+        for event in logger.events
+        if event.event_type == "step_succeeded" and event.step_type == "Observe"
     ]
+    assert len(observations) == 1
+    assert observations[0].status == "succeeded"
 
 
-def test_run_script_dry_run_wait_until_image_stops_normally_by_default(capsys) -> None:
-    """验证 dry-run 未配置图片时图片等待会正常停止。"""
+def test_run_script_dry_run_reports_unhandled_image_wait_timeout(capsys) -> None:
+    """模拟画面缺少图片时直接等待返回 timed_out。"""
     result = run_script(build_wait_until_image_script(), dry_run=True)
 
     captured = capsys.readouterr()
-    assert captured.out.splitlines() == [
-        "wait 0.5s",
-        "wait 0.5s",
+    waits = [
+        float(line.removeprefix("wait ").removesuffix("s"))
+        for line in captured.out.splitlines()
     ]
-    assert result.exit_code == 0
-    assert result.finish_reason == "stopped_unmet_condition"
-    assert result.error_message is None
+    assert waits == pytest.approx([0.5, 0.5], abs=0.01)
+    assert result.exit_code == 1
+    assert result.finish_reason == "timed_out"
+    assert "timed out" in result.error_message
 
 
 def test_run_script_dry_run_click_image_with_configured_match(capsys) -> None:
@@ -300,7 +366,9 @@ def test_run_script_dry_run_click_image_with_configured_match(capsys) -> None:
     assert captured.out == "click Point(x=0, y=0)\n"
 
 
-def test_run_script_dry_run_click_image_stops_normally_when_target_is_missing(capsys) -> None:
+def test_run_script_dry_run_click_image_stops_normally_when_target_is_missing(
+    capsys,
+) -> None:
     """验证 dry-run 未配置图片时图片目标点击正常停止。"""
     result = run_script(build_click_image_script(), dry_run=True)
 
@@ -361,6 +429,7 @@ def test_run_script_real_mode_injects_screen_state_reader_for_state_script() -> 
 
     class FakeMacOSPointerDevice(InputDevice):
         def click(self, target) -> None:
+            """记录本例发出的点击位置。"""
             clicks.append(target)
 
         def drag_to(self, start, end, duration_seconds: float = 0.0) -> None:
@@ -394,6 +463,7 @@ def test_run_script_real_mode_uses_injected_device_without_color_reader(capsys) 
 
     class FakeMacOSPointerDevice(InputDevice):
         def click(self, target) -> None:
+            """记录本例发出的点击位置。"""
             clicks.append(target)
 
         def drag_to(self, start, end, duration_seconds: float = 0.0) -> None:
@@ -440,7 +510,9 @@ def test_run_script_activates_target_application_before_creating_device() -> Non
         events.append(("build_device", None))
         return FakeInputDevice()
 
-    script = Script("activate-first", ScreenWindow(), (Click(Point(5, 6)),))
+    script = function_task(
+        "activate-first", "ctx.click(Point(5, 6))", window=ScreenWindow()
+    )
 
     result = run_script(
         script,
@@ -459,7 +531,9 @@ def test_run_script_activates_target_application_before_creating_device() -> Non
     ]
 
 
-def test_run_script_reports_target_application_activation_failure_without_device() -> None:
+def test_run_script_reports_target_application_activation_failure_without_device() -> (
+    None
+):
     """验证目标应用激活失败会阻止真实输入设备创建。"""
     device_builds = []
 
@@ -473,7 +547,9 @@ def test_run_script_reports_target_application_activation_failure_without_device
         device_builds.append(True)
         raise AssertionError("device must not be created")
 
-    script = Script("activation-fails", ScreenWindow(), (Click(Point(1, 2)),))
+    script = function_task(
+        "activation-fails", "ctx.click(Point(1, 2))", window=ScreenWindow()
+    )
 
     result = run_script(
         script,
@@ -485,7 +561,9 @@ def test_run_script_reports_target_application_activation_failure_without_device
 
     assert result.exit_code == 1
     assert result.finish_reason == "setup_failed"
-    assert result.error_message == "script run setup failed: cannot activate Missing App"
+    assert (
+        result.error_message == "script run setup failed: cannot activate Missing App"
+    )
     assert device_builds == []
 
 
@@ -498,7 +576,9 @@ def test_run_script_dry_run_does_not_activate_target_application() -> None:
         activator_builds.append(True)
         raise AssertionError("activator must not be created")
 
-    script = Script("dry-run-no-activation", ScreenWindow(), (Click(Point(1, 2)),))
+    script = function_task(
+        "dry-run-no-activation", "ctx.click(Point(1, 2))", window=ScreenWindow()
+    )
 
     result = run_script(
         script,
@@ -521,10 +601,14 @@ def test_run_script_focuses_target_window_and_binds_script_copy_before_device() 
             events.append(("activate", application))
 
     class FakeWindowController:
-        def focus_window(self, application: str, title_contains: str) -> FocusedApplicationWindow:
+        def focus_window(
+            self, application: str, title_contains: str
+        ) -> FocusedApplicationWindow:
             """记录窗口选择并返回固定屏幕矩形。"""
             events.append(("focus_window", application, title_contains))
-            return FocusedApplicationWindow("Star 视觉自动化靶场", Rect(100, 200, 800, 600))
+            return FocusedApplicationWindow(
+                "Star 视觉自动化靶场", Rect(100, 200, 800, 600)
+            )
 
     class FakeInputDevice(InputDevice):
         def click(self, target) -> None:
@@ -542,7 +626,9 @@ def test_run_script_focuses_target_window_and_binds_script_copy_before_device() 
         events.append(("build_device", None))
         return FakeInputDevice()
 
-    script = Script("window-bound", ScreenWindow(), (Click(Point(10, 20)),))
+    script = function_task(
+        "window-bound", "ctx.click(Point(10, 20))", window=ScreenWindow()
+    )
 
     result = run_script(
         script,
@@ -573,7 +659,9 @@ def test_run_script_reports_target_window_failure_without_device() -> None:
             """模拟应用激活成功。"""
 
     class FailingWindowController:
-        def focus_window(self, application: str, title_contains: str) -> FocusedApplicationWindow:
+        def focus_window(
+            self, application: str, title_contains: str
+        ) -> FocusedApplicationWindow:
             """模拟目标窗口不存在。"""
             raise RuntimeError("target window was not found")
 
@@ -582,7 +670,9 @@ def test_run_script_reports_target_window_failure_without_device() -> None:
         device_builds.append(True)
         raise AssertionError("device must not be created")
 
-    script = Script("window-missing", ScreenWindow(), (Click(Point(1, 2)),))
+    script = function_task(
+        "window-missing", "ctx.click(Point(1, 2))", window=ScreenWindow()
+    )
 
     result = run_script(
         script,
@@ -596,19 +686,25 @@ def test_run_script_reports_target_window_failure_without_device() -> None:
 
     assert result.exit_code == 1
     assert result.finish_reason == "setup_failed"
-    assert result.error_message == "script run setup failed: target window was not found"
+    assert (
+        result.error_message == "script run setup failed: target window was not found"
+    )
     assert device_builds == []
 
 
 def test_run_script_rejects_target_window_without_target_application() -> None:
     """验证 portable application 要求窗口标题和目标应用一起提供。"""
-    script = Script("window-without-app", ScreenWindow(), (Click(Point(1, 2)),))
+    script = function_task(
+        "window-without-app", "ctx.click(Point(1, 2))", window=ScreenWindow()
+    )
 
     result = run_script(
         script,
         dry_run=False,
         target_window_title="视觉自动化靶场",
-        real_device_factory=lambda: (_ for _ in ()).throw(AssertionError("must not build device")),
+        real_device_factory=lambda: (_ for _ in ()).throw(
+            AssertionError("must not build device")
+        ),
     )
 
     assert result.exit_code == 2
@@ -627,7 +723,9 @@ def test_run_script_dry_run_does_not_focus_target_window() -> None:
         controller_builds.append(True)
         raise AssertionError("window controller must not be created")
 
-    script = Script("dry-window", ScreenWindow(), (Click(Point(1, 2)),))
+    script = function_task(
+        "dry-window", "ctx.click(Point(1, 2))", window=ScreenWindow()
+    )
 
     result = run_script(
         script,
@@ -648,6 +746,7 @@ def test_run_script_real_mode_injects_color_reader_for_color_script() -> None:
 
     class FakeMacOSPointerDevice(InputDevice):
         def click(self, target) -> None:
+            """记录本例发出的点击位置。"""
             clicks.append(target)
 
         def drag_to(self, start, end, duration_seconds: float = 0.0) -> None:
@@ -658,6 +757,7 @@ def test_run_script_real_mode_injects_color_reader_for_color_script() -> None:
 
     class FakePixelColorReader:
         def read_color(self, point) -> Color:
+            """记录取色位置并返回预设颜色。"""
             read_points.append(point)
             return Color.from_hex("#102030")
 
@@ -681,6 +781,7 @@ def test_run_script_real_mode_injects_image_locator_for_image_script() -> None:
 
     class FakeMacOSPointerDevice(InputDevice):
         def click(self, target) -> None:
+            """记录本例发出的点击位置。"""
             clicks.append(target)
 
         def drag_to(self, start, end, duration_seconds: float = 0.0) -> None:
@@ -710,8 +811,10 @@ def test_run_script_real_mode_injects_image_locator_for_image_script() -> None:
 
 def test_run_script_real_mode_reports_color_reader_setup_error() -> None:
     """验证真实取色 adapter setup 失败时应用层返回 setup 错误。"""
+
     class FailingPixelColorReader:
         def __init__(self) -> None:
+            """模拟平台观察能力初始化失败。"""
             raise RuntimeError("screen color unavailable")
 
     result = run_script(
@@ -727,8 +830,10 @@ def test_run_script_real_mode_reports_color_reader_setup_error() -> None:
 
 def test_run_script_real_mode_reports_image_locator_setup_error() -> None:
     """验证真实图像定位 adapter setup 失败时应用层返回 setup 错误。"""
+
     class FailingImageLocator:
         def __init__(self) -> None:
+            """模拟平台观察能力初始化失败。"""
             raise RuntimeError("screen image unavailable")
 
     result = run_script(
@@ -744,6 +849,7 @@ def test_run_script_real_mode_reports_image_locator_setup_error() -> None:
 
 def test_run_script_real_mode_reports_image_locator_runtime_error() -> None:
     """验证真实图像定位运行失败时应用层返回运行错误。"""
+
     class FailingImageLocator:
         def locate(self, template, *, region=None, min_confidence=1.0, logger=None):
             """模拟模板读取或截图匹配失败。"""

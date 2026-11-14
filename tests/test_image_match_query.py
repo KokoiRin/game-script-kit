@@ -3,8 +3,8 @@
 import pytest
 
 from game_automation.portable.domain import (
-    ImageRef,
     ImageMatch,
+    ImageRef,
     ImageTemplate,
     NamedImage,
     Rect,
@@ -73,7 +73,9 @@ def test_locate_image_logs_match_duration_and_result() -> None:
 
     locate_image(
         ImageTemplate("assets/start.png"),
-        image_locator=FakeImageLocator(ImageMatch(Rect(10, 20, 30, 40), confidence=0.91)),
+        image_locator=FakeImageLocator(
+            ImageMatch(Rect(10, 20, 30, 40), confidence=0.91)
+        ),
         resources=TargetCatalog(),
         min_confidence=0.8,
         logger=logger,
@@ -88,7 +90,9 @@ def test_locate_image_logs_match_duration_and_result() -> None:
 def test_locate_image_resolves_named_image_before_calling_locator() -> None:
     """验证命名图片查询会先解析为模板。"""
     locator = FakeImageLocator(ImageMatch(Rect(10, 20, 30, 40), confidence=0.9))
-    resources = TargetCatalog(images=(NamedImage("开始按钮", ImageTemplate("assets/start.png")),))
+    resources = TargetCatalog(
+        images=(NamedImage("开始按钮", ImageTemplate("assets/start.png")),)
+    )
 
     locate_image(
         ImageRef("开始按钮"),

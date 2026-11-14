@@ -8,6 +8,7 @@ env/
 
 *.egg-info/
 .pytest_cache/
+.ruff_cache/
 .coverage
 htmlcov/
 .claude/
@@ -16,8 +17,17 @@ htmlcov/
 .star/
 /workspaces/
 scripts/*
-!scripts/file-script-demo.json
-!scripts/paste.json
+!scripts/click-image-demo.py
+!scripts/conditional-color-demo.py
+!scripts/conditional-screen-state-demo.py
+!scripts/demo.py
+!scripts/file-script-demo.py
+!scripts/function-task-demo.py
+!scripts/paste.py
+!scripts/repeat-demo.py
+!scripts/wait-until-color-demo.py
+!scripts/wait-until-image-demo.py
+!scripts/wait-until-screen-state-demo.py
 assets/*
 !assets/start.png
 !assets/screen-states.json

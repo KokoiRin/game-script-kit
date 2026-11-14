@@ -22,7 +22,9 @@ def test_visual_lab_serves_target_page_and_static_assets() -> None:
         html = _request_text(server.server_address, "GET", "/")
         css = _request_text(server.server_address, "GET", "/static/lab.css")
         script = _request_text(server.server_address, "GET", "/static/lab.js")
-        image = _request_bytes(server.server_address, "GET", "/static/images/open-tasks.png")
+        image = _request_bytes(
+            server.server_address, "GET", "/static/images/open-tasks.png"
+        )
     finally:
         _stop_server(server, thread)
 
@@ -131,19 +133,22 @@ def test_visual_lab_main_maps_arguments_to_independent_server(monkeypatch) -> No
 
     monkeypatch.setattr(visual_lab_server, "serve_visual_lab", fake_serve)
 
-    assert main(
-        [
-            "--host",
-            "127.0.0.1",
-            "--port",
-            "9001",
-            "--no-open",
-            "--mode",
-            "slow",
-            "--loading-delay",
-            "4.5",
-        ]
-    ) == 0
+    assert (
+        main(
+            [
+                "--host",
+                "127.0.0.1",
+                "--port",
+                "9001",
+                "--no-open",
+                "--mode",
+                "slow",
+                "--loading-delay",
+                "4.5",
+            ]
+        )
+        == 0
+    )
     assert calls == [
         {
             "host": "127.0.0.1",

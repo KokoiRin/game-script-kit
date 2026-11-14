@@ -7,7 +7,13 @@ from game_automation.portable.adapters.dry_run import (
     DryRunPixelColorReader,
     DryRunScreenImageLocator,
 )
-from game_automation.portable.domain import Color, ImageMatch, ImageTemplate, Point, Rect
+from game_automation.portable.domain import (
+    Color,
+    ImageMatch,
+    ImageTemplate,
+    Point,
+    Rect,
+)
 
 
 def test_dry_run_input_device_prints_click(capsys) -> None:
@@ -21,7 +27,10 @@ def test_dry_run_input_device_prints_drag(capsys) -> None:
     """验证 dry-run 拖拽只打印起终点和持续时间。"""
     DryRunInputDevice().drag_to(Point(1, 2), Point(3, 4), duration_seconds=0.5)
 
-    assert capsys.readouterr().out == "drag Point(x=1, y=2) -> Point(x=3, y=4) (duration=0.5s)\n"
+    assert (
+        capsys.readouterr().out
+        == "drag Point(x=1, y=2) -> Point(x=3, y=4) (duration=0.5s)\n"
+    )
 
 
 def test_dry_run_input_device_prints_wait(capsys) -> None:

@@ -45,13 +45,16 @@ def test_macos_hotkey_presses_in_order_and_releases_in_reverse() -> None:
     device.hotkey(("command", "v"))
 
     assert backend.calls == [
-        ("keyDown", ("command",), {}), ("keyDown", ("v",), {}),
-        ("keyUp", ("v",), {}), ("keyUp", ("command",), {}),
+        ("keyDown", ("command",), {}),
+        ("keyDown", ("v",), {}),
+        ("keyUp", ("v",), {}),
+        ("keyUp", ("command",), {}),
     ]
 
 
 def test_macos_hotkey_releases_keys_after_backend_failsafe() -> None:
     """按 V 时触发安全中止，仍应释放可能按下的键，并恢复安全开关和报告失败。"""
+
     class InterruptedBackend(Backend):
         def keyDown(self, key: str) -> None:
             """模拟 V 已按下后发生桌面安全中止。"""
@@ -72,13 +75,15 @@ def test_macos_hotkey_releases_keys_after_backend_failsafe() -> None:
         device.hotkey(("command", "v"))
 
     assert backend.calls[-2:] == [
-        ("keyUp", ("v",), {}), ("keyUp", ("command",), {}),
+        ("keyUp", ("v",), {}),
+        ("keyUp", ("command",), {}),
     ]
     assert backend.FAILSAFE is True
 
 
 def test_macos_hotkey_attempts_remaining_releases_after_keyup_error() -> None:
     """释放 V 失败时仍应尝试释放 Command，并向调用方报告失败。"""
+
     class ReleaseFailureBackend(Backend):
         def keyUp(self, key: str) -> None:
             """模拟单个键的释放失败。"""
@@ -113,7 +118,9 @@ def test_macos_adapter_translates_click_and_drag_with_left_button() -> None:
     ]
 
 
-def test_macos_adapter_rejects_non_darwin_without_injected_backend(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_macos_adapter_rejects_non_darwin_without_injected_backend(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """验证未注入 backend 时，非 macOS 环境会被拒绝。"""
     monkeypatch.setattr(platform, "system", lambda: "Linux")
 

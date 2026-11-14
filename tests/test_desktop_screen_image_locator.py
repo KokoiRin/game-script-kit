@@ -4,16 +4,20 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PIL import Image
 import pytest
+from PIL import Image
 
-from game_automation.platform.desktop.adapters import image_matching as image_matching_adapter
 from game_automation.platform.desktop.adapters import PyAutoGuiScreenImageLocator
+from game_automation.platform.desktop.adapters import (
+    image_matching as image_matching_adapter,
+)
 from game_automation.portable.domain import ImageSearchRequest, ImageTemplate, Rect
 
 
 class ScreenshotBackend:
-    def __init__(self, image: Image.Image, pointer_size: tuple[int, int] | None = None) -> None:
+    def __init__(
+        self, image: Image.Image, pointer_size: tuple[int, int] | None = None
+    ) -> None:
         """初始化只提供截图能力的 fake backend。"""
         self.image = image
         self.pointer_size = pointer_size if pointer_size is not None else image.size
@@ -106,7 +110,9 @@ def test_screen_image_locator_logs_stage_durations(tmp_path) -> None:
     assert "confidence=" in message
 
 
-def test_screen_image_locator_batch_matches_many_templates_with_one_screenshot(tmp_path) -> None:
+def test_screen_image_locator_batch_matches_many_templates_with_one_screenshot(
+    tmp_path,
+) -> None:
     """验证批量定位会复用同一张截图匹配多张模板。"""
     first_template = _build_template_image()
     second_template = _build_second_template_image()
@@ -139,7 +145,9 @@ def test_screen_image_locator_batch_matches_many_templates_with_one_screenshot(t
     assert any("template_count=2" in message for message in logger.messages)
 
 
-def test_screen_image_locator_batch_matches_requests_with_independent_regions(tmp_path) -> None:
+def test_screen_image_locator_batch_matches_requests_with_independent_regions(
+    tmp_path,
+) -> None:
     """验证批量搜索请求可以在同一张截图上使用各自区域。"""
     first_template = _build_template_image()
     second_template = _build_second_template_image()
@@ -174,14 +182,18 @@ def test_screen_image_locator_batch_matches_requests_with_independent_regions(tm
     assert results[1].match.rect == Rect(left=82, top=52, width=8, height=6)
 
 
-def test_screen_image_locator_batch_keeps_best_confidence_when_below_threshold(tmp_path) -> None:
+def test_screen_image_locator_batch_keeps_best_confidence_when_below_threshold(
+    tmp_path,
+) -> None:
     """验证批量匹配未达阈值时仍保留 OpenCV 最佳分数和位置。"""
     template = _build_template_image()
     template_path = tmp_path / "button.png"
     template.save(template_path)
     screenshot = Image.new("RGB", (40, 30), "white")
 
-    results = PyAutoGuiScreenImageLocator(backend=ScreenshotBackend(screenshot)).locate_requests(
+    results = PyAutoGuiScreenImageLocator(
+        backend=ScreenshotBackend(screenshot)
+    ).locate_requests(
         (
             ImageSearchRequest(
                 ImageTemplate(str(template_path)),
@@ -197,7 +209,9 @@ def test_screen_image_locator_batch_keeps_best_confidence_when_below_threshold(t
     assert results[0].best_rect is not None
 
 
-def test_screen_image_locator_clamps_opencv_score_above_one(tmp_path, monkeypatch) -> None:
+def test_screen_image_locator_clamps_opencv_score_above_one(
+    tmp_path, monkeypatch
+) -> None:
     """验证 OpenCV 浮点误差超过 1 时会被 adapter 归一化。"""
     import numpy
 
@@ -222,7 +236,9 @@ def test_screen_image_locator_clamps_opencv_score_above_one(tmp_path, monkeypatc
     template.save(template_path)
     screenshot = Image.new("RGB", (40, 30), "white")
 
-    results = PyAutoGuiScreenImageLocator(backend=ScreenshotBackend(screenshot)).locate_requests(
+    results = PyAutoGuiScreenImageLocator(
+        backend=ScreenshotBackend(screenshot)
+    ).locate_requests(
         (
             ImageSearchRequest(
                 ImageTemplate(str(template_path)),
@@ -236,7 +252,9 @@ def test_screen_image_locator_clamps_opencv_score_above_one(tmp_path, monkeypatc
     assert results[0].best_confidence == 1.0
 
 
-def test_screen_image_locator_batch_converts_screenshot_to_array_once(tmp_path, monkeypatch) -> None:
+def test_screen_image_locator_batch_converts_screenshot_to_array_once(
+    tmp_path, monkeypatch
+) -> None:
     """验证批量定位只把同一张截图转换为一次 OpenCV 数组。"""
     cv2, numpy = image_matching_adapter._load_cv_modules()
     counting_numpy = CountingNumpy(numpy)
@@ -263,7 +281,9 @@ def test_screen_image_locator_batch_converts_screenshot_to_array_once(tmp_path, 
     assert counting_numpy.array_sizes.count((80, 50)) == 1
 
 
-def test_screen_image_locator_reuses_cached_template_image(tmp_path, monkeypatch) -> None:
+def test_screen_image_locator_reuses_cached_template_image(
+    tmp_path, monkeypatch
+) -> None:
     """验证重复使用同一模板时不重复读取模板文件。"""
     template = _build_template_image()
     template_path = tmp_path / "button.png"
@@ -304,7 +324,9 @@ def test_screen_image_locator_batch_stops_after_first_match(tmp_path) -> None:
     screenshot.paste(second_template, (44, 31))
     logger = FakeLogger()
 
-    results = PyAutoGuiScreenImageLocator(backend=ScreenshotBackend(screenshot)).locate_many(
+    results = PyAutoGuiScreenImageLocator(
+        backend=ScreenshotBackend(screenshot)
+    ).locate_many(
         (ImageTemplate(str(first_path)), ImageTemplate(str(second_path))),
         min_confidence=0.8,
         logger=logger,
@@ -380,7 +402,9 @@ def test_screen_image_locator_interprets_region_as_pointer_coordinates_on_retina
     assert match.rect == Rect(left=12, top=6, width=4, height=3)
 
 
-def test_screen_image_locator_returns_none_when_score_is_below_threshold(tmp_path) -> None:
+def test_screen_image_locator_returns_none_when_score_is_below_threshold(
+    tmp_path,
+) -> None:
     """验证最高匹配分数低于阈值时 adapter 表示未找到。"""
     template = _build_template_image()
     template_path = tmp_path / "button.png"
@@ -396,7 +420,9 @@ def test_screen_image_locator_returns_none_when_score_is_below_threshold(tmp_pat
     )
 
 
-def test_screen_image_locator_returns_none_when_template_is_larger_than_screen(tmp_path) -> None:
+def test_screen_image_locator_returns_none_when_template_is_larger_than_screen(
+    tmp_path,
+) -> None:
     """验证模板大于搜索图时 adapter 表示未找到。"""
     template = _build_template_image()
     template_path = tmp_path / "button.png"
@@ -421,10 +447,14 @@ def test_screen_image_locator_wraps_backend_errors() -> None:
 
 
 @pytest.mark.parametrize("min_confidence", [0.0, -0.1, 1.1])
-def test_screen_image_locator_rejects_invalid_min_confidence(min_confidence: float) -> None:
+def test_screen_image_locator_rejects_invalid_min_confidence(
+    min_confidence: float,
+) -> None:
     """验证最低匹配置信度必须在有效范围内。"""
     with pytest.raises(ValueError, match="minimum image match confidence"):
-        PyAutoGuiScreenImageLocator(backend=ScreenshotBackend(Image.new("RGB", (1, 1)))).locate(
+        PyAutoGuiScreenImageLocator(
+            backend=ScreenshotBackend(Image.new("RGB", (1, 1)))
+        ).locate(
             ImageTemplate("x.png"),
             min_confidence=min_confidence,
         )

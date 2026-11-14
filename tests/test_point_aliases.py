@@ -3,16 +3,16 @@
 import pytest
 
 from game_automation.portable.domain import (
-    Click,
     NamedPoint,
     OffsetTarget,
     Point,
     PointRef,
     ScreenWindow,
-    Script,
     TargetCatalog,
     UnknownPointNameError,
 )
+from game_automation.portable.domain.task import TaskRequirements
+from tests.support.function_tasks import function_task
 
 
 def test_named_point_preserves_name_and_point() -> None:
@@ -46,10 +46,8 @@ def test_target_catalog_reports_unknown_point_name() -> None:
 
 def test_script_uses_empty_target_catalog_by_default() -> None:
     """验证现有脚本构造默认带空资源目录。"""
-    script = Script(
-        name="default-resources",
-        window=ScreenWindow(),
-        steps=(Click(Point(1, 2)),),
+    script = function_task(
+        "default-resources", "ctx.click(Point(1, 2))", window=ScreenWindow()
     )
 
     assert script.resources == TargetCatalog()
@@ -58,21 +56,15 @@ def test_script_uses_empty_target_catalog_by_default() -> None:
 def test_script_can_carry_target_catalog() -> None:
     """验证脚本可以携带命名点位资源目录。"""
     catalog = TargetCatalog(points=(NamedPoint("头像", Point(242, 92)),))
-    script = Script(
-        name="named-resources",
+    script = function_task(
+        "named-resources",
+        "ctx.click(PointRef('头像'))",
         window=ScreenWindow(),
-        steps=(Click(PointRef("头像")),),
         resources=catalog,
+        requires=TaskRequirements(points=("头像",)),
     )
 
     assert script.resources == catalog
-
-
-def test_click_can_hold_point_ref_target() -> None:
-    """验证点击动作可以保留命名点位引用目标。"""
-    action = Click(PointRef("头像"))
-
-    assert action.point == PointRef("头像")
 
 
 def test_point_offset_returns_new_point() -> None:
@@ -90,10 +82,3 @@ def test_point_ref_offset_builds_offset_target() -> None:
     target = PointRef("头像").offset(x=120, y=0)
 
     assert target == OffsetTarget(PointRef("头像"), Point(120, 0))
-
-
-def test_click_can_hold_offset_target() -> None:
-    """验证点击动作可以保留偏移目标。"""
-    target = OffsetTarget(PointRef("头像"), Point(120, 0))
-
-    assert Click(target).point == target

@@ -10,10 +10,18 @@ from game_automation.portable.preparation.service import PreparationService
 
 def build_preparation_service(workspace: Path) -> PreparationService:
     """构造设备依赖延迟加载的准备服务，绑定外部素材工作区。"""
-    from game_automation.platform.desktop.adapters.preparation import DesktopFrameCapture, PillowImageEditor, WorkspaceTemplateStore
-    from game_automation.platform.macos.adapters.preparation_windows import MacOSPreparationWindows
+    from game_automation.platform.desktop.adapters.preparation import (
+        DesktopFrameCapture,
+        PillowImageEditor,
+        WorkspaceTemplateStore,
+    )
+    from game_automation.platform.macos.adapters.preparation_windows import (
+        MacOSPreparationWindows,
+    )
 
     return PreparationService(
-        windows=MacOSPreparationWindows(), capture=DesktopFrameCapture(),
-        images=PillowImageEditor(), templates=WorkspaceTemplateStore(workspace),
+        windows=MacOSPreparationWindows(),
+        capture=DesktopFrameCapture(),
+        images=PillowImageEditor(),
+        templates=WorkspaceTemplateStore(workspace),
     )

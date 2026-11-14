@@ -1,14 +1,14 @@
 """编排单次脚本运行的应用 module。
 
-本 module 负责选择 dry-run 或真实 adapter、补齐脚本所需端口、调用 runner，
+本 module 负责选择 dry-run 或真实 adapter、补齐运行端口、调用任务，
 并把运行配置、setup 和超时错误归一化；它不做脚本注册表查找，也不打印 CLI 输出。
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass, replace
 from contextlib import ExitStack
+from dataclasses import dataclass, replace
 from time import monotonic
 
 from game_automation.portable.adapters.dry_run import (
@@ -17,10 +17,30 @@ from game_automation.portable.adapters.dry_run import (
     DryRunScreenImageLocator,
     DryRunScreenStateReader,
 )
-from game_automation.portable.application.runtime_ports import RuntimeFactory
-from game_automation.portable.application.ports import ApplicationActivator, ApplicationWindowController
-from game_automation.portable.application.script_dependencies import validate_script_resource_references
-from game_automation.portable.domain import AreaWindow, Color, ImageMatch, ImageTemplate, Rect, Script
+from game_automation.portable.application.function_task_run import run_function_task
+from game_automation.portable.application.ports import (
+    ApplicationActivator,
+    ApplicationWindowController,
+)
+from game_automation.portable.application.runtime_ports import (
+    RuntimeFactory,
+    RuntimePorts,
+)
+from game_automation.portable.application.script_dependencies import (
+    validate_script_resource_references,
+)
+from game_automation.portable.domain import (
+    AreaWindow,
+    Color,
+    ImageMatch,
+    ImageTemplate,
+    Rect,
+)
+from game_automation.portable.domain.task import FunctionTask
+from game_automation.portable.engine.cancellation import (
+    RunCancelled,
+    ScriptCancelledError,
+)
 from game_automation.portable.engine.ports import (
     CancellationToken,
     InputDevice,
@@ -28,11 +48,15 @@ from game_automation.portable.engine.ports import (
     RunLogger,
     ScreenImageLocator,
     ScreenStateReader,
-    RuntimeControl,
 )
-from game_automation.portable.engine.run_events import ScriptRunEvent, emit_script_run_event
-from game_automation.portable.engine.runner import ScriptCancelledError, ScriptRunner
-from game_automation.portable.engine.script_requirements import inspect_script_requirements
+from game_automation.portable.engine.run_events import (
+    ScriptRunEvent,
+    emit_script_run_event,
+)
+from game_automation.portable.engine.script_requirements import (
+    inspect_script_requirements,
+)
+from game_automation.portable.engine.task_context import TargetNotFound, TaskContext
 
 InputDeviceFactory = Callable[[], InputDevice]
 PixelColorReaderFactory = Callable[[], PixelColorReader]
@@ -50,7 +74,7 @@ class ScriptRunResult:
 
 
 def run_script(
-    script: Script,
+    script: FunctionTask,
     *,
     dry_run: bool,
     dry_run_color: str = "#000000",
@@ -59,7 +83,8 @@ def run_script(
     target_application: str | None = None,
     target_window_title: str | None = None,
     real_application_activator_factory: ApplicationActivatorFactory | None = None,
-    real_application_window_controller_factory: ApplicationWindowControllerFactory | None = None,
+    real_application_window_controller_factory: ApplicationWindowControllerFactory
+    | None = None,
     real_runtime_factory: RuntimeFactory | None = None,
     real_device_factory: InputDeviceFactory | None = None,
     real_color_reader_factory: PixelColorReaderFactory | None = None,
@@ -77,62 +102,116 @@ def run_script(
             details={"script": script.name, "dry_run": str(dry_run)},
         )
     stack = ExitStack()
-    runtime_control = None
     stage = "setup"
+    execution_message = None
     result = ScriptRunResult(1, "script run did not finish", "failed")
     try:
         validate_script_resource_references(script)
-        native = not dry_run and script.target is not None and script.target.uses_native_window
+        native = (
+            not dry_run
+            and script.target is not None
+            and script.target.uses_native_window
+        )
         if native:
             if target_application is not None or target_window_title is not None:
-                raise ValueError(f"{script.target.backend} uses the script target; CLI target overrides are unsupported")
+                raise ValueError(
+                    f"{script.target.backend} uses the script target; CLI target overrides are unsupported"
+                )
             if real_runtime_factory is None:
-                raise RuntimeError(f"{script.target.backend} runtime factory is required; desktop fallback is disabled")
+                raise RuntimeError(
+                    f"{script.target.backend} runtime factory is required; desktop fallback is disabled"
+                )
             if logger is not None:
-                logger.log(f"runtime selected backend={script.target.backend} target={script.target.application!r} title={script.target.window_title!r}")
+                logger.log(
+                    f"runtime selected backend={script.target.backend} target={script.target.application!r} title={script.target.window_title!r}"
+                )
             requirements = inspect_script_requirements(script)
-            ports = stack.enter_context(real_runtime_factory.open(
-                script.target, requirements, cancellation_token, logger))
+            ports = stack.enter_context(
+                real_runtime_factory.open(
+                    script.target, requirements, cancellation_token, logger
+                )
+            )
             for needed, port, name in (
                 (True, ports.device, "device"),
                 (requirements.needs_color_reader, ports.color_reader, "color reader"),
-                (requirements.needs_image_locator, ports.image_locator, "image locator"),
-                (requirements.needs_screen_state_reader, ports.screen_state_reader, "screen state reader"),
+                (
+                    requirements.needs_image_locator,
+                    ports.image_locator,
+                    "image locator",
+                ),
+                (
+                    requirements.needs_screen_state_reader,
+                    ports.screen_state_reader,
+                    "screen state reader",
+                ),
             ):
                 if needed and port is None:
-                    raise RuntimeError(f"{script.target.backend} runtime did not supply required {name}")
-            runtime_control = ports.control
+                    raise RuntimeError(
+                        f"{script.target.backend} runtime did not supply required {name}"
+                    )
             prepared_script = replace(script, window=ports.window)
-            real_device_factory = lambda: ports.device
-            real_color_reader_factory = lambda: ports.color_reader
-            real_image_locator_factory = lambda: ports.image_locator
-            real_screen_state_reader_factory = lambda: ports.screen_state_reader
         else:
             prepared_script = _prepare_target_environment(
-                script, dry_run=dry_run, target_application=target_application,
+                script,
+                dry_run=dry_run,
+                target_application=target_application,
                 target_window_title=target_window_title,
                 real_application_activator_factory=real_application_activator_factory,
-                real_application_window_controller_factory=real_application_window_controller_factory)
-        runner = _build_runner(
-            prepared_script, dry_run=dry_run, dry_run_color=dry_run_color,
-            dry_run_images=dry_run_images, dry_run_screen_state=dry_run_screen_state,
-            real_device_factory=real_device_factory,
-            real_color_reader_factory=real_color_reader_factory,
-            real_image_locator_factory=real_image_locator_factory,
-            real_screen_state_reader_factory=real_screen_state_reader_factory,
-            cancellation_token=cancellation_token, logger=logger, emit_step_events=emit_step_events,
-            runtime_control=runtime_control)
+                real_application_window_controller_factory=real_application_window_controller_factory,
+            )
+            ports = _build_ports(
+                prepared_script,
+                dry_run=dry_run,
+                dry_run_color=dry_run_color,
+                dry_run_images=dry_run_images,
+                dry_run_screen_state=dry_run_screen_state,
+                real_device_factory=real_device_factory,
+                real_color_reader_factory=real_color_reader_factory,
+                real_image_locator_factory=real_image_locator_factory,
+                real_screen_state_reader_factory=real_screen_state_reader_factory,
+            )
+        if not dry_run and cancellation_token is not None:
+            ports = replace(
+                ports, device=_CancellableInputDevice(ports.device, cancellation_token)
+            )
+        clock = ports.device.clock if dry_run else monotonic
+        if ports.control is not None:
+            clock = ports.control.task_time
+        context = TaskContext(
+            ports.window,
+            prepared_script.resources,
+            device=ports.device,
+            clock=clock,
+            color_reader=ports.color_reader,
+            image_locator=ports.image_locator,
+            screen_state_reader=ports.screen_state_reader,
+            runtime_control=ports.control,
+            cancellation_token=cancellation_token,
+            logger=logger,
+            emit_step_events=emit_step_events,
+        )
         stage = "run"
-        execution_result = runner.run(prepared_script)
-        result = ScriptRunResult(0, finish_reason=execution_result.finish_reason)
-        execution_message = execution_result.message
-    except ScriptCancelledError as exc:
+        run_function_task(
+            prepared_script, context, cancellation_token=cancellation_token
+        )
+        result = ScriptRunResult(0)
+    except (ScriptCancelledError, RunCancelled) as exc:
         result = ScriptRunResult(130, str(exc), "cancelled")
     except Exception as exc:
         if stage == "setup":
-            reason = "configuration_failed" if isinstance(exc, (LookupError, ValueError)) else "setup_failed"
-            result = ScriptRunResult(2 if reason == "configuration_failed" else 1,
-                                     f"script run {'configuration' if reason == 'configuration_failed' else 'setup'} failed: {exc}", reason)
+            reason = (
+                "configuration_failed"
+                if isinstance(exc, (LookupError, ValueError))
+                else "setup_failed"
+            )
+            result = ScriptRunResult(
+                2 if reason == "configuration_failed" else 1,
+                f"script run {'configuration' if reason == 'configuration_failed' else 'setup'} failed: {exc}",
+                reason,
+            )
+        elif isinstance(exc, TargetNotFound):
+            result = ScriptRunResult(0, finish_reason="stopped_unmet_condition")
+            execution_message = str(exc)
         elif isinstance(exc, TimeoutError):
             result = ScriptRunResult(1, f"script run timed out: {exc}", "timed_out")
         else:
@@ -144,36 +223,51 @@ def run_script(
             message = f"runtime cleanup failed: {exc}"
             if logger is not None:
                 logger.log(message)
+            execution_error = result.error_message or execution_message
+            if execution_error:
+                message = f"{execution_error}\n{message}"
             if result.finish_reason == "cancelled":
-                result = replace(result, error_message=f"{result.error_message}; {message}")
+                result = replace(result, error_message=message)
             else:
                 result = ScriptRunResult(1, message, "cleanup_failed")
     # 停流可能等待回调屏障；此期间到达的取消仍高于完成和清理失败。
     if cancellation_token is not None and cancellation_token.is_cancelled():
-        result = ScriptRunResult(130, result.error_message or "script run cancelled", "cancelled")
+        result = ScriptRunResult(
+            130, result.error_message or "script run cancelled", "cancelled"
+        )
     details = {"exit_code": str(result.exit_code)}
     if result.exit_code == 0 and result.finish_reason != "completed":
         details["reason"] = execution_message or ""
     if result.error_message is not None:
         details["error"] = result.error_message
-    _emit_run_lifecycle_event(logger, "run_finished", status=result.finish_reason,
-                              details=details, enabled=emit_step_events)
+    _emit_run_lifecycle_event(
+        logger,
+        "run_finished",
+        status=result.finish_reason,
+        details=details,
+        enabled=emit_step_events,
+    )
     return result
 
 
 def _prepare_target_environment(
-    script: Script,
+    script: FunctionTask,
     *,
     dry_run: bool,
     target_application: str | None,
     target_window_title: str | None,
     real_application_activator_factory: ApplicationActivatorFactory | None,
-    real_application_window_controller_factory: ApplicationWindowControllerFactory | None,
-) -> Script:
-    """在真实 runner 创建前激活应用、选窗并返回本轮脚本副本。"""
+    real_application_window_controller_factory: ApplicationWindowControllerFactory
+    | None,
+) -> FunctionTask:
+    """在真实运行上下文创建前激活应用、选窗并返回本轮脚本副本。"""
     if dry_run:
         return script
-    declared_target = script.target if target_application is None and target_window_title is None else None
+    declared_target = (
+        script.target
+        if target_application is None and target_window_title is None
+        else None
+    )
     if declared_target is not None:
         target_application = declared_target.application
         target_window_title = declared_target.window_title
@@ -198,13 +292,16 @@ def _prepare_target_environment(
         normalized_application,
         normalized_title,
     )
-    if declared_target is not None and (focused_window.rect.width,focused_window.rect.height) != (declared_target.width,declared_target.height):
-        raise ValueError('目标窗口尺寸与脚本素材不符，请恢复窗口尺寸后重试')
+    if declared_target is not None and (
+        focused_window.rect.width,
+        focused_window.rect.height,
+    ) != (declared_target.width, declared_target.height):
+        raise ValueError("目标窗口尺寸与脚本素材不符，请恢复窗口尺寸后重试")
     return replace(script, window=AreaWindow(focused_window.rect))
 
 
-def _build_runner(
-    script: Script,
+def _build_ports(
+    script: FunctionTask,
     *,
     dry_run: bool,
     dry_run_color: str,
@@ -214,42 +311,27 @@ def _build_runner(
     real_color_reader_factory: PixelColorReaderFactory | None,
     real_image_locator_factory: ScreenImageLocatorFactory | None,
     real_screen_state_reader_factory: ScreenStateReaderFactory | None,
-    cancellation_token: CancellationToken | None,
-    logger: RunLogger | None,
-    emit_step_events: bool,
-    runtime_control: RuntimeControl | None = None,
-) -> ScriptRunner:
-    """按脚本运行模式和端口需求组装 runner。"""
+) -> RuntimePorts:
+    """将既有 desktop 工厂或模拟配置归一为已打开的端口集合。"""
     requirements = inspect_script_requirements(script)
     if dry_run:
-        device = DryRunInputDevice()
-        return ScriptRunner(
-            device=device,
-            clock=device.clock,
+        return RuntimePorts(
+            script.window,
+            DryRunInputDevice(),
             color_reader=_build_dry_run_color_reader(
-                dry_run_color,
-                needs_color_reader=requirements.needs_color_reader,
+                dry_run_color, needs_color_reader=requirements.needs_color_reader
             ),
             image_locator=_build_dry_run_image_locator(
-                dry_run_images,
-                needs_image_locator=requirements.needs_image_locator,
+                dry_run_images, needs_image_locator=requirements.needs_image_locator
             ),
             screen_state_reader=_build_dry_run_screen_state_reader(
                 dry_run_screen_state,
                 needs_screen_state_reader=requirements.needs_screen_state_reader,
             ),
-            cancellation_token=cancellation_token,
-            logger=logger,
-            emit_step_events=emit_step_events,
         )
-
-    device = _build_real_device(real_device_factory)
-    if cancellation_token is not None:
-        device = _CancellableInputDevice(device, cancellation_token)
-    return ScriptRunner(
-        device=device,
-        clock=monotonic if runtime_control is None else runtime_control.task_time,
-        runtime_control=runtime_control,
+    return RuntimePorts(
+        script.window,
+        _build_real_device(real_device_factory),
         color_reader=_build_real_color_reader(
             needs_color_reader=requirements.needs_color_reader,
             real_color_reader_factory=real_color_reader_factory,
@@ -262,9 +344,6 @@ def _build_runner(
             needs_screen_state_reader=requirements.needs_screen_state_reader,
             real_screen_state_reader_factory=real_screen_state_reader_factory,
         ),
-        cancellation_token=cancellation_token,
-        logger=logger,
-        emit_step_events=emit_step_events,
     )
 
 

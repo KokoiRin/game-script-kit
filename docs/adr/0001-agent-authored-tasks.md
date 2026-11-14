@@ -4,6 +4,8 @@
 - 日期：2026-10-18（本轮用户确认）
 - 性质：产品方向与协作方式；不表示下述任务能力已经实现
 
+任务格式后续按 [ADR 0015](0015-python-only-tasks.md) 统一为 Python。本文保留最初确定协作方向时的格式背景。
+
 ## 背景
 
 Star 已具备点击、识图、条件等待和循环等执行基础，但现有游戏脚本主要停留在任务入口，尚未形成可靠的日常任务闭环。
@@ -32,6 +34,6 @@ Star 已具备点击、识图、条件等待和循环等执行基础，但现有
 
 ## 依据
 
-- [通用文件脚本](../../scripts/file-script-demo.json)：当前文件脚本入口示例，具体业务任务由外部工作区维护。
-- [JSON loader](../../src/game_automation/portable/application/config_script_loader.py)：当前创建格式的实现边界。
+- [通用文件任务](../../scripts/file-script-demo.py) 提供当前作者接口示例，具体业务任务由外部工作区维护。
+- [函数任务解析](../../src/game_automation/portable/application/function_task_loader.py) 定义当前文件声明的实现边界。
 - [当前状态](../current-state.md)、[重启计划](../restart-plan.md)：能力差距和后续安排。

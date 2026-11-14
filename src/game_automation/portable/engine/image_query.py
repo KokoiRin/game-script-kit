@@ -21,7 +21,6 @@ from game_automation.portable.domain import (
 )
 from game_automation.portable.engine.ports import RunLogger, ScreenImageLocator
 
-
 ImageSearchSource = ImageTemplate | ImageRef | ImageSearchSpec | SearchRef
 
 

@@ -8,7 +8,10 @@ import io
 import json
 from types import SimpleNamespace
 
-from game_automation.platform.local_desktop.entrypoints.desktop_backend import DesktopBackend, run_stdio
+from game_automation.platform.local_desktop.entrypoints.desktop_backend import (
+    DesktopBackend,
+    run_stdio,
+)
 from game_automation.portable.domain.geometry import Rect
 from game_automation.portable.preparation.models import DesktopWindow
 
@@ -17,13 +20,23 @@ def test_window_query_sees_application_started_after_backend_initial_query(tmp_p
     """后启动应用的窗口应在同一后台的新查询中出现，不要求重启。"""
     visible = []
     pending = []
-    window = DesktopWindow('42:1', 'LateApp', '任务窗口', Rect(10, 20, 800, 600))
+    window = DesktopWindow("42:1", "LateApp", "任务窗口", Rect(10, 20, 800, 600))
     preparation = SimpleNamespace(list_windows=lambda application: tuple(visible))
     session = DesktopBackend(tmp_path, preparation=preparation)
     requests = [
-        {'jsonrpc': '2.0', 'id': 1, 'method': 'preparation.windows', 'params': {'application': 'LateApp'}},
-        {'jsonrpc': '2.0', 'id': 2, 'method': 'preparation.windows', 'params': {'application': 'LateApp'}},
-        {'jsonrpc': '2.0', 'id': 3, 'method': 'session.shutdown'},
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "preparation.windows",
+            "params": {"application": "LateApp"},
+        },
+        {
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "preparation.windows",
+            "params": {"application": "LateApp"},
+        },
+        {"jsonrpc": "2.0", "id": 3, "method": "session.shutdown"},
     ]
 
     class Source(io.StringIO):
@@ -45,9 +58,12 @@ def test_window_query_sees_application_started_after_backend_initial_query(tmp_p
         pending.clear()
 
     output = io.StringIO()
-    source = Source('\n'.join(map(json.dumps, requests)) + '\n')
-    assert run_stdio(session, source, output, io.StringIO(), process_events=process_events) == 0
+    source = Source("\n".join(map(json.dumps, requests)) + "\n")
+    assert (
+        run_stdio(session, source, output, io.StringIO(), process_events=process_events)
+        == 0
+    )
     replies = [json.loads(line) for line in output.getvalue().splitlines()]
-    assert replies[0]['result']['windows'] == []
-    assert replies[1]['result']['windows'][0]['title'] == '任务窗口'
-    assert replies[2]['result']['stopping'] is True
+    assert replies[0]["result"]["windows"] == []
+    assert replies[1]["result"]["windows"][0]["title"] == "任务窗口"
+    assert replies[2]["result"]["stopping"] is True

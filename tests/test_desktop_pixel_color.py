@@ -44,7 +44,9 @@ def test_pixel_color_reader_ignores_alpha_channel() -> None:
     image = FakeImage((11, 22, 33, 44))
     backend = SimpleNamespace(screenshot=lambda: image)
 
-    assert PyAutoGuiPixelColorReader(backend=backend).read_color(Point(1, 2)) == Color(11, 22, 33)
+    assert PyAutoGuiPixelColorReader(backend=backend).read_color(Point(1, 2)) == Color(
+        11, 22, 33
+    )
 
 
 def test_pixel_color_reader_wraps_screenshot_errors() -> None:

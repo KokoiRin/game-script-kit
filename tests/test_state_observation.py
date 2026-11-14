@@ -9,12 +9,19 @@ import time
 import pytest
 
 from game_automation.portable.application.state_observation import StateObservation
-from game_automation.portable.domain import ImageTemplate, ImageMatch, Rect, ScreenStateCandidate, ScreenStateCandidateResult, ScreenStateProbeResult
+from game_automation.portable.domain import (
+    ImageMatch,
+    ImageTemplate,
+    Rect,
+    ScreenStateCandidate,
+    ScreenStateCandidateResult,
+    ScreenStateProbeResult,
+)
 
 
-def result(state='页面', found=True):
+def result(state="页面", found=True):
     """构造有命中或未知的独立探测结果。"""
-    candidate = ScreenStateCandidate(state, ImageTemplate('sample.png'))
+    candidate = ScreenStateCandidate(state, ImageTemplate("sample.png"))
     match = ImageMatch(Rect(10, 20, 30, 40), 0.95) if found else None
     return ScreenStateProbeResult((ScreenStateCandidateResult(candidate, match, 2),), 2)
 
@@ -34,11 +41,13 @@ class Probe:
         """初始化观察证据和关闭事件。"""
         self.value = result()
         self.closed = threading.Event()
+
     def read(self):
         """返回当前结果，或模拟捕获失败。"""
         if isinstance(self.value, Exception):
             raise self.value
         return self.value
+
     def close(self):
         """标记探测资源已回收。"""
         self.closed.set()
@@ -50,13 +59,13 @@ def test_observation_confirms_state_then_invalidates_it_on_failure():
     observer = StateObservation()
     try:
         observer.start(probe, hz=5, confirmations=2)
-        wait_until(lambda: observer.snapshot().current_state == '页面')
+        wait_until(lambda: observer.snapshot().current_state == "页面")
         assert observer.snapshot().sequence >= 2
         assert observer.snapshot().sample.result.candidates[0].found is True
-        probe.value = RuntimeError('目标窗口已关闭')
-        wait_until(lambda: observer.snapshot().phase == 'unavailable')
-        assert observer.snapshot().current_state == '未知'
-        assert '已关闭' in observer.snapshot().error
+        probe.value = RuntimeError("目标窗口已关闭")
+        wait_until(lambda: observer.snapshot().phase == "unavailable")
+        assert observer.snapshot().current_state == "未知"
+        assert "已关闭" in observer.snapshot().error
         assert observer.snapshot().performance.failures >= 1
     finally:
         assert observer.stop()
@@ -71,7 +80,7 @@ def test_observation_rejects_duplicate_start_and_invalid_frequency():
         observer.start(Probe(), hz=0)
     try:
         observer.start(Probe(), hz=5)
-        with pytest.raises(RuntimeError, match='running'):
+        with pytest.raises(RuntimeError, match="running"):
             observer.start(Probe(), hz=5)
     finally:
         observer.stop()
@@ -83,41 +92,45 @@ def test_stopped_observation_cannot_report_a_live_state():
     observer.start(Probe(), hz=5, confirmations=1)
     wait_until(lambda: observer.snapshot().sequence >= 1)
     assert observer.stop()
-    assert observer.snapshot().phase == 'stopped'
-    assert observer.snapshot().current_state == '未知'
+    assert observer.snapshot().phase == "stopped"
+    assert observer.snapshot().current_state == "未知"
 
 
-@pytest.mark.parametrize('late_error', [False, True])
+@pytest.mark.parametrize("late_error", [False, True])
 def test_stop_revokes_state_before_blocked_read_finishes(late_error):
     """停止立即撤销状态，迟到成功或失败均不能覆盖停止中。"""
     entered, release, closing, closed = (threading.Event() for _ in range(4))
+
     class Blocked(Probe):
         def read(self):
             """等待模拟卡住的截图。"""
             entered.set()
             release.wait(2)
             if late_error:
-                raise RuntimeError('迟到错误')
+                raise RuntimeError("迟到错误")
             return result()
+
         def close(self):
             """保持清理进行中以观察迟到发布屏障。"""
             closing.set()
             closed.wait(2)
+
     observer = StateObservation()
     try:
         observer.start(Blocked(), confirmations=1)
         assert entered.wait(1)
-        assert observer.request_stop().phase == 'stopping'
+        assert observer.request_stop().phase == "stopping"
         release.set()
         assert closing.wait(1)
-        assert observer.snapshot().phase == 'stopping'
-        assert observer.snapshot().current_state == '未知'
+        assert observer.snapshot().phase == "stopping"
+        assert observer.snapshot().current_state == "未知"
         assert observer.snapshot().sample is None
         assert observer.snapshot().performance.attempts == 0
         assert observer.snapshot().performance.last_failure_at is None
-        assert observer.snapshot().performance.last_failure_message == ''
+        assert observer.snapshot().performance.last_failure_message == ""
     finally:
-        release.set(); closed.set()
+        release.set()
+        closed.set()
         assert observer.stop()
 
 
@@ -125,26 +138,30 @@ def test_first_frame_timeout_and_slow_result_are_stale():
     """首帧卡住与超龄完成结果都不能成为已知状态。"""
     now = [0.0]
     entered, release = threading.Event(), threading.Event()
+
     class Slow(Probe):
         def read(self):
             """模拟超过时效预算才完成的采集。"""
             if entered.is_set():
                 threading.Event().wait(0.2)
-            entered.set(); release.wait(2)
+            entered.set()
+            release.wait(2)
             return result()
+
     observer = StateObservation(clock=lambda: now[0])
     try:
         observer.start(Slow(), hz=5, confirmations=1)
         assert entered.wait(1)
         now[0] = 3
-        assert observer.snapshot().phase == 'stale'
+        assert observer.snapshot().phase == "stale"
         release.set()
         wait_until(lambda: observer.snapshot().sequence >= 1)
-        assert observer.snapshot().current_state == '未知'
+        assert observer.snapshot().current_state == "未知"
         assert observer.snapshot().performance.stale_results == 1
         assert observer.snapshot().performance.over_budget == 1
     finally:
-        release.set(); observer.stop()
+        release.set()
+        observer.stop()
 
 
 def test_confirmation_restarts_after_long_capture_gap():
@@ -156,9 +173,9 @@ def test_confirmation_restarts_after_long_capture_gap():
         wait_until(lambda: observer.snapshot().sequence == 1)
         now[0] = 3
         wait_until(lambda: observer.snapshot().sequence == 2)
-        assert observer.snapshot().current_state == '未知'
+        assert observer.snapshot().current_state == "未知"
         wait_until(lambda: observer.snapshot().sequence >= 3)
-        assert observer.snapshot().current_state == '页面'
+        assert observer.snapshot().current_state == "页面"
     finally:
         observer.stop()
 
@@ -166,11 +183,13 @@ def test_confirmation_restarts_after_long_capture_gap():
 def test_sample_wall_timestamp_is_from_capture_start():
     """画面时间保留采集开始值，不被匹配完成后的时间替换。"""
     wall = [100.0]
+
     class TimedProbe(Probe):
         def read(self):
             """模拟识别期间墙上时间前进。"""
             wall[0] = 200.0
             return result()
+
     observer = StateObservation(wall_clock=lambda: wall[0])
     try:
         observer.start(TimedProbe(), hz=1, confirmations=1)
@@ -203,7 +222,10 @@ def test_performance_counts_rounds_and_retains_stopped_session():
 
 def test_performance_rolling_window_and_failure_budget():
     """所有完成轮次计入预算与失败，分位数最多覆盖最近120轮。"""
-    from game_automation.portable.application.state_observation import ObservationPerformance
+    from game_automation.portable.application.state_observation import (
+        ObservationPerformance,
+    )
+
     stats = ObservationPerformance()
     for number in range(125):
         stats = stats.record(float(number), budget_ms=100, failed=number == 124)
@@ -219,26 +241,29 @@ def test_performance_rolling_window_and_failure_budget():
 def test_recent_failure_survives_recovery_and_resets_on_restart():
     """成功恢复清空实时错误但保留有界失败历史，新观察清空历史。"""
     probe = Probe()
-    probe.value = RuntimeError('窗口读取失败' + '细节' * 1000)
+    probe.value = RuntimeError("窗口读取失败" + "细节" * 1000)
     observer = StateObservation(wall_clock=lambda: 1234.5)
     try:
         observer.start(probe, hz=5, confirmations=1)
-        wait_until(lambda: observer.snapshot().phase == 'unavailable')
+        wait_until(lambda: observer.snapshot().phase == "unavailable")
         failed = observer.snapshot().performance
         assert failed.last_failure_at == 1234.5
-        assert failed.last_failure_message.startswith('窗口读取失败')
+        assert failed.last_failure_message.startswith("窗口读取失败")
         assert len(failed.last_failure_message) == 1024
         probe.value = result()
-        wait_until(lambda: observer.snapshot().current_state == '页面')
+        wait_until(lambda: observer.snapshot().current_state == "页面")
         recovered = observer.snapshot()
-        assert recovered.error == ''
+        assert recovered.error == ""
         assert recovered.performance.last_failure_message == failed.last_failure_message
         assert recovered.performance.last_failure_at == 1234.5
         observer.stop()
-        assert observer.snapshot().performance.last_failure_message == failed.last_failure_message
+        assert (
+            observer.snapshot().performance.last_failure_message
+            == failed.last_failure_message
+        )
         observer.start(Probe(), hz=5, confirmations=1)
         wait_until(lambda: observer.snapshot().sequence >= 1)
-        assert observer.snapshot().performance.last_failure_message == ''
+        assert observer.snapshot().performance.last_failure_message == ""
         assert observer.snapshot().performance.last_failure_at is None
     finally:
         observer.stop()
@@ -247,7 +272,9 @@ def test_recent_failure_survives_recovery_and_resets_on_restart():
 def test_cached_source_proof_never_confirms_twice_or_refreshes_age():
     """重复读取同一源证据不确认第二次，也不能用读取时间续期。"""
     from dataclasses import replace
+
     from game_automation.portable.domain.screen_state import FrameProof
+
     now = [100.0]
     probe = Probe()
     probe.value = replace(result(), proof=FrameProof(1, 99.5))
@@ -255,14 +282,14 @@ def test_cached_source_proof_never_confirms_twice_or_refreshes_age():
     try:
         observer.start(probe, hz=5, confirmations=2)
         wait_until(lambda: observer.snapshot().sequence >= 2)
-        assert observer.snapshot().current_state == '未知'
+        assert observer.snapshot().current_state == "未知"
         assert observer.snapshot().age_ms == pytest.approx(500)
         assert observer.snapshot().performance.duplicate_results >= 1
-        probe.value = replace(result(), proof=FrameProof(2, 100.0, 'idle'))
-        wait_until(lambda: observer.snapshot().current_state == '页面')
+        probe.value = replace(result(), proof=FrameProof(2, 100.0, "idle"))
+        wait_until(lambda: observer.snapshot().current_state == "页面")
         now[0] = 103
-        wait_until(lambda: observer.snapshot().phase == 'stale')
-        assert observer.snapshot().current_state == '未知'
+        wait_until(lambda: observer.snapshot().phase == "stale")
+        assert observer.snapshot().current_state == "未知"
     finally:
         observer.stop()
 
@@ -270,7 +297,9 @@ def test_cached_source_proof_never_confirms_twice_or_refreshes_age():
 def test_old_stream_frame_is_stale_even_when_read_is_fast():
     """源事件已过期时，快速读取与匹配不能使其重新有效。"""
     from dataclasses import replace
+
     from game_automation.portable.domain.screen_state import FrameProof
+
     probe = Probe()
     probe.value = replace(result(), proof=FrameProof(1, 95))
     observer = StateObservation(clock=lambda: 100)
@@ -278,8 +307,8 @@ def test_old_stream_frame_is_stale_even_when_read_is_fast():
         observer.start(probe, hz=5, confirmations=1)
         wait_until(lambda: observer.snapshot().sequence >= 1)
         value = observer.snapshot()
-        assert value.phase == 'stale'
-        assert value.current_state == '未知'
+        assert value.phase == "stale"
+        assert value.current_state == "未知"
         assert value.performance.stale_results >= 1
         assert value.performance.round_ms == 0
         assert value.performance.source_age_ms == 5000
@@ -289,41 +318,56 @@ def test_old_stream_frame_is_stale_even_when_read_is_fast():
 
 def test_cleanup_failure_keeps_slot_occupied_until_backend_recovery():
     """停流失败不能谎报已停止或允许新流并发启动。"""
+
     class CannotClose(Probe):
         def close(self):
             """模拟系统不能确认停流。"""
-            raise RuntimeError('停流未确认')
+            raise RuntimeError("停流未确认")
+
     observer = StateObservation()
     observer.start(CannotClose(), hz=5)
     wait_until(lambda: observer.snapshot().sequence >= 1)
     assert observer.stop() is False
-    assert observer.snapshot().phase == 'stopping'
-    assert '停流未确认' in observer.snapshot().error
-    with pytest.raises(RuntimeError, match='running'):
+    assert observer.snapshot().phase == "stopping"
+    assert "停流未确认" in observer.snapshot().error
+    with pytest.raises(RuntimeError, match="running"):
         observer.start(Probe())
 
 
 def test_stream_source_future_timestamp_is_unavailable():
     """跨时钟转换出的未来时间不能作为零龄画面。"""
     from dataclasses import replace
+
     from game_automation.portable.domain.screen_state import FrameProof
+
     probe = Probe()
     probe.value = replace(result(), proof=FrameProof(1, 101))
     observer = StateObservation(clock=lambda: 100)
     try:
         observer.start(probe, hz=5, confirmations=1)
-        wait_until(lambda: observer.snapshot().phase == 'unavailable')
-        assert observer.snapshot().current_state == '未知'
-        assert '源时间无效' in observer.snapshot().error
+        wait_until(lambda: observer.snapshot().phase == "unavailable")
+        assert observer.snapshot().current_state == "未知"
+        assert "源时间无效" in observer.snapshot().error
     finally:
         observer.stop()
 
 
 def test_wire_reports_processing_cost_separately_from_source_age():
     """协议耗时是本轮处理，不把缓存源年龄冒充处理成本。"""
-    from game_automation.platform.local_desktop.entrypoints.desktop_backend import observation_wire
-    from game_automation.portable.application.state_observation import ObservationSnapshot, ObservationPhase, ObservationSample
+    from game_automation.platform.local_desktop.entrypoints.desktop_backend import (
+        observation_wire,
+    )
+    from game_automation.portable.application.state_observation import (
+        ObservationPhase,
+        ObservationSample,
+        ObservationSnapshot,
+    )
+
     sample = ObservationSample(10, 11.5, 1000, result(), 5, 11.49)
-    wire = observation_wire(ObservationSnapshot(phase=ObservationPhase.OBSERVING, sample=sample, age_ms=1500))
-    assert wire['elapsed_ms'] == pytest.approx(10)
-    assert wire['age_ms'] == 1500
+    wire = observation_wire(
+        ObservationSnapshot(
+            phase=ObservationPhase.OBSERVING, sample=sample, age_ms=1500
+        )
+    )
+    assert wire["elapsed_ms"] == pytest.approx(10)
+    assert wire["age_ms"] == 1500

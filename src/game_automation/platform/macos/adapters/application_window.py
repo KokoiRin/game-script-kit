@@ -6,9 +6,9 @@
 
 from __future__ import annotations
 
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
-import time
 from typing import Protocol
 
 from game_automation.portable.application.ports import (
@@ -16,7 +16,6 @@ from game_automation.portable.application.ports import (
     FocusedApplicationWindow,
 )
 from game_automation.portable.domain import Rect
-
 
 Sleeper = Callable[[float], None]
 

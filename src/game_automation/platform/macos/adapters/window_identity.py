@@ -17,6 +17,7 @@ class BoundWindow:
         """按进程和唯一完整几何首次绑定，不用AX标题猜测。"""
         if quartz is None:
             import Quartz
+
             quartz = Quartz
         self.quartz = quartz
         self.window = window
@@ -27,40 +28,72 @@ class BoundWindow:
     def check(self):
         """每次仅核对固定编号、进程、标题及原始逻辑尺寸。"""
         q = self.quartz
-        pid = int(self.window.id.split(':', 1)[0])
-        rows = q.CGWindowListCopyWindowInfo(q.kCGWindowListOptionOnScreenOnly | q.kCGWindowListExcludeDesktopElements,
-                                          q.kCGNullWindowID) or ()
-        candidates = [item for item in rows if item.get(q.kCGWindowOwnerPID) == pid
-                      and item.get(q.kCGWindowLayer) == 0]
+        pid = int(self.window.id.split(":", 1)[0])
+        rows = (
+            q.CGWindowListCopyWindowInfo(
+                q.kCGWindowListOptionOnScreenOnly
+                | q.kCGWindowListExcludeDesktopElements,
+                q.kCGNullWindowID,
+            )
+            or ()
+        )
+        candidates = [
+            item
+            for item in rows
+            if item.get(q.kCGWindowOwnerPID) == pid and item.get(q.kCGWindowLayer) == 0
+        ]
         if self.number is None:
             rect = self.window.rect
             expected = (rect.left, rect.top, rect.width, rect.height)
-            candidates = [item for item in candidates if logical_bounds(item.get(q.kCGWindowBounds, {})) == expected]
+            candidates = [
+                item
+                for item in candidates
+                if logical_bounds(item.get(q.kCGWindowBounds, {})) == expected
+            ]
         else:
-            candidates = [item for item in candidates if item.get(q.kCGWindowNumber) == self.number
-                          and item.get(q.kCGWindowName) == self.title]
+            candidates = [
+                item
+                for item in candidates
+                if item.get(q.kCGWindowNumber) == self.number
+                and item.get(q.kCGWindowName) == self.title
+            ]
         if not candidates and self.number is not None:
-            rows = q.CGWindowListCopyWindowInfo(q.kCGWindowListOptionAll | q.kCGWindowListExcludeDesktopElements,
-                                              q.kCGNullWindowID) or ()
-            if any(item.get(q.kCGWindowOwnerPID) == pid
-                   and item.get(q.kCGWindowLayer) == 0
-                   and item.get(q.kCGWindowNumber) == self.number
-                   and item.get(q.kCGWindowName) == self.title for item in rows):
-                raise WindowPresentationUnavailable('目标窗口暂时不可见，等待原窗口恢复')
+            rows = (
+                q.CGWindowListCopyWindowInfo(
+                    q.kCGWindowListOptionAll | q.kCGWindowListExcludeDesktopElements,
+                    q.kCGNullWindowID,
+                )
+                or ()
+            )
+            if any(
+                item.get(q.kCGWindowOwnerPID) == pid
+                and item.get(q.kCGWindowLayer) == 0
+                and item.get(q.kCGWindowNumber) == self.number
+                and item.get(q.kCGWindowName) == self.title
+                for item in rows
+            ):
+                raise WindowPresentationUnavailable(
+                    "目标窗口暂时不可见，等待原窗口恢复"
+                )
         if len(candidates) != 1:
-            raise WindowCaptureError('目标窗口已关闭、不可见、标题已变化或几何不唯一，请停止观察并重新选择窗口')
+            raise WindowCaptureError(
+                "目标窗口已关闭、不可见、标题已变化或几何不唯一，请停止观察并重新选择窗口"
+            )
         item = candidates[0]
         bounds = logical_bounds(item.get(q.kCGWindowBounds, {}))
-        if bounds is None or bounds[2:] != (self.window.rect.width, self.window.rect.height):
+        if bounds is None or bounds[2:] != (
+            self.window.rect.width,
+            self.window.rect.height,
+        ):
             rect = self.window.rect
             expected = (rect.left, rect.top, rect.width, rect.height)
             raise WindowPresentationUnavailable(
-                f'目标窗口尺寸已变化，原窗口={expected}，当前窗口={bounds}，请恢复采集素材时的窗口尺寸'
+                f"目标窗口尺寸已变化，原窗口={expected}，当前窗口={bounds}，请恢复采集素材时的窗口尺寸"
             )
         if self.number is None:
             number = item.get(q.kCGWindowNumber)
             if isinstance(number, bool) or not isinstance(number, int) or number <= 0:
-                raise WindowCaptureError('目标窗口缺少有效编号，请重新选择窗口')
+                raise WindowCaptureError("目标窗口缺少有效编号，请重新选择窗口")
             self.number, self.title = number, item.get(q.kCGWindowName)
         return item
 
@@ -68,6 +101,6 @@ class BoundWindow:
 def logical_bounds(bounds):
     """归一化系统完整窗口几何，拒绝缺失和非有限值。"""
     try:
-        return tuple(round(bounds[key]) for key in ('X', 'Y', 'Width', 'Height'))
-    except (KeyError, TypeError, ValueError, OverflowError):
+        return tuple(round(bounds[key]) for key in ("X", "Y", "Width", "Height"))
+    except KeyError, TypeError, ValueError, OverflowError:
         return None

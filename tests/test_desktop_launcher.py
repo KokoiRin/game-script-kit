@@ -41,7 +41,13 @@ def test_native_launcher_passes_workspace_and_current_python(tmp_path, monkeypat
 
     monkeypatch.setattr(desktop_app.subprocess, "Popen", launch)
     assert desktop_app.launch_desktop(workspace=tmp_path) == 0
-    assert captured["command"] == [str(executable), "--tab", "prepare", "--workspace", str(tmp_path)]
+    assert captured["command"] == [
+        str(executable),
+        "--tab",
+        "prepare",
+        "--workspace",
+        str(tmp_path),
+    ]
     assert captured["env"]["STAR_PYTHON"] == sys.executable
     assert captured["start_new_session"] is True
 
@@ -67,6 +73,8 @@ def test_native_launcher_interrupt_requests_graceful_termination(tmp_path, monke
             """记录退出请求。"""
             calls.append(("signal", signum))
 
-    monkeypatch.setattr(desktop_app.subprocess, "Popen", lambda *args, **kwargs: Child())
+    monkeypatch.setattr(
+        desktop_app.subprocess, "Popen", lambda *args, **kwargs: Child()
+    )
     assert desktop_app.launch_desktop(workspace=tmp_path) == 0
     assert calls == [("wait", None), ("signal", signal.SIGTERM), ("wait", 12)]

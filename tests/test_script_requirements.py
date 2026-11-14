@@ -1,266 +1,71 @@
-"""验证脚本运行前端口需求分析。"""
+"""验证声明依赖驱动端口装配，不执行任务或推导 Python 控制流。
 
-from game_automation.portable.domain import (
-    Click,
-    Color,
-    ColorIs,
-    If,
-    ImageExists,
-    ImageRef,
-    ImageTemplate,
-    ImageTarget,
-    Point,
-    Repeat,
-    SearchRef,
-    ScreenWindow,
-    ScreenStateIs,
-    Script,
-    Wait,
-    WaitUntil,
+这些测试通过 FunctionTask 与公开元信息解析入口观察运行需求。
+"""
+
+from pathlib import Path
+
+import pytest
+
+from game_automation.portable.application.function_task_loader import (
+    parse_function_task_source,
 )
-from game_automation.portable.engine.script_requirements import inspect_script_requirements
+from game_automation.portable.domain.task import FunctionTask, TaskRequirements
+from game_automation.portable.engine.script_requirements import (
+    inspect_script_requirements,
+)
 
 
-def test_script_requirements_do_not_need_color_reader_for_plain_steps() -> None:
-    """验证普通动作和 Repeat 不需要颜色读取端口。"""
-    script = Script(
-        name="plain",
-        window=ScreenWindow(),
-        steps=(Repeat(times=2, steps=(Click(Point(1, 2)), Wait(0.1))),),
-    )
-
-    requirements = inspect_script_requirements(script)
-
-    assert requirements.needs_color_reader is False
-    assert requirements.needs_image_locator is False
-
-
-def test_script_requirements_need_color_reader_for_color_condition() -> None:
-    """验证顶层 If 颜色条件会声明需要取色端口。"""
-    script = Script(
-        name="color-if",
-        window=ScreenWindow(),
-        steps=(
-            If(
-                condition=ColorIs(Point(1, 2), Color(1, 2, 3)),
-                then_steps=(Click(Point(3, 4)),),
-            ),
+@pytest.mark.parametrize(
+    "requires, expected",
+    [
+        (TaskRequirements(), (False, False, False)),
+        (TaskRequirements(points=("button",)), (False, False, False)),
+        (TaskRequirements(colors=True), (True, False, False)),
+        (TaskRequirements(images=("button",)), (False, True, False)),
+        (TaskRequirements(searches=("button",)), (False, True, False)),
+        (TaskRequirements(states=("home",)), (False, False, True)),
+        (
+            TaskRequirements(colors=True, images=("button",), states=("home",)),
+            (True, True, True),
         ),
+    ],
+)
+def test_declared_capabilities_select_runtime_ports(requires, expected):
+    """端口需求仅来自显式声明，各种能力可以独立组合。"""
+    task = FunctionTask(
+        "ports", Path("ports.py"), "def run(ctx): pass", requires=requires
     )
 
-    requirements = inspect_script_requirements(script)
+    result = inspect_script_requirements(task)
 
-    assert requirements.needs_color_reader is True
-    assert requirements.needs_image_locator is False
-
-
-def test_script_requirements_find_nested_color_condition() -> None:
-    """验证需求分析会递归检查嵌套控制流步骤。"""
-    nested = If(
-        condition=ColorIs(Point(1, 2), Color(1, 2, 3)),
-        then_steps=(Click(Point(3, 4)),),
-    )
-    script = Script(
-        name="nested-color-if",
-        window=ScreenWindow(),
-        steps=(Repeat(times=2, steps=(nested,)),),
-    )
-
-    requirements = inspect_script_requirements(script)
-
-    assert requirements.needs_color_reader is True
-    assert requirements.needs_image_locator is False
+    assert (
+        result.needs_color_reader,
+        result.needs_image_locator,
+        result.needs_screen_state_reader,
+    ) == expected
 
 
-def test_script_requirements_need_color_reader_for_wait_until_color_condition() -> None:
-    """验证 WaitUntil 颜色条件会声明需要取色端口。"""
-    script = Script(
-        name="wait-until-color",
-        window=ScreenWindow(),
-        steps=(
-            WaitUntil(
-                condition=ColorIs(Point(1, 2), Color(1, 2, 3)),
-                timeout_seconds=1,
-                interval_seconds=0.5,
-            ),
-        ),
+def test_local_resources_select_image_port_before_task_execution(tmp_path):
+    """文件中的图片和搜索声明无需执行源码便参与运行装配。"""
+    source = """TASK = {"name": "resources", "resources": {
+        "images": {"button": "button.png"},
+        "searches": {"confirm": {"image": "button"}}
+    }}
+def run(ctx):
+    raise AssertionError("discovery executed the task")
+"""
+    task = parse_function_task_source(
+        source, path=tmp_path / "task.py", asset_root=tmp_path
     )
 
-    requirements = inspect_script_requirements(script)
-
-    assert requirements.needs_color_reader is True
-    assert requirements.needs_image_locator is False
-
-
-def test_script_requirements_need_image_locator_for_image_condition() -> None:
-    """验证顶层 If 图片条件会声明需要图像定位端口。"""
-    script = Script(
-        name="image-if",
-        window=ScreenWindow(),
-        steps=(
-            If(
-                condition=ImageExists(ImageTemplate("assets/start.png")),
-                then_steps=(Click(Point(3, 4)),),
-            ),
-        ),
-    )
-
-    requirements = inspect_script_requirements(script)
-
-    assert requirements.needs_color_reader is False
-    assert requirements.needs_image_locator is True
+    assert inspect_script_requirements(task).needs_image_locator
+    assert task.requires.images == ("button",)
+    assert task.requires.searches == ("confirm",)
 
 
-def test_script_requirements_need_screen_state_reader_for_screen_state_condition() -> None:
-    """验证顶层 If 界面状态条件会声明需要状态读取端口。"""
-    script = Script(
-        name="screen-state-if",
-        window=ScreenWindow(),
-        steps=(
-            If(
-                condition=ScreenStateIs("主页"),
-                then_steps=(Click(Point(3, 4)),),
-            ),
-        ),
-    )
+def test_python_body_does_not_implicitly_declare_capabilities():
+    """调用上下文的 Python 语句不会被静态解释为隐式依赖。"""
+    task = FunctionTask("explicit", Path("explicit.py"), "def run(ctx): ctx.state()")
 
-    requirements = inspect_script_requirements(script)
-
-    assert requirements.needs_color_reader is False
-    assert requirements.needs_image_locator is False
-    assert requirements.needs_screen_state_reader is True
-
-
-def test_script_requirements_need_screen_state_reader_for_wait_until_state() -> None:
-    """验证 WaitUntil 界面状态条件会声明需要状态读取端口。"""
-    script = Script(
-        name="wait-until-state",
-        window=ScreenWindow(),
-        steps=(
-            WaitUntil(
-                condition=ScreenStateIs("主页"),
-                timeout_seconds=1,
-                interval_seconds=0.5,
-            ),
-        ),
-    )
-
-    requirements = inspect_script_requirements(script)
-
-    assert requirements.needs_screen_state_reader is True
-
-
-def test_script_requirements_need_image_locator_for_named_image_condition() -> None:
-    """验证命名图片条件会声明需要图像定位端口。"""
-    script = Script(
-        name="named-image-if",
-        window=ScreenWindow(),
-        steps=(
-            If(
-                condition=ImageExists(ImageRef("开始按钮")),
-                then_steps=(Click(Point(3, 4)),),
-            ),
-        ),
-    )
-
-    requirements = inspect_script_requirements(script)
-
-    assert requirements.needs_color_reader is False
-    assert requirements.needs_image_locator is True
-
-
-def test_script_requirements_need_image_locator_for_named_search_condition() -> None:
-    """验证命名搜索条件会声明需要图像定位端口。"""
-    script = Script(
-        name="named-search-if",
-        window=ScreenWindow(),
-        steps=(
-            If(
-                condition=ImageExists(SearchRef("开始按钮")),
-                then_steps=(Click(Point(3, 4)),),
-            ),
-        ),
-    )
-
-    requirements = inspect_script_requirements(script)
-
-    assert requirements.needs_color_reader is False
-    assert requirements.needs_image_locator is True
-
-
-def test_script_requirements_find_nested_image_condition() -> None:
-    """验证需求分析会递归检查嵌套图片条件。"""
-    nested = If(
-        condition=ImageExists(ImageTemplate("assets/start.png")),
-        then_steps=(Click(Point(3, 4)),),
-    )
-    script = Script(
-        name="nested-image-if",
-        window=ScreenWindow(),
-        steps=(Repeat(times=2, steps=(nested,)),),
-    )
-
-    requirements = inspect_script_requirements(script)
-
-    assert requirements.needs_image_locator is True
-
-
-def test_script_requirements_need_image_locator_for_wait_until_image_condition() -> None:
-    """验证 WaitUntil 图片条件会声明需要图像定位端口。"""
-    script = Script(
-        name="wait-until-image",
-        window=ScreenWindow(),
-        steps=(
-            WaitUntil(
-                condition=ImageExists(ImageTemplate("assets/start.png")),
-                timeout_seconds=1,
-                interval_seconds=0.5,
-            ),
-        ),
-    )
-
-    requirements = inspect_script_requirements(script)
-
-    assert requirements.needs_image_locator is True
-
-
-def test_script_requirements_need_image_locator_for_image_target_click() -> None:
-    """验证图片目标点击会声明需要图像定位端口。"""
-    script = Script(
-        name="click-image",
-        window=ScreenWindow(),
-        steps=(Click(ImageTarget(ImageTemplate("assets/start.png"))),),
-    )
-
-    requirements = inspect_script_requirements(script)
-
-    assert requirements.needs_color_reader is False
-    assert requirements.needs_image_locator is True
-
-
-def test_script_requirements_need_image_locator_for_named_image_target_click() -> None:
-    """验证命名图片目标点击会声明需要图像定位端口。"""
-    script = Script(
-        name="click-named-image",
-        window=ScreenWindow(),
-        steps=(Click(ImageTarget(ImageRef("开始按钮"))),),
-    )
-
-    requirements = inspect_script_requirements(script)
-
-    assert requirements.needs_color_reader is False
-    assert requirements.needs_image_locator is True
-
-
-def test_script_requirements_need_image_locator_for_named_search_target_click() -> None:
-    """验证命名搜索目标点击会声明需要图像定位端口。"""
-    script = Script(
-        name="click-named-search",
-        window=ScreenWindow(),
-        steps=(Click(ImageTarget(SearchRef("开始按钮"))),),
-    )
-
-    requirements = inspect_script_requirements(script)
-
-    assert requirements.needs_color_reader is False
-    assert requirements.needs_image_locator is True
+    assert not inspect_script_requirements(task).needs_screen_state_reader

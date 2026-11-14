@@ -6,11 +6,11 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import math
+from dataclasses import dataclass
 
-from game_automation.portable.domain.geometry import Rect
 from game_automation.portable.domain.color_pattern import validate_point_evidence
+from game_automation.portable.domain.geometry import Rect
 from game_automation.portable.domain.image_matching import ImageMatch, ImageTemplate
 from game_automation.portable.domain.point_aliases import ImageSearchSpec
 
@@ -39,7 +39,9 @@ class ScreenStateCandidate:
     def template(self) -> ImageTemplate:
         """返回兼容旧调用方的候选模板。"""
         if not isinstance(self.search.image, ImageTemplate):
-            raise TypeError("screen state candidate image must be resolved before probing")
+            raise TypeError(
+                "screen state candidate image must be resolved before probing"
+            )
         return self.search.image
 
 
@@ -59,15 +61,24 @@ class ScreenStateCandidateResult:
         """校验单个候选探测耗时、跳过状态和最佳诊断信息必须自洽。"""
         if self.elapsed_ms < 0:
             raise ValueError("screen state candidate elapsed_ms cannot be negative")
-        validate_point_evidence(self.point_count, self.matched_points, skipped=self.skipped, found=self.match is not None)
+        validate_point_evidence(
+            self.point_count,
+            self.matched_points,
+            skipped=self.skipped,
+            found=self.match is not None,
+        )
         if self.skipped and self.match is not None:
             raise ValueError("skipped screen state candidate cannot contain a match")
         if self.skipped and self.best_confidence is not None:
-            raise ValueError("skipped screen state candidate cannot contain best confidence")
+            raise ValueError(
+                "skipped screen state candidate cannot contain best confidence"
+            )
         if self.skipped and self.best_rect is not None:
             raise ValueError("skipped screen state candidate cannot contain best rect")
         if self.best_confidence is not None and not 0 <= self.best_confidence <= 1:
-            raise ValueError("screen state candidate best confidence must be between 0 and 1")
+            raise ValueError(
+                "screen state candidate best confidence must be between 0 and 1"
+            )
         if self.match is not None and self.best_confidence is None:
             object.__setattr__(self, "best_confidence", self.match.confidence)
         if self.match is not None and self.best_rect is None:
@@ -87,31 +98,36 @@ class ScreenStateCandidateResult:
 @dataclass(frozen=True, slots=True)
 class ProbeTiming:
     """记录单帧截图与其余识别处理耗时，不将识别误称为纯匹配。"""
+
     screenshot_ms: float
     recognition_ms: float
-    capture_mode: str = 'snapshot'
+    capture_mode: str = "snapshot"
 
     def __post_init__(self) -> None:
         """确保阶段计时为有限非负单调时钟差。"""
-        if any(not math.isfinite(value) or value < 0 for value in (self.screenshot_ms, self.recognition_ms)):
-            raise ValueError('probe timing must be finite and nonnegative')
+        if any(
+            not math.isfinite(value) or value < 0
+            for value in (self.screenshot_ms, self.recognition_ms)
+        ):
+            raise ValueError("probe timing must be finite and nonnegative")
 
 
 @dataclass(frozen=True, slots=True)
 class FrameProof:
     """表达系统新画面或明确未变化事件，不把重复读取当新证据。"""
+
     sequence: int
     captured_at: float
-    kind: str = 'complete'
+    kind: str = "complete"
 
     def __post_init__(self) -> None:
         """源序号与单调时间必须有效，idle只代表系统明确未变化。"""
         if type(self.sequence) is not int or self.sequence < 1:
-            raise ValueError('source sequence must be a positive integer')
+            raise ValueError("source sequence must be a positive integer")
         if not math.isfinite(self.captured_at) or self.captured_at < 0:
-            raise ValueError('source timestamp must be finite and nonnegative')
-        if self.kind not in ('complete', 'idle'):
-            raise ValueError('source proof must be complete or idle')
+            raise ValueError("source timestamp must be finite and nonnegative")
+        if self.kind not in ("complete", "idle"):
+            raise ValueError("source proof must be complete or idle")
 
 
 @dataclass(frozen=True, slots=True)
@@ -140,7 +156,9 @@ class ScreenStateProbeResult:
     @property
     def selected_candidate(self) -> ScreenStateCandidateResult | None:
         """返回置信度最高的命中候选，全部未命中时返回 None。"""
-        found_candidates = tuple(candidate for candidate in self.candidates if candidate.found)
+        found_candidates = tuple(
+            candidate for candidate in self.candidates if candidate.found
+        )
         if not found_candidates:
             return None
         return max(found_candidates, key=lambda candidate: candidate.confidence or 0)
@@ -150,10 +168,14 @@ class ScreenStateProbeResult:
         """返回本轮探测结果可推导出的用户诊断提示。"""
         if self.known:
             return ()
-        executed_candidates = tuple(candidate for candidate in self.candidates if not candidate.skipped)
+        executed_candidates = tuple(
+            candidate for candidate in self.candidates if not candidate.skipped
+        )
         if not executed_candidates:
             return ()
-        best_confidences = tuple(candidate.best_confidence for candidate in executed_candidates)
+        best_confidences = tuple(
+            candidate.best_confidence for candidate in executed_candidates
+        )
         if any(confidence is None for confidence in best_confidences):
             return ()
         if max(confidence or 0 for confidence in best_confidences) == 0:

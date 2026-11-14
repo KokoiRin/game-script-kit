@@ -4,12 +4,15 @@
 """
 
 import io
-from pathlib import Path
 import re
+from pathlib import Path
 
 from PIL import Image
 
-from game_automation.platform.desktop.adapters.screen_capture import capture_screen, crop_captured_screen
+from game_automation.platform.desktop.adapters.screen_capture import (
+    capture_screen,
+    crop_captured_screen,
+)
 from game_automation.portable.domain.geometry import Rect
 from game_automation.portable.preparation.models import ImageData
 
@@ -31,25 +34,41 @@ class DesktopFrameCapture:
         try:
             if self._backend is None:
                 import pyautogui
+
                 self._backend = pyautogui
             screen = capture_screen(self._backend)
-            if (region.left < 0 or region.top < 0
-                    or (region.left + region.width) * screen.pixels_per_point_x > screen.image.width
-                    or (region.top + region.height) * screen.pixels_per_point_y > screen.image.height):
+            if (
+                region.left < 0
+                or region.top < 0
+                or (region.left + region.width) * screen.pixels_per_point_x
+                > screen.image.width
+                or (region.top + region.height) * screen.pixels_per_point_y
+                > screen.image.height
+            ):
                 raise RuntimeError("window is outside the captured primary display")
             return _encode(crop_captured_screen(screen, region=region).image)
         except RuntimeError:
             raise
         except Exception as exc:
-            raise RuntimeError("window capture failed; check Screen Recording permission and desktop session") from exc
+            raise RuntimeError(
+                "window capture failed; check Screen Recording permission and desktop session"
+            ) from exc
 
 
 class PillowImageEditor:
     def crop(self, image: ImageData, region: Rect) -> ImageData:
         """仅裁剪传入 PNG 内容，不重新截图。"""
         with Image.open(io.BytesIO(image.png)) as decoded:
-            return _encode(decoded.crop((region.left, region.top,
-                                         region.left + region.width, region.top + region.height)))
+            return _encode(
+                decoded.crop(
+                    (
+                        region.left,
+                        region.top,
+                        region.left + region.width,
+                        region.top + region.height,
+                    )
+                )
+            )
 
 
 class WorkspaceTemplateStore:
@@ -60,7 +79,9 @@ class WorkspaceTemplateStore:
     def save_png(self, name: str, png: bytes) -> str:
         """将命名 PNG 排他写入 assets，拒绝路径和同名覆盖。"""
         if not re.fullmatch(r"[\w -]{1,80}", name):
-            raise ValueError("template name must contain 1-80 letters, numbers, spaces, underscores or hyphens")
+            raise ValueError(
+                "template name must contain 1-80 letters, numbers, spaces, underscores or hyphens"
+            )
         root = (self._workspace / "assets").resolve()
         if not root.is_relative_to(self._workspace):
             raise ValueError("template assets must stay inside workspace")

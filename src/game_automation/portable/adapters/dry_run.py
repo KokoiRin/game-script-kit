@@ -6,11 +6,17 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Mapping
 from time import monotonic
 
-from game_automation.portable.domain import Color, ImageMatch, ImageTemplate, Point, Rect
+from game_automation.portable.domain import (
+    Color,
+    ImageMatch,
+    ImageTemplate,
+    Point,
+    Rect,
+)
 from game_automation.portable.engine.ports import (
     InputDevice,
     PixelColorReader,

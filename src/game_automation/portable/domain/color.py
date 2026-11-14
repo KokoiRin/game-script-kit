@@ -6,8 +6,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import re
+from dataclasses import dataclass
 
 _HEX_RGB_PATTERN = re.compile(r"^#[0-9A-Fa-f]{6}$")
 
@@ -29,7 +29,7 @@ class Color:
                 raise ValueError(f"{channel_name} must be between 0 and 255")
 
     @classmethod
-    def from_hex(cls, value: str) -> "Color":
+    def from_hex(cls, value: str) -> Color:
         """从 #RRGGBB 格式的 RGB 十六进制字符串创建颜色。"""
         if _HEX_RGB_PATTERN.fullmatch(value) is None:
             raise ValueError("color must match #[0-9A-Fa-f]{6}")

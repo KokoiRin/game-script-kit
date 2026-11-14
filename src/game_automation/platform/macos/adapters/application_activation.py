@@ -6,13 +6,12 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
 import platform
 import subprocess
 import time
+from collections.abc import Callable
 
 from game_automation.portable.application.ports import ApplicationActivator
-
 
 CommandRunner = Callable[..., subprocess.CompletedProcess[str]]
 Sleeper = Callable[[float], None]
@@ -33,7 +32,9 @@ class MacOSApplicationActivator(ApplicationActivator):
             raise RuntimeError("macOS application activator requires Darwin")
         if stabilization_seconds < 0:
             raise ValueError("application stabilization seconds must be non-negative")
-        self._command_runner = subprocess.run if command_runner is None else command_runner
+        self._command_runner = (
+            subprocess.run if command_runner is None else command_runner
+        )
         self._sleeper = sleeper
         self._stabilization_seconds = stabilization_seconds
 

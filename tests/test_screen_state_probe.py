@@ -8,19 +8,23 @@ import json
 
 import pytest
 
-from game_automation.portable.application.screen_state_reader import ProjectScreenStateReader
-from game_automation.portable.application.screen_state_config import load_screen_state_target_catalog
+from game_automation.portable.application.screen_state_config import (
+    load_screen_state_target_catalog,
+)
+from game_automation.portable.application.screen_state_reader import (
+    ProjectScreenStateReader,
+)
 from game_automation.portable.domain import (
-    ImageMatch,
     ImageBatchMatchResult,
+    ImageMatch,
     ImageSearchRequest,
     ImageSearchSpec,
     ImageTemplate,
     Rect,
-    SearchRef,
     ScreenStateCandidate,
     ScreenStateCandidateResult,
     ScreenStateProbeResult,
+    SearchRef,
 )
 from game_automation.portable.engine.screen_state_probe import probe_screen_state
 
@@ -52,12 +56,16 @@ def test_screen_state_probe_result_is_unknown_when_no_candidate_matches() -> Non
     result = ScreenStateProbeResult(
         candidates=(
             ScreenStateCandidateResult(
-                candidate=ScreenStateCandidate("人物", ImageTemplate("assets/character.png")),
+                candidate=ScreenStateCandidate(
+                    "人物", ImageTemplate("assets/character.png")
+                ),
                 match=None,
                 elapsed_ms=8.0,
             ),
             ScreenStateCandidateResult(
-                candidate=ScreenStateCandidate("装备", ImageTemplate("assets/equipment.png")),
+                candidate=ScreenStateCandidate(
+                    "装备", ImageTemplate("assets/equipment.png")
+                ),
                 match=None,
                 elapsed_ms=9.0,
             ),
@@ -74,14 +82,18 @@ def test_screen_state_probe_result_hints_when_all_best_confidences_are_zero() ->
     result = ScreenStateProbeResult(
         candidates=(
             ScreenStateCandidateResult(
-                candidate=ScreenStateCandidate("主页", ImageTemplate("assets/home.png")),
+                candidate=ScreenStateCandidate(
+                    "主页", ImageTemplate("assets/home.png")
+                ),
                 match=None,
                 elapsed_ms=4.0,
                 best_confidence=0.0,
                 best_rect=Rect(10, 20, 30, 40),
             ),
             ScreenStateCandidateResult(
-                candidate=ScreenStateCandidate("人物", ImageTemplate("assets/character.png")),
+                candidate=ScreenStateCandidate(
+                    "人物", ImageTemplate("assets/character.png")
+                ),
                 match=None,
                 elapsed_ms=5.0,
                 best_confidence=0.0,
@@ -102,7 +114,9 @@ def test_screen_state_probe_result_does_not_hint_for_low_nonzero_confidence() ->
     result = ScreenStateProbeResult(
         candidates=(
             ScreenStateCandidateResult(
-                candidate=ScreenStateCandidate("主页", ImageTemplate("assets/home.png")),
+                candidate=ScreenStateCandidate(
+                    "主页", ImageTemplate("assets/home.png")
+                ),
                 match=None,
                 elapsed_ms=4.0,
                 best_confidence=0.12,
@@ -120,12 +134,16 @@ def test_screen_state_probe_result_chooses_highest_confidence_match() -> None:
     result = ScreenStateProbeResult(
         candidates=(
             ScreenStateCandidateResult(
-                candidate=ScreenStateCandidate("人物", ImageTemplate("assets/character.png")),
+                candidate=ScreenStateCandidate(
+                    "人物", ImageTemplate("assets/character.png")
+                ),
                 match=ImageMatch(Rect(0, 0, 10, 10), confidence=0.71),
                 elapsed_ms=7.0,
             ),
             ScreenStateCandidateResult(
-                candidate=ScreenStateCandidate("装备", ImageTemplate("assets/equipment.png")),
+                candidate=ScreenStateCandidate(
+                    "装备", ImageTemplate("assets/equipment.png")
+                ),
                 match=ImageMatch(Rect(10, 10, 10, 10), confidence=0.93),
                 elapsed_ms=9.0,
             ),
@@ -247,7 +265,11 @@ def test_project_state_reader_reads_state_from_configured_groups(tmp_path) -> No
                     {
                         "state": "主页",
                         "searches": [
-                            {"name": "主页标题", "image": "主页.png", "region": "主页标题"}
+                            {
+                                "name": "主页标题",
+                                "image": "主页.png",
+                                "region": "主页标题",
+                            }
                         ],
                     },
                 ],
@@ -359,14 +381,20 @@ def test_project_state_reader_rejects_invalid_screen_state_config(tmp_path) -> N
     )
     reader = ProjectScreenStateReader(project_root=tmp_path)
 
-    with pytest.raises(RuntimeError, match="screen state search image must stay inside assets folder"):
+    with pytest.raises(
+        RuntimeError, match="screen state search image must stay inside assets folder"
+    ):
         reader.read_current_state(min_confidence=0.8)
 
 
 @pytest.mark.parametrize(
     ("config", "error_type", "message"),
     [
-        ({"groups": []}, ValueError, "screen state config groups must be a non-empty list"),
+        (
+            {"groups": []},
+            ValueError,
+            "screen state config groups must be a non-empty list",
+        ),
         (
             {"groups": [{"state": "空场景", "searches": []}]},
             ValueError,
@@ -378,7 +406,11 @@ def test_project_state_reader_rejects_invalid_screen_state_config(tmp_path) -> N
                     {
                         "state": "未知区域",
                         "searches": [
-                            {"name": "按钮", "image": "按钮.png", "region": "不存在区域"}
+                            {
+                                "name": "按钮",
+                                "image": "按钮.png",
+                                "region": "不存在区域",
+                            }
                         ],
                     }
                 ]
@@ -409,7 +441,9 @@ def test_project_state_reader_rejects_malformed_screen_state_config(
     assert isinstance(exc.value.__cause__, error_type)
 
 
-def test_probe_screen_state_prefers_batch_locator_and_preserves_candidate_order() -> None:
+def test_probe_screen_state_prefers_batch_locator_and_preserves_candidate_order() -> (
+    None
+):
     """验证界面探测优先使用批量定位并按候选顺序映射结果。"""
     candidates = (
         ScreenStateCandidate(
@@ -443,19 +477,23 @@ def test_probe_screen_state_prefers_batch_locator_and_preserves_candidate_order(
             """记录批量搜索请求并返回同序结果。"""
             self.requests.append((requests, stop_on_first_match))
             return (
-                ImageBatchMatchResult(
-                    requests[0].template,
-                    ImageMatch(Rect(1, 2, 3, 4), confidence=0.9),
-                    elapsed_ms=3.0,
-                ),
-                ImageBatchMatchResult.skipped_result(requests[1].template),
-            ) if stop_on_first_match else (
-                ImageBatchMatchResult(requests[0].template, None, elapsed_ms=3.0),
-                ImageBatchMatchResult(
-                    requests[1].template,
-                    ImageMatch(Rect(10, 20, 30, 40), confidence=0.91),
-                    elapsed_ms=4.0,
-                ),
+                (
+                    ImageBatchMatchResult(
+                        requests[0].template,
+                        ImageMatch(Rect(1, 2, 3, 4), confidence=0.9),
+                        elapsed_ms=3.0,
+                    ),
+                    ImageBatchMatchResult.skipped_result(requests[1].template),
+                )
+                if stop_on_first_match
+                else (
+                    ImageBatchMatchResult(requests[0].template, None, elapsed_ms=3.0),
+                    ImageBatchMatchResult(
+                        requests[1].template,
+                        ImageMatch(Rect(10, 20, 30, 40), confidence=0.91),
+                        elapsed_ms=4.0,
+                    ),
+                )
             )
 
     batch_locator = FakeBatchLocator()
@@ -468,7 +506,10 @@ def test_probe_screen_state_prefers_batch_locator_and_preserves_candidate_order(
     )
 
     assert result.current_state == "人物"
-    assert [candidate.candidate.name for candidate in result.candidates] == ["人物", "装备"]
+    assert [candidate.candidate.name for candidate in result.candidates] == [
+        "人物",
+        "装备",
+    ]
     assert [candidate.skipped for candidate in result.candidates] == [False, True]
     first_request = batch_locator.requests[0][0][0]
     assert first_request == ImageSearchRequest(
@@ -484,14 +525,18 @@ def test_probe_screen_state_prefers_batch_locator_and_preserves_candidate_order(
                     region=Rect(10, 20, 300, 120),
                     min_confidence=0.85,
                 ),
-                ImageSearchRequest(ImageTemplate("assets/equipment.png"), min_confidence=0.8),
+                ImageSearchRequest(
+                    ImageTemplate("assets/equipment.png"), min_confidence=0.8
+                ),
             ),
             True,
         )
     ]
 
 
-def test_probe_screen_state_preserves_batch_best_diagnostics_for_missed_candidate() -> None:
+def test_probe_screen_state_preserves_batch_best_diagnostics_for_missed_candidate() -> (
+    None
+):
     """验证批量界面探测会保留未命中候选的最佳诊断信息。"""
     candidates = (ScreenStateCandidate("人物", ImageTemplate("assets/character.png")),)
 

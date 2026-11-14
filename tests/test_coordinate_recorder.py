@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
-import game_automation.portable.domain.actions as actions
 import pytest
+
 from game_automation.portable.domain import Color, Point
-from game_automation.portable.tools.coordinate_recorder import CoordinateRecorder, RecordedPoint
+from game_automation.portable.tools.coordinate_recorder import (
+    CoordinateRecorder,
+    RecordedPoint,
+)
 
 
 class FakePointerReader:
@@ -132,12 +135,6 @@ def test_record_rereads_latest_position_and_q_exits_quickly() -> None:
     assert recorded == (RecordedPoint(Point(9, 9), Color(9, 9, 9)),)
     assert pointer.calls == 2
     assert clock.sleeps == []
-
-
-def test_recorder_does_not_add_script_steps() -> None:
-    """验证工具没有向脚本步骤模型添加获取坐标步骤。"""
-    assert not hasattr(actions, "GetCoordinate")
-    assert not hasattr(actions, "RecordCoordinate")
 
 
 @pytest.mark.parametrize(

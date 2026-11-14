@@ -7,8 +7,12 @@ from dataclasses import replace
 
 import pytest
 
-from game_automation.platform.macos.adapters.application_window import MacOSWindowCandidate
-from game_automation.platform.macos.adapters.preparation_windows import MacOSPreparationWindows
+from game_automation.platform.macos.adapters.application_window import (
+    MacOSWindowCandidate,
+)
+from game_automation.platform.macos.adapters.preparation_windows import (
+    MacOSPreparationWindows,
+)
 from game_automation.portable.domain.geometry import Rect
 
 
@@ -38,7 +42,9 @@ def test_preparation_window_query_is_read_only_and_capture_refreshes_bounds():
             """记录实际选择窗口时的激活请求。"""
             activations.append(application)
 
-    windows = MacOSPreparationWindows(backend=backend, activator=Activator(), sleeper=lambda _: None)
+    windows = MacOSPreparationWindows(
+        backend=backend, activator=Activator(), sleeper=lambda _: None
+    )
     candidate = windows.list_windows("Game")[0]
     assert activations == backend.raised == []
     selected = windows.focus_window("Game", candidate.id)

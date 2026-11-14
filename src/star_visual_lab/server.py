@@ -7,14 +7,14 @@
 from __future__ import annotations
 
 import argparse
+import json
+import webbrowser
 from dataclasses import asdict
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-import json
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
-import webbrowser
 
 from star_visual_lab.scenario import (
     SUPPORTED_MODES,
@@ -23,7 +23,6 @@ from star_visual_lab.scenario import (
     ScenarioSnapshot,
     TaskFlowScenario,
 )
-
 
 STATIC_ROOT = Path(__file__).with_name("static")
 CONTENT_TYPES = {
@@ -161,7 +160,7 @@ def create_visual_lab_server(
             try:
                 path = _resolve_static_path(relative_path)
                 body = path.read_bytes()
-            except (OSError, ValueError):
+            except OSError, ValueError:
                 self.send_error(HTTPStatus.NOT_FOUND)
                 return
             self.send_response(HTTPStatus.OK)
@@ -185,7 +184,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--host", default="127.0.0.1", help="Local bind host.")
     parser.add_argument("--port", type=int, default=8770, help="Local bind port.")
-    parser.add_argument("--no-open", action="store_true", help="Do not open a browser window.")
+    parser.add_argument(
+        "--no-open", action="store_true", help="Do not open a browser window."
+    )
     parser.add_argument(
         "--mode",
         choices=SUPPORTED_MODES,

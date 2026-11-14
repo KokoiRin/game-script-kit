@@ -45,7 +45,16 @@ def crop_captured_screen(screen: CapturedScreen, *, region: Rect) -> CapturedScr
     right = round((region.left + region.width) * screen.pixels_per_point_x)
     bottom = round((region.top + region.height) * screen.pixels_per_point_y)
     return CapturedScreen(
-        screen.image.crop((left - screen.origin_left_pixels, top - screen.origin_top_pixels,
-                           right - screen.origin_left_pixels, bottom - screen.origin_top_pixels)),
-        left, top, screen.pixels_per_point_x, screen.pixels_per_point_y,
+        screen.image.crop(
+            (
+                left - screen.origin_left_pixels,
+                top - screen.origin_top_pixels,
+                right - screen.origin_left_pixels,
+                bottom - screen.origin_top_pixels,
+            )
+        ),
+        left,
+        top,
+        screen.pixels_per_point_x,
+        screen.pixels_per_point_y,
     )

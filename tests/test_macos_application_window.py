@@ -35,7 +35,9 @@ class FakeWindowBackend:
 
 def test_macos_window_controller_focuses_unique_title_match() -> None:
     """验证控制器按不区分大小写的标题子串选择唯一窗口。"""
-    target = MacOSWindowCandidate(42, 7, "Star 视觉自动化靶场", Rect(100, 200, 800, 600))
+    target = MacOSWindowCandidate(
+        42, 7, "Star 视觉自动化靶场", Rect(100, 200, 800, 600)
+    )
     backend = FakeWindowBackend(
         (
             MacOSWindowCandidate(42, 6, "其他页面", Rect(0, 0, 400, 300)),
@@ -63,7 +65,9 @@ def test_macos_window_controller_rejects_missing_title() -> None:
         sleeper=lambda _: None,
     )
 
-    with pytest.raises(RuntimeError, match="target window containing 'Missing' was not found"):
+    with pytest.raises(
+        RuntimeError, match="target window containing 'Missing' was not found"
+    ):
         controller.focus_window("Safari", "Missing")
 
 
@@ -75,7 +79,9 @@ def test_macos_window_controller_rejects_ambiguous_title() -> None:
             MacOSWindowCandidate(42, 7, "Star - B", Rect(10, 20, 400, 300)),
         )
     )
-    controller = MacOSApplicationWindowController(backend=backend, sleeper=lambda _: None)
+    controller = MacOSApplicationWindowController(
+        backend=backend, sleeper=lambda _: None
+    )
 
     with pytest.raises(RuntimeError, match="matched multiple windows.*more specific"):
         controller.focus_window("Safari", "Star")
@@ -83,6 +89,7 @@ def test_macos_window_controller_rejects_ambiguous_title() -> None:
 
 def test_macos_accessibility_backend_reads_and_converts_ax_windows() -> None:
     """验证 backend 读取目标应用具名窗口及其 Accessibility 矩形。"""
+
     class FakeAccessibility:
         kAXErrorSuccess = 0
         kAXWindowsAttribute = "windows"
@@ -168,6 +175,7 @@ def test_macos_accessibility_backend_reads_and_converts_ax_windows() -> None:
         @staticmethod
         def executableURL():
             """返回辅助进程可执行 URL 替身。"""
+
             class HelperExecutableURL:
                 @staticmethod
                 def lastPathComponent():
@@ -208,6 +216,7 @@ def test_macos_accessibility_backend_reads_and_converts_ax_windows() -> None:
 
 def test_macos_accessibility_backend_raises_matching_ax_window() -> None:
     """验证 backend 在所属进程的 Accessibility 窗口上执行 Raise。"""
+
     class FakeAccessibility:
         kAXErrorSuccess = 0
         kAXWindowsAttribute = "windows"
@@ -242,7 +251,9 @@ def test_macos_accessibility_backend_raises_matching_ax_window() -> None:
         accessibility=accessibility,
         appkit=object(),
     )
-    candidate = MacOSWindowCandidate(42, 7, "Star 视觉自动化靶场", Rect(100, 200, 800, 600))
+    candidate = MacOSWindowCandidate(
+        42, 7, "Star 视觉自动化靶场", Rect(100, 200, 800, 600)
+    )
 
     backend.raise_window(candidate)
 
@@ -251,6 +262,7 @@ def test_macos_accessibility_backend_raises_matching_ax_window() -> None:
 
 def test_macos_accessibility_backend_reports_raise_permission_failure() -> None:
     """验证 Accessibility Raise 错误会转换为平台级提示。"""
+
     class FailingAccessibility:
         kAXErrorSuccess = 0
         kAXWindowsAttribute = "windows"
@@ -278,36 +290,44 @@ def test_macos_accessibility_backend_reports_raise_permission_failure() -> None:
         accessibility=FailingAccessibility(),
         appkit=object(),
     )
-    candidate = MacOSWindowCandidate(42, 7, "Star 视觉自动化靶场", Rect(100, 200, 800, 600))
+    candidate = MacOSWindowCandidate(
+        42, 7, "Star 视觉自动化靶场", Rect(100, 200, 800, 600)
+    )
 
-    with pytest.raises(RuntimeError, match="failed to raise macOS window.*Accessibility"):
+    with pytest.raises(
+        RuntimeError, match="failed to raise macOS window.*Accessibility"
+    ):
         backend.raise_window(candidate)
 
 
 class FocusedAccessibility:
     kAXErrorSuccess = 0
-    kAXFocusedWindowAttribute = 'focused-window'
-    kAXTitleAttribute = 'title'
-    kAXPositionAttribute = 'position'
-    kAXSizeAttribute = 'size'
-    kAXValueCGPointType = 'point'
-    kAXValueCGSizeType = 'dimensions'
+    kAXFocusedWindowAttribute = "focused-window"
+    kAXTitleAttribute = "title"
+    kAXPositionAttribute = "position"
+    kAXSizeAttribute = "size"
+    kAXValueCGPointType = "point"
+    kAXValueCGSizeType = "dimensions"
+
     def __init__(self, error=0, present=True):
         """保存固定 PID 焦点读取的系统结果。"""
         self.error, self.present = error, present
         self.calls = []
+
     def AXUIElementCreateApplication(self, pid):
         """仅创建明确 PID 的应用元素。"""
-        self.calls.append(('application', pid))
-        return ('app', pid)
+        self.calls.append(("application", pid))
+        return ("app", pid)
+
     def AXUIElementCopyAttributeValue(self, element, attribute, output):
         """返回焦点窗口属性，不提供枚举或激活能力。"""
         self.calls.append((element, attribute))
-        if element == ('app', 42):
+        if element == ("app", 42):
             assert attribute == self.kAXFocusedWindowAttribute
-            return self.error, 'target' if self.present else None
-        assert element == 'target'
-        return 0, {'title':'Game', 'position':(100, 200), 'size':(80, 60)}[attribute]
+            return self.error, "target" if self.present else None
+        assert element == "target"
+        return 0, {"title": "Game", "position": (100, 200), "size": (80, 60)}[attribute]
+
     def AXValueGetValue(self, value, value_type, output):
         """返回公开 AXValue 中的位置或尺寸。"""
         return True, value
@@ -316,16 +336,28 @@ class FocusedAccessibility:
 def test_focused_window_read_is_bound_pid_and_geometry_without_reselection():
     """焦点读取只访问绑定应用的AXFocusedWindow及完整几何。"""
     from game_automation.portable.application.ports import FocusedApplicationWindow
+
     accessibility = FocusedAccessibility()
-    backend = MacOSAccessibilityWindowBackend(accessibility=accessibility, appkit=object())
-    assert backend.read_focused_window(42) == FocusedApplicationWindow('Game', Rect(100, 200, 80, 60))
-    assert accessibility.calls == [('application', 42), (('app', 42), 'focused-window'),
-                                   ('target', 'title'), ('target', 'position'), ('target', 'size')]
+    backend = MacOSAccessibilityWindowBackend(
+        accessibility=accessibility, appkit=object()
+    )
+    assert backend.read_focused_window(42) == FocusedApplicationWindow(
+        "Game", Rect(100, 200, 80, 60)
+    )
+    assert accessibility.calls == [
+        ("application", 42),
+        (("app", 42), "focused-window"),
+        ("target", "title"),
+        ("target", "position"),
+        ("target", "size"),
+    ]
 
 
-@pytest.mark.parametrize('error,present', [(-25211, True), (0, False)])
+@pytest.mark.parametrize("error,present", [(-25211, True), (0, False)])
 def test_focused_window_ax_error_or_absence_is_explicit(error, present):
     """无法确认焦点窗口时明确失败，不能挑选另一扇窗口代替。"""
-    backend = MacOSAccessibilityWindowBackend(accessibility=FocusedAccessibility(error, present), appkit=object())
-    with pytest.raises(RuntimeError, match='焦点窗口'):
+    backend = MacOSAccessibilityWindowBackend(
+        accessibility=FocusedAccessibility(error, present), appkit=object()
+    )
+    with pytest.raises(RuntimeError, match="焦点窗口"):
         backend.read_focused_window(42)

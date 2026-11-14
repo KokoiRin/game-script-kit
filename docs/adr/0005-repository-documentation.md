@@ -37,7 +37,7 @@ OpenSpec 退出开发流程后，历史提案曾继续留在工作区。当前�
 
 ## 依据
 
-- [执行器](../../src/game_automation/portable/engine/runner.py)、[行为测试](../../tests/test_runner.py)：核对当前行为的源码入口。
+- [执行核心](../../src/game_automation/portable/engine/task_context.py)、[行为测试](../../tests/test_execution_core.py) 提供当前执行行为的源码入口。
 
 ## 历史查询
 

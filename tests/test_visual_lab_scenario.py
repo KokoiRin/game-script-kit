@@ -52,7 +52,9 @@ def test_task_flow_scenario_completes_normal_flow_after_loading() -> None:
     assert scenario.snapshot().state == "completed"
     assert scenario.snapshot().available_actions == ()
 
-    assert [(event.kind, event.action, event.to_state) for event in scenario.events()] == [
+    assert [
+        (event.kind, event.action, event.to_state) for event in scenario.events()
+    ] == [
         ("reset", None, "home"),
         ("action", "open_tasks", "task_list"),
         ("action", "select_target", "loading"),
@@ -65,7 +67,9 @@ def test_task_flow_scenario_rejects_action_not_allowed_in_current_state() -> Non
     """验证非法动作不会改变状态或追加事件。"""
     scenario = TaskFlowScenario()
 
-    with pytest.raises(ScenarioActionError, match="action confirm_task is not allowed in state home"):
+    with pytest.raises(
+        ScenarioActionError, match="action confirm_task is not allowed in state home"
+    ):
         scenario.perform("confirm_task")
 
     assert scenario.snapshot().state == "home"
@@ -89,7 +93,9 @@ def test_task_flow_scenario_slow_mode_uses_longer_default_delay() -> None:
     normal = TaskFlowScenario(mode="normal")
     slow = TaskFlowScenario(mode="slow")
 
-    assert slow.snapshot().loading_delay_seconds > normal.snapshot().loading_delay_seconds
+    assert (
+        slow.snapshot().loading_delay_seconds > normal.snapshot().loading_delay_seconds
+    )
 
 
 def test_task_flow_scenario_reset_replaces_mode_delay_and_event_history() -> None:
@@ -104,7 +110,9 @@ def test_task_flow_scenario_reset_replaces_mode_delay_and_event_history() -> Non
     assert snapshot.mode == "slow"
     assert snapshot.loading_delay_seconds == 4.0
     assert snapshot.sequence == 1
-    assert [(event.sequence, event.kind) for event in scenario.events()] == [(1, "reset")]
+    assert [(event.sequence, event.kind) for event in scenario.events()] == [
+        (1, "reset")
+    ]
 
 
 @pytest.mark.parametrize("mode", ["unknown", "", "NORMAL"])

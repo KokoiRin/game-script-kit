@@ -34,6 +34,6 @@
 
 ## 依据
 
-- [引擎结果](../../src/game_automation/portable/engine/runner.py)、[应用层归一化](../../src/game_automation/portable/application/script_run.py)。
+- [执行核心](../../src/game_automation/portable/engine/task_context.py)、[应用层结果归一化](../../src/game_automation/portable/application/script_run.py)。
 - [Run Plan](../../src/game_automation/portable/application/run_plan.py)、[运行事件](../../src/game_automation/portable/engine/run_events.py)。
 - [靶场真实 smoke](../../tools/visual_lab_star_smoke.py)、[独立目标应用](../../src/star_visual_lab/scenario.py)。

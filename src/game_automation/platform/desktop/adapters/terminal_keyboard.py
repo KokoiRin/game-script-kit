@@ -58,9 +58,7 @@ class TerminalKeyStateReader(KeyStateReader):
             self._old_termios = termios.tcgetattr(self._fd)
             tty.setcbreak(self._fd)
         except Exception as exc:
-            raise RuntimeError(
-                "failed to configure terminal keyboard input"
-            ) from exc
+            raise RuntimeError("failed to configure terminal keyboard input") from exc
 
     def _drain_available_keys(self) -> None:
         """读取当前终端中已经可用的按键事件。"""

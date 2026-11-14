@@ -20,8 +20,6 @@ from game_automation.portable.application.project_assets import (
     PROJECT_ROOT,
     image_asset_root,
 )
-from game_automation.portable.application.screen_state_config import load_screen_state_names
-from game_automation.portable.application.script_details import ScriptDetailsResult, describe_script_details
 from game_automation.portable.application.project_scripts import (
     ProjectScriptCatalogResult,
     load_project_script_catalog_result,
@@ -33,18 +31,24 @@ from game_automation.portable.application.run_plan import (
     ScriptPlanScriptResult,
     run_script_plan,
 )
+from game_automation.portable.application.screen_state_config import (
+    load_screen_state_names,
+)
+from game_automation.portable.application.script_details import (
+    ScriptDetailsResult,
+    describe_script_details,
+)
 from game_automation.portable.application.script_resources import (
     prepare_script_resources,
     script_state_config_path,
 )
-from game_automation.portable.scripts_manager import DEFAULT_SCRIPT_CATALOG
-from game_automation.portable.scripts_manager.catalog import ScriptCatalog, ScriptNotFoundError
+from game_automation.portable.scripts_manager.catalog import ScriptNotFoundError
 
 
 def _run_list(args: argparse.Namespace) -> int:
     """列出所有可用脚本。"""
     catalog_result = _load_cli_script_catalog_result(
-        args.project_root, include_builtin_scripts=args.workspace is None,
+        args.project_root,
     )
     for name in catalog_result.catalog.list_names():
         print(name)
@@ -62,7 +66,7 @@ def _run_script(args: argparse.Namespace) -> int:
         return 2
     try:
         script = _load_cli_script_catalog_result(
-            args.project_root, include_builtin_scripts=args.workspace is None,
+            args.project_root,
         ).catalog.get(args.name)
     except ScriptNotFoundError as exc:
         print(exc, file=sys.stderr)
@@ -138,7 +142,7 @@ def _run_plan(args: argparse.Namespace) -> int:
 def _resolve_plan_items(args: argparse.Namespace) -> tuple[ScriptPlanItem, ...] | int:
     """解析 Run Plan 中每个脚本名和该脚本自己的 dry-run 图片依赖。"""
     catalog_result = _load_cli_script_catalog_result(
-        args.project_root, include_builtin_scripts=args.workspace is None,
+        args.project_root,
     )
     scripts = []
     for script_name in args.names:
@@ -209,7 +213,9 @@ def _run_plan_item(
 
 def _print_run_plan_result(result: ScriptPlanResult) -> None:
     """打印一轮计划摘要和每个脚本捕获到的输出。"""
-    print(f"Run Plan: exit_code={result.exit_code} finish_reason={result.finish_reason}")
+    print(
+        f"Run Plan: exit_code={result.exit_code} finish_reason={result.finish_reason}"
+    )
     for item in result.items:
         _print_run_plan_item_result(item)
 
@@ -241,7 +247,7 @@ def _run_details(args: argparse.Namespace) -> int:
     """按名称展示脚本详情。"""
     try:
         script = _load_cli_script_catalog_result(
-            args.project_root, include_builtin_scripts=args.workspace is None,
+            args.project_root,
         ).catalog.get(args.name)
     except ScriptNotFoundError as exc:
         print(exc, file=sys.stderr)
@@ -259,14 +265,9 @@ def _run_details(args: argparse.Namespace) -> int:
     return details.exit_code
 
 
-def _load_cli_script_catalog_result(
-    project_root: Path,
-    *,
-    include_builtin_scripts: bool,
-) -> ProjectScriptCatalogResult:
-    """加载选定工作区脚本，显式工作区只包含自己的 JSON 脚本。"""
-    base_catalog = DEFAULT_SCRIPT_CATALOG if include_builtin_scripts else ScriptCatalog(())
-    return load_project_script_catalog_result(project_root, base_catalog=base_catalog)
+def _load_cli_script_catalog_result(project_root: Path) -> ProjectScriptCatalogResult:
+    """只从所选工作区发现 Python 任务，并保留逐文件诊断。"""
+    return load_project_script_catalog_result(project_root)
 
 
 def _print_script_config_errors(catalog_result: ProjectScriptCatalogResult) -> None:
@@ -288,7 +289,9 @@ def _describe_script(script, project_root: Path) -> ScriptDetailsResult:
     )
 
 
-def _resolve_dry_run_images(image_paths: list[str], project_root: Path) -> tuple[str, ...]:
+def _resolve_dry_run_images(
+    image_paths: list[str], project_root: Path
+) -> tuple[str, ...]:
     """把显式模拟图片的相对路径绑定工作区，绝对模板路径保持原样。"""
     return tuple(
         value if Path(value).is_absolute() else str((project_root / value).resolve())
@@ -304,7 +307,9 @@ def _merge_dry_run_images(
     return tuple(dict.fromkeys((*explicit_images, *script_images)))
 
 
-def _configured_screen_state_names(project_root: Path, script) -> tuple[str, ...] | None:
+def _configured_screen_state_names(
+    project_root: Path, script
+) -> tuple[str, ...] | None:
     """读取状态配置中的状态名，配置不可用时返回 None。"""
     try:
         return load_screen_state_names(script_state_config_path(script, project_root))
@@ -319,8 +324,7 @@ def _print_script_details(details: ScriptDetailsResult) -> None:
     if not details.steps:
         return
     print(f"脚本：{details.name}")
-    _print_section("步骤", details.steps)
-    _print_section("状态等待", tuple(f"等待状态: {state}" for state in details.state_waits))
+    _print_section("任务入口", details.steps)
     _print_section("点位依赖", details.point_dependencies)
     _print_section("图片依赖", details.image_dependencies)
     _print_section("依赖", details.dependencies)
@@ -386,10 +390,14 @@ def _run_recorder(args: argparse.Namespace) -> int:
 
 def _run_ui(args: argparse.Namespace) -> int:
     """启动 macOS 原生桌面壳，未指定工作区时由原生选择器选择。"""
-    from game_automation.platform.local_desktop.entrypoints.desktop_app import launch_desktop
+    from game_automation.platform.local_desktop.entrypoints.desktop_app import (
+        launch_desktop,
+    )
 
     try:
-        return launch_desktop(workspace=args.project_root if args.workspace is not None else None)
+        return launch_desktop(
+            workspace=args.project_root if args.workspace is not None else None
+        )
     except (OSError, RuntimeError) as exc:
         print(str(exc), file=sys.stderr)
         return 1
@@ -415,7 +423,9 @@ def _resolve_workspace(workspace: str | None) -> Path:
 
 def main(argv: list[str] | None = None) -> int:
     """解析工作区与子命令，完成路径校验后调用对应入口。"""
-    parser = argparse.ArgumentParser(prog="star", description="Game automation toolkit.")
+    parser = argparse.ArgumentParser(
+        prog="star", description="Game automation toolkit."
+    )
     parser.add_argument(
         "--workspace",
         metavar="PATH",
@@ -425,14 +435,22 @@ def main(argv: list[str] | None = None) -> int:
 
     subparsers.add_parser("list", help="List available scripts.")
 
-    details_parser = subparsers.add_parser("details", help="Show a named script's steps and dependencies.")
+    details_parser = subparsers.add_parser(
+        "details", help="Show a named script's steps and dependencies."
+    )
     details_parser.add_argument("name", help="Script name to inspect.")
 
     run_parser = subparsers.add_parser("run", help="Run a named script.")
     run_parser.add_argument("name", help="Script name to run.")
     mode = run_parser.add_mutually_exclusive_group()
-    mode.add_argument("--dry-run", action="store_true", help="Print planned operations without real mouse.")
-    mode.add_argument("--macos", action="store_true", help="Run with macOS adapter (default).")
+    mode.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print planned operations without real mouse.",
+    )
+    mode.add_argument(
+        "--macos", action="store_true", help="Run with macOS adapter (default)."
+    )
     run_parser.add_argument(
         "--dry-run-color",
         default="#000000",
@@ -465,11 +483,21 @@ def main(argv: list[str] | None = None) -> int:
         help="Raise the unique top-level window containing this title and bind its bounds.",
     )
 
-    run_plan_parser = subparsers.add_parser("run-plan", help="Run many named scripts in order.")
-    run_plan_parser.add_argument("names", nargs="+", help="Script names to run in order.")
+    run_plan_parser = subparsers.add_parser(
+        "run-plan", help="Run many named scripts in order."
+    )
+    run_plan_parser.add_argument(
+        "names", nargs="+", help="Script names to run in order."
+    )
     run_plan_mode = run_plan_parser.add_mutually_exclusive_group()
-    run_plan_mode.add_argument("--dry-run", action="store_true", help="Print planned operations without real mouse.")
-    run_plan_mode.add_argument("--macos", action="store_true", help="Run with macOS adapter (default).")
+    run_plan_mode.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print planned operations without real mouse.",
+    )
+    run_plan_mode.add_argument(
+        "--macos", action="store_true", help="Run with macOS adapter (default)."
+    )
     run_plan_parser.add_argument(
         "--dry-run-color",
         default="#000000",
@@ -507,13 +535,27 @@ def main(argv: list[str] | None = None) -> int:
         help="Raise and bind the matching top-level window before every real plan item.",
     )
 
-    recorder_parser = subparsers.add_parser("recorder", help="Record screen coordinates.")
-    recorder_parser.add_argument("--display-interval", type=float, default=1.0, help="Seconds between coordinate prints.")
-    recorder_parser.add_argument("--poll-interval", type=float, default=0.05, help="Seconds between keyboard polls.")
+    recorder_parser = subparsers.add_parser(
+        "recorder", help="Record screen coordinates."
+    )
+    recorder_parser.add_argument(
+        "--display-interval",
+        type=float,
+        default=1.0,
+        help="Seconds between coordinate prints.",
+    )
+    recorder_parser.add_argument(
+        "--poll-interval",
+        type=float,
+        default=0.05,
+        help="Seconds between keyboard polls.",
+    )
 
     subparsers.add_parser("ui", help="Start the macOS native desktop application.")
 
-    subparsers.add_parser("prepare", help="Open material preparation in the macOS native application.")
+    subparsers.add_parser(
+        "prepare", help="Open material preparation in the macOS native application."
+    )
 
     args = parser.parse_args(argv)
     try:

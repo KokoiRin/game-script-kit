@@ -84,7 +84,7 @@ class MacOSPointerDevice(InputDevice):
         except ModuleNotFoundError as exc:
             raise RuntimeError(
                 "pyautogui is required for the macOS pointer adapter. "
-                "Install dependencies with: pip install -e \".[dev]\""
+                'Install dependencies with: pip install -e ".[dev]"'
             ) from exc
         return pyautogui
 

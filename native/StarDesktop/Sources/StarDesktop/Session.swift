@@ -25,6 +25,7 @@ struct DesktopError: LocalizedError {
 @MainActor
 final class DesktopSession: ObservableObject {
     enum Phase { case idle, starting, ready, stopping, failed }
+    enum RunPhase { case idle, running, stopping, finished }
     typealias Object = [String: Any]
     typealias Reply = (Result<Object, Error>) -> Void
 
@@ -49,7 +50,7 @@ final class DesktopSession: ObservableObject {
     @Published var selectedScript = ""
     @Published var scriptDetails = ""
     @Published var runLog = ""
-    @Published var runRunning = false
+    @Published private(set) var runPhase: RunPhase = .idle
     @Published var observationRunning = false
     @Published var observationHz = 2
     @Published var confirmObservation = true
@@ -69,7 +70,19 @@ final class DesktopSession: ObservableObject {
     @Published var dryRun = true
     @Published var dryRunColor = "#000000"
     @Published var dryRunState = "未知"
+    var runRunning: Bool { runPhase == .running || runPhase == .stopping }
     var canOperate: Bool { phase == .ready && !busy && !runRunning && !observationRunning }
+    var canSwitchWorkspace: Bool {
+        !busy && !runRunning && !observationRunning && phase != .starting && phase != .stopping
+    }
+    var canRestartBackend: Bool {
+        !busy && runPhase != .running && !observationRunning && phase != .starting && phase != .stopping &&
+            workspace != nil && python != nil && sourceRoot != nil
+    }
+    var canStopScript: Bool { phase == .ready && runPhase == .running && !busy }
+    var canStopObservation: Bool { phase == .ready && observationRunning && !observationStopping }
+    var canCheckPermissions: Bool { canOperate && !checkingPermissions }
+    var showsProgress: Bool { busy || phase == .starting || phase == .stopping || runPhase == .stopping }
     var processRunning: Bool { process?.isRunning ?? false }
 
     private var process: Process?
@@ -82,9 +95,11 @@ final class DesktopSession: ObservableObject {
     private var deadlines: [Int: DispatchWorkItem] = [:]
     private var pollTimer: Timer?
     private var polling = false
+    private var runGeneration = UUID()
     private var observationPolling = false
     private var observationTimer: Timer?
     private var stopCompletions: [() -> Void] = []
+    private var pendingRestart: UUID?
     private var python: URL?
     private var sourceRoot: URL?
     private var ownsProcessGroup = false
@@ -95,11 +110,14 @@ final class DesktopSession: ObservableObject {
     private var observationStopping = false
 
     func start(workspace: URL, python: URL, sourceRoot: URL) {
-        guard !processRunning else { return }
+        guard process == nil else { return }
         self.workspace = workspace
         self.python = python
         self.sourceRoot = sourceRoot
         phase = .starting
+        runGeneration = UUID()
+        runPhase = .idle
+        polling = false
         ownsProcessGroup = false
         observationGeneration = UUID()
         observationGrace?.cancel(); observationGrace = nil
@@ -181,19 +199,25 @@ final class DesktopSession: ObservableObject {
         }
     }
 
-    func restart() {
-        guard !processRunning, let workspace, let python, let sourceRoot else { return }
-        start(workspace: workspace, python: python, sourceRoot: sourceRoot)
+    func stop(completion: @escaping () -> Void) {
+        pendingRestart = nil
+        beginStop(completion: completion)
     }
 
-    func stop(completion: @escaping () -> Void) {
-        guard let child = process, child.isRunning else {
+    private func beginStop(completion: @escaping () -> Void) {
+        guard let child = process else {
             completion()
             return
         }
         stopCompletions.append(completion)
+        if !child.isRunning {
+            didExit(child)
+            return
+        }
         guard phase != .stopping else { return }
         phase = .stopping; busy = true
+        runGeneration = UUID()
+        if runRunning { runPhase = .stopping }
         observationGeneration = UUID()
         observationGrace?.cancel(); observationGrace = nil
         observationDeadline = nil
@@ -242,7 +266,8 @@ final class DesktopSession: ObservableObject {
         observationTimer?.invalidate(); observationTimer = nil
         deadlines.values.forEach { $0.cancel() }; deadlines.removeAll()
         let replies = pending.values.map { $0 }; pending.removeAll()
-        busy = false; polling = false; runRunning = false
+        busy = false; polling = false
+        if runRunning { runPhase = .finished }
         observationGeneration = UUID()
         observationGrace?.cancel(); observationGrace = nil
         observationDeadline = nil; observationStopping = false
@@ -342,7 +367,7 @@ final class DesktopSession: ObservableObject {
 
     // 权限由实际执行后台查询，界面不以自身授权代替子进程授权。
     func refreshPermissions() {
-        guard canOperate, !checkingPermissions else { return }
+        guard canCheckPermissions else { return }
         checkingPermissions = true
         call("permissions.status") { [weak self] reply in
             guard let self else { return }
@@ -355,7 +380,7 @@ final class DesktopSession: ObservableObject {
     }
 
     func requestPermission(_ kind: String) {
-        guard canOperate, !checkingPermissions else { return }
+        guard canCheckPermissions else { return }
         busy = true; errorMessage = ""
         status = "请按 macOS 提示确认权限，完成后返回 Star。"
         // 截图权限提示可能等待用户选择，不能套用普通操作的短超时。
@@ -377,9 +402,13 @@ final class DesktopSession: ObservableObject {
     }
 
     func restartBackend() {
-        guard !busy, !runRunning, let workspace, let python, let sourceRoot else { return }
-        stop { [weak self] in
-            self?.start(workspace: workspace, python: python, sourceRoot: sourceRoot)
+        guard canRestartBackend, let workspace, let python, let sourceRoot else { return }
+        let request = UUID()
+        pendingRestart = request
+        beginStop { [weak self] in
+            guard let self, self.pendingRestart == request else { return }
+            self.pendingRestart = nil
+            self.start(workspace: workspace, python: python, sourceRoot: sourceRoot)
         }
     }
 
@@ -695,22 +724,28 @@ final class DesktopSession: ObservableObject {
     }
 
     func startScript() {
-        guard dryRun || requirePermission("accessibility") else { return }
+        guard canOperate, dryRun || requirePermission("accessibility") else { return }
+        runGeneration = UUID()
+        let generation = runGeneration
+        polling = false
+        runPhase = .idle
         runLog = ""
         perform("script.start", ["name": selectedScript, "dry_run": dryRun,
                                  "dry_run_color": dryRunColor, "dry_run_screen_state": dryRunState]) { [weak self] result in
-            self?.renderRun(result)
+            guard let self, self.runGeneration == generation, self.phase == .ready else { return }
+            self.renderRun(result)
         }
     }
 
     func stopScript() {
-        guard phase == .ready, runRunning, !busy else { return }
-        busy = true
+        guard canStopScript else { return }
+        runPhase = .stopping
+        status = "已请求停止，正在等待当前操作结束。等待期间可重启后台回收进程。"
+        let generation = runGeneration
         call("script.stop") { [weak self] reply in
-            guard let self else { return }
-            self.busy = false
+            guard let self, self.runGeneration == generation, self.phase == .ready else { return }
             switch reply {
-            case .success(let result): self.renderRun(result); self.status = "已请求停止，正在等待当前操作结束…"
+            case .success(let result): self.renderRun(result)
             case .failure(let error): self.errorMessage = error.localizedDescription
             }
         }
@@ -719,22 +754,32 @@ final class DesktopSession: ObservableObject {
     private func pollRun() {
         guard phase == .ready, runRunning, !polling else { return }
         polling = true
+        let generation = runGeneration
         call("script.status") { [weak self] reply in
-            guard let self else { return }
+            guard let self, self.runGeneration == generation, self.phase == .ready else { return }
             self.polling = false
             if case .success(let result) = reply { self.renderRun(result) }
         }
     }
 
     private func renderRun(_ result: Object) {
-        runRunning = result["running"] as? Bool ?? false
+        let running = result["running"] as? Bool ?? false
+        // 已确认结束的同次运行不能被更早发出的在途状态恢复为运行中。
+        guard runPhase != .finished else { return }
+        if !running { runPhase = .finished }
+        else if runPhase != .stopping { runPhase = .running }
         let stdout = result["stdout"] as? String ?? "", stderr = result["stderr"] as? String ?? ""
         let text = stdout + (stderr.isEmpty ? "" : "\n提示与错误：\n" + stderr)
         if runLog != text { runLog = text }
         let reason = result["finish_reason"] as? String ?? "idle"
         let labels = ["completed": "脚本执行完成", "cancelled": "已取消", "configuration_failed": "配置错误",
-                      "setup_failed": "运行环境不可用", "failed": "运行失败", "stopped_unmet_condition": "条件未满足，已停止", "idle": "脚本未运行"]
-        status = runRunning ? "脚本运行中…" : (labels[reason] ?? reason)
+                      "setup_failed": "运行环境不可用", "failed": "运行失败", "timed_out": "任务等待超时",
+                      "cleanup_failed": "运行资源回收失败", "stopped_unmet_condition": "条件未满足，已停止", "idle": "脚本未运行"]
+        switch runPhase {
+        case .stopping: status = "已请求停止，正在等待当前操作结束。等待期间可重启后台回收进程。"
+        case .running: status = "脚本运行中…"
+        case .idle, .finished: status = labels[reason] ?? reason
+        }
     }
 
     private func pretty(_ value: Object) -> String {

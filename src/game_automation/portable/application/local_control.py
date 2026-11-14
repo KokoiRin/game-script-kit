@@ -9,42 +9,52 @@ from __future__ import annotations
 import io
 import threading
 from collections import deque
-from contextlib import redirect_stderr, redirect_stdout
 from collections.abc import Callable
+from contextlib import redirect_stderr, redirect_stdout
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from game_automation.portable.application.config_script_loader import ScriptConfigError
 from game_automation.portable.application.project_assets import (
     IMAGE_ASSET_SUFFIXES,
     PROJECT_ROOT,
     image_asset_root,
     screen_state_config_path,
 )
-from game_automation.portable.application.screen_state_config import load_screen_state_names
+from game_automation.portable.application.runtime_ports import RuntimeFactory
+from game_automation.portable.application.screen_state_config import (
+    load_screen_state_names,
+)
 from game_automation.portable.application.screen_state_reader import (
     ProjectScreenStateReader,
     ScreenImageBatchLocatorFactory,
 )
-from game_automation.portable.application.script_details import ScriptDetailsResult, describe_script_details
+from game_automation.portable.application.script_details import (
+    ScriptDetailsResult,
+    describe_script_details,
+)
 from game_automation.portable.application.script_resources import (
     prepare_script_resources,
     script_state_config_path,
 )
-from game_automation.portable.application.runtime_ports import RuntimeFactory
 from game_automation.portable.application.script_run import (
-    InputDeviceFactory,
     ApplicationActivatorFactory,
     ApplicationWindowControllerFactory,
+    InputDeviceFactory,
     PixelColorReaderFactory,
     ScreenImageLocatorFactory,
     run_script,
 )
-from game_automation.portable.domain import Script
+from game_automation.portable.application.task_discovery import TaskLoadError
+from game_automation.portable.domain.task import FunctionTask
 from game_automation.portable.engine.ports import ScreenStateReader
-from game_automation.portable.engine.run_events import ScriptRunEvent, format_script_run_event
-from game_automation.portable.scripts_manager import DEFAULT_SCRIPT_CATALOG
-from game_automation.portable.scripts_manager.catalog import ScriptCatalog, ScriptNotFoundError
+from game_automation.portable.engine.run_events import (
+    ScriptRunEvent,
+    format_script_run_event,
+)
+from game_automation.portable.scripts_manager.catalog import (
+    ScriptCatalog,
+    ScriptNotFoundError,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -109,7 +119,12 @@ class _ThreadSafeRunLog:
     def log_event(self, event: ScriptRunEvent) -> None:
         """记录结构化运行事件，并同步追加可读文本日志。"""
         with self._lock:
-            self._events.append(replace(event, details={key: value[:4096] for key, value in event.details.items()}))
+            self._events.append(
+                replace(
+                    event,
+                    details={key: value[:4096] for key, value in event.details.items()},
+                )
+            )
             self._append(self._stdout, f"{format_script_run_event(event)}\n")
 
     def write_stdout(self, text: str) -> None:
@@ -209,9 +224,9 @@ class _BackgroundScriptRun:
 class LocalControlApplication:
     def __init__(
         self,
-        catalog: ScriptCatalog = DEFAULT_SCRIPT_CATALOG,
+        catalog: ScriptCatalog | None = None,
         *,
-        script_config_errors: tuple[ScriptConfigError, ...] = (),
+        script_config_errors: tuple[TaskLoadError, ...] = (),
         project_root: Path = PROJECT_ROOT,
         real_runtime_factory: RuntimeFactory | None = None,
         real_device_factory: InputDeviceFactory | None = None,
@@ -219,12 +234,15 @@ class LocalControlApplication:
         real_image_locator_factory: ScreenImageLocatorFactory | None = None,
         real_image_batch_locator_factory: ScreenImageBatchLocatorFactory | None = None,
         real_application_activator_factory: ApplicationActivatorFactory | None = None,
-        real_application_window_controller_factory: ApplicationWindowControllerFactory | None = None,
+        real_application_window_controller_factory: ApplicationWindowControllerFactory
+        | None = None,
     ) -> None:
         """注入脚本目录、项目路径和运行所需的外部能力工厂。"""
         self._real_application_activator_factory = real_application_activator_factory
-        self._real_application_window_controller_factory = real_application_window_controller_factory
-        self._catalog = catalog
+        self._real_application_window_controller_factory = (
+            real_application_window_controller_factory
+        )
+        self._catalog = catalog if catalog is not None else ScriptCatalog()
         self._script_config_errors = script_config_errors
         self._project_root = project_root
         self._real_runtime_factory = real_runtime_factory
@@ -245,14 +263,16 @@ class LocalControlApplication:
         """返回 UI 可展示的脚本名称列表。"""
         return self._catalog.list_names()
 
-    def list_script_config_errors(self) -> tuple[ScriptConfigError, ...]:
+    def list_script_config_errors(self) -> tuple[TaskLoadError, ...]:
         """返回文件脚本加载时被隔离的配置错误。"""
         return self._script_config_errors
 
     def list_screen_state_names(self) -> tuple[str, ...]:
         """列出状态配置中的界面状态名称，配置不可用时返回空列表。"""
         try:
-            names = load_screen_state_names(screen_state_config_path(self._project_root))
+            names = load_screen_state_names(
+                screen_state_config_path(self._project_root)
+            )
         except ValueError:
             return ()
         return () if names is None else names
@@ -285,7 +305,9 @@ class LocalControlApplication:
         try:
             script = self._script_with_shared_resources(self._catalog.get(name))
         except ScriptNotFoundError as exc:
-            return ControlResult(exit_code=1, stderr=str(exc), finish_reason="script_not_found")
+            return ControlResult(
+                exit_code=1, stderr=str(exc), finish_reason="script_not_found"
+            )
         except (LookupError, ValueError) as exc:
             return ControlResult(
                 exit_code=2,
@@ -389,7 +411,9 @@ class LocalControlApplication:
         """请求停止当前后台脚本运行。"""
         with self._run_lock:
             if self._current_run is None:
-                return ScriptRunStatus(running=False, exit_code=0, stderr="no script is running\n")
+                return ScriptRunStatus(
+                    running=False, exit_code=0, stderr="no script is running\n"
+                )
             self._current_run.cancellation.cancel()
             return self._current_run.snapshot()
 
@@ -404,7 +428,7 @@ class LocalControlApplication:
 
     def _run_script_session(
         self,
-        script: Script,
+        script: FunctionTask,
         dry_run: bool,
         dry_run_color: str,
         dry_run_screen_state: str,
@@ -414,7 +438,10 @@ class LocalControlApplication:
         """在后台线程中运行脚本并写入会话状态。"""
         exit_code, finish_reason = 1, "failed"
         try:
-            with redirect_stdout(session.log.stdout_writer()), redirect_stderr(session.log.stderr_writer()):
+            with (
+                redirect_stdout(session.log.stdout_writer()),
+                redirect_stderr(session.log.stderr_writer()),
+            ):
                 result = run_script(
                     script,
                     dry_run=dry_run,
@@ -438,10 +465,13 @@ class LocalControlApplication:
         except Exception as exc:
             message = f"unexpected script run failure: {type(exc).__name__}: {exc}"
             session.log.write_stderr(f"{message}\n")
-            session.log.log_event(ScriptRunEvent(
-                event_type="run_finished", status="failed",
-                details={"exit_code": "1", "error": message},
-            ))
+            session.log.log_event(
+                ScriptRunEvent(
+                    event_type="run_finished",
+                    status="failed",
+                    details={"exit_code": "1", "error": message},
+                )
+            )
         finally:
             # 会话状态由本层持有，即使用例漏掉异常归一化也必须释放运行槽位。
             session.finish(exit_code, finish_reason)
@@ -450,14 +480,18 @@ class LocalControlApplication:
         """返回本地 UI 允许读取模板图片的项目内目录。"""
         return image_asset_root(self._project_root)
 
-    def _configured_screen_state_names_for_readiness(self, script: Script) -> tuple[str, ...] | None:
+    def _configured_screen_state_names_for_readiness(
+        self, script: FunctionTask
+    ) -> tuple[str, ...] | None:
         """读取状态名用于详情检查，配置不可用时返回 None。"""
         try:
-            return load_screen_state_names(script_state_config_path(script, self._project_root))
+            return load_screen_state_names(
+                script_state_config_path(script, self._project_root)
+            )
         except ValueError:
             return None
 
-    def _script_with_shared_resources(self, script: Script) -> Script:
+    def _script_with_shared_resources(self, script: FunctionTask) -> FunctionTask:
         """按脚本需要合并状态配置里的共享搜索资源。"""
         return prepare_script_resources(script, self._project_root)
 
