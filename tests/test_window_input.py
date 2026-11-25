@@ -587,3 +587,25 @@ def test_focus_window_change_releases_only_attempted_modifier():
         MacOSWindowInputDevice(Session(q), keyboard_focus=read).hotkey(("command", "a"))
     assert calls == [42, 42]
     assert [event["kind"] for _, event in q.events] == [(55, True), (55, False)]
+
+
+def test_hold_mouse_does_not_sleep_negative_when_clock_passes_deadline():
+    """按下保持期间时钟跨过截止时间时，不得向 sleep 传入负值。"""
+    q = Quartz()
+    session = Session(q)
+    now = [10.0]
+
+    def check_cancelled():
+        """模拟取消检查期间时钟推进越过按住截止时间。"""
+        now[0] += 0.06
+
+    def sleep(amount):
+        """拒绝非正等待时长，与标准库 time.sleep 语义一致。"""
+        assert amount > 0
+        now[0] += amount
+
+    session.check_cancelled = check_cancelled
+    MacOSWindowInputDevice(session, clock=lambda: now[0], sleep=sleep).click(
+        Point(105, 206)
+    )
+    assert [event["kind"] for _, event in q.events] == ["move", "down", "up"]

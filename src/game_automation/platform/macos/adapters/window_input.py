@@ -367,9 +367,12 @@ class MacOSWindowInputDevice:
     def _hold_mouse(self, seconds):
         """按下后仅检查取消，避免恢复等待阻止必要释放。"""
         deadline = self._clock() + seconds
-        while self._clock() < deadline:
+        while True:
             self.session.check_cancelled()
-            self._sleep(min(0.02, deadline - self._clock()))
+            remaining = deadline - self._clock()
+            if remaining <= 0:
+                return
+            self._sleep(min(0.02, remaining))
 
     def hotkey(self, keys):
         """按序发送按键并在失败或取消后逆序释放已尝试按下的键。"""
