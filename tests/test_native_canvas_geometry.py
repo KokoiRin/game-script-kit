@@ -16,7 +16,7 @@ def test_drag_includes_last_pixel_in_both_directions(tmp_path):
     """全图、反向和单像素框选都保留包含式端点。"""
     source = (
         Path(__file__).resolve().parents[1]
-        / "native/StarDesktop/Sources/StarDesktop/CanvasGeometry.swift"
+        / "native/StarDesktop/Sources/StarDesktop/Preparation/CanvasGeometry.swift"
     )
     harness = tmp_path / "main.swift"
     harness.write_text("""import Foundation

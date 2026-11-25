@@ -18,7 +18,7 @@ struct TargetWindowPicker: View {
                     applicationControls
                     windowControl
                     if showCapture {
-                        Button("截取画面", action: session.capture).disabled(session.selectedWindow.isEmpty)
+                        Button("截取画面", action: session.capture).disabled(session.preparation.selectedWindow.isEmpty)
                     }
                 }
             }
@@ -27,20 +27,20 @@ struct TargetWindowPicker: View {
 
     private var applicationControls: some View {
         HStack {
-            TextField("目标应用名", text: $session.application)
-                .onChange(of: session.application) { _ in
-                    session.windows = []; session.selectedWindow = ""; session.clearFrame()
+            TextField("目标应用名", text: $session.preparation.application)
+                .onChange(of: session.preparation.application) { _ in
+                    session.preparation.windows = []; session.preparation.selectedWindow = ""; session.clearFrame()
                 }
-            Button("读取窗口", action: session.readWindows).disabled(session.application.isEmpty)
+            Button("读取窗口", action: session.readWindows).disabled(session.preparation.application.isEmpty)
         }
     }
 
     private var windowControl: some View {
-        Picker("窗口", selection: $session.selectedWindow) {
+        Picker("窗口", selection: $session.preparation.selectedWindow) {
             Text("请选择窗口").tag("")
-            ForEach(session.windows) { Text($0.title).tag($0.id) }
+            ForEach(session.preparation.windows) { Text($0.title).tag($0.id) }
         }.frame(minWidth: 180)
-            .onChange(of: session.selectedWindow) { _ in session.clearFrame() }
+            .onChange(of: session.preparation.selectedWindow) { _ in session.clearFrame() }
     }
 }
 
@@ -81,40 +81,40 @@ struct ObservationView: View {
 
     private var settings: some View {
         HStack {
-            Picker("检测频率", selection: $session.observationHz) {
+            Picker("检测频率", selection: $session.observation.hz) {
                 Text("每秒 1 次").tag(1)
                 Text("每秒 2 次").tag(2)
                 Text("每秒 5 次").tag(5)
             }.frame(width: compact ? 190 : 200)
-            Toggle("连续两次确认", isOn: $session.confirmObservation).toggleStyle(.checkbox)
+            Toggle("连续两次确认", isOn: $session.observation.confirm).toggleStyle(.checkbox)
         }.disabled(!session.canOperate)
     }
 
     private var actions: some View {
         HStack {
             Button("开始观察", action: session.startObservation)
-                .disabled(!session.canOperate || session.selectedWindow.isEmpty)
+                .disabled(!session.canOperate || session.preparation.selectedWindow.isEmpty)
             Button("停止观察", action: session.stopObservation)
-                .disabled(!session.observationRunning || session.phase != .ready)
+                .disabled(!session.observation.running || session.phase != .ready)
         }
     }
 
     private var currentState: some View {
         GroupBox("当前状态") {
             VStack(alignment: .leading, spacing: 8) {
-                Text(session.observationState).font(.system(size: compact ? 28 : 30, weight: .semibold))
+                Text(session.observation.state).font(.system(size: compact ? 28 : 30, weight: .semibold))
                     .fixedSize(horizontal: false, vertical: true)
-                Text(session.observationPhase).foregroundStyle(.secondary)
-                Text("本帧候选：" + session.observationCandidate).foregroundStyle(.secondary)
-                Text(session.observationMetrics).font(.caption).foregroundStyle(.secondary)
+                Text(session.observation.phase).foregroundStyle(.secondary)
+                Text("本帧候选：" + session.observation.candidate).foregroundStyle(.secondary)
+                Text(session.observation.metrics).font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }.frame(maxWidth: .infinity, alignment: .leading).padding(8)
         }
     }
 
     @ViewBuilder private var captureError: some View {
-        if !session.observationError.isEmpty {
-            Label(session.observationError, systemImage: "exclamationmark.triangle")
+        if !session.observation.error.isEmpty {
+            Label(session.observation.error, systemImage: "exclamationmark.triangle")
                 .foregroundStyle(.orange).font(.callout).textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -122,10 +122,10 @@ struct ObservationView: View {
 
     private var performance: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(session.observationPerformanceSummary).font(.caption).foregroundStyle(.secondary)
+            Text(session.observation.performanceSummary).font(.caption).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             DisclosureGroup("性能") {
-                Text(session.observationPerformanceDetails).font(.caption).textSelection(.enabled)
+                Text(session.observation.performanceDetails).font(.caption).textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading).fixedSize(horizontal: false, vertical: true)
             }
         }
@@ -133,14 +133,14 @@ struct ObservationView: View {
 
     private var evidence: some View {
         GroupBox("匹配证据 · 窗口相对坐标") {
-            ScrollView { evidenceText(session.observationEvidence) }
+            ScrollView { evidenceText(session.observation.evidence) }
                 .frame(minHeight: compact ? 100 : 140, maxHeight: compact ? 170 : .infinity)
         }
     }
 
     private var history: some View {
         GroupBox("状态变化") {
-            ScrollView { evidenceText(session.observationHistory) }
+            ScrollView { evidenceText(session.observation.history) }
                 .frame(minHeight: compact ? 80 : 140, maxHeight: compact ? 140 : .infinity)
         }
     }
@@ -152,7 +152,7 @@ struct ObservationView: View {
                 Spacer()
                 Button("重新加载", action: session.reloadObservationRules).disabled(!session.canOperate)
             }
-            ScrollView { evidenceText(session.observationRuleSummary) }.frame(height: 65)
+            ScrollView { evidenceText(session.observation.ruleSummary) }.frame(height: 65)
         }
     }
 

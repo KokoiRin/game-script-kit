@@ -69,6 +69,6 @@ Linux 可验证协议、子进程 EOF、单实例锁、等待取消、缓存与�
 
 ## 依据
 
-- [原生会话](../../native/StarDesktop/Sources/StarDesktop/Session.swift)、[应用入口](../../native/StarDesktop/Sources/StarDesktop/Main.swift)。
+- [原生会话](../../native/StarDesktop/Sources/StarDesktop/Backend/Session.swift)、[应用入口](../../native/StarDesktop/Sources/StarDesktop/App/Main.swift)。
 - [后台协议](../../src/game_automation/platform/local_desktop/entrypoints/desktop_backend.py)、[启动器](../../src/game_automation/platform/local_desktop/entrypoints/desktop_app.py)。
 - [构建说明](../../native/StarDesktop/README.md)、[进程测试](../../tests/test_desktop_backend.py)。

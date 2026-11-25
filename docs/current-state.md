@@ -44,7 +44,7 @@
 平台初始化或执行抛出普通异常时，用例返回失败原因；后台会话还有独立兜底，记录结束状态。普通执行失败完成资源回收后可重新运行；原生停流失败则保留进程级故障租约，后台重启前不能建立新的原生会话。
 原生会话通过标准管道请求与后台通信。超时或异常退出显示诊断并回收进程，不自动重放动作。关闭窗口、Command+Q 与信号退出共用关闭路径；后台收到 shutdown、EOF 或 SIGTERM 时取消并等待线程，释放临时帧和工作区锁。
 原生运行页按任务 `target` 打开原生窗口会话；没有暂停、单步执行或从中断点恢复。未声明原生后端的真实运行直接失败。
-入口代码见 [CLI](../src/game_automation/platform/local_desktop/entrypoints/cli.py)、[后台协议](../src/game_automation/platform/local_desktop/entrypoints/desktop_backend.py) 和 [原生会话](../native/StarDesktop/Sources/StarDesktop/Session.swift)。
+入口代码见 [CLI](../src/game_automation/platform/local_desktop/entrypoints/cli.py)、[后台协议](../src/game_automation/platform/local_desktop/entrypoints/desktop_backend.py) 和 [原生会话](../native/StarDesktop/Sources/StarDesktop/Backend/Session.swift)。
 
 ## 素材准备与执行隔离
 

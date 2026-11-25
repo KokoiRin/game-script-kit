@@ -15,7 +15,7 @@ def test_compact_pages_and_wide_restore_respect_visible_screen(tmp_path):
     """运行和观察采用窄版，准备页恢复宽版并约束屏幕边界。"""
     source = (
         Path(__file__).resolve().parents[1]
-        / "native/StarDesktop/Sources/StarDesktop/WindowLayout.swift"
+        / "native/StarDesktop/Sources/StarDesktop/App/WindowLayout.swift"
     )
     harness = tmp_path / "main.swift"
     harness.write_text("""import Foundation

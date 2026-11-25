@@ -114,10 +114,11 @@ PYTHONPATH=src .venv/bin/python tools/benchmark_observation.py \
 
 ## 职责
 
-- `Main.swift`：原生窗口、菜单、工作区选择与统一退出路径。
-- `Session.swift`：后台监督、请求超时、管道与日志回收、单帧缓存。
-- `WorkspaceView.swift`：素材准备与任务运行界面。
-- `Canvas.swift`：原生截图画布、像素取点及框选，不解释任务。
+- `App/`：`Main.swift`（原生窗口、菜单、工作区选择与统一退出路径）、`WorkspaceView.swift`（主框架、权限区、状态栏与页面路由）、`CompanionWindowController.swift`、`WindowLayout.swift`。
+- `Backend/`：`BackendClient.swift`（子进程、管道拆帧、JSON-RPC 超时与分级回收）、`Session.swift`（会话生命周期与跨领域协调）、`PermissionState.swift`（系统权限状态与检测）、`DiagnosticsLog.swift`（诊断日志落盘与轮转）。
+- `Preparation/`：`PreparationView.swift`（素材准备页）、`PreparationState.swift`（窗口/冻帧/素材状态与动作）、`Canvas.swift`、`CanvasGeometry.swift`（原生截图画布、像素取点及框选，不解释任务）。
+- `Observation/`：`ObservationView.swift`（实时状态识别页与目标窗口选择器）、`ObservationState.swift`（观察状态与轮询动作）、`ObservationFormatter.swift`（规则/证据/性能文案格式化）。
+- `Execution/`：`ExecutionView.swift`（脚本运行页与流程编排编辑器）、`ExecutionState.swift`（运行/编排状态与轮询动作）、`PlanDraft.swift`（编排条目、草稿指纹与提交前校验）。
 - Python `desktop_backend.py`：串行协议分发、后台执行会话、文件锁与临时 PNG。
 
 运行中禁止截取新画面或重复启动任务。关闭时先请求取消、等待线程结束；平台

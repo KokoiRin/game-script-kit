@@ -162,7 +162,7 @@ func exercise() throws {
         session.stop { stopped = true }
         waitFor({ stopped }, timeout: 12)
     }
-    waitFor({ session.phase == .ready && session.permissionsKnown })
+    waitFor({ session.phase == .ready && session.permissions.known })
     try check(session.phase == .ready && session.canOperate, "backend becomes ready")
     waitFor({ session.companionTarget != nil })
     try check(session.companionTarget == CompanionTarget(pid: 1234, windowNumber: 5678),
@@ -170,27 +170,27 @@ func exercise() throws {
     try check(session.canSwitchWorkspace && session.canRestartBackend, "idle backend permits management")
     if scenario == "plan-editor" {
         session.reloadScripts()
-        waitFor({ !session.busy && session.planEntries.count == 1 })
-        try check(session.planEntries.first?.waitSeconds == "600", "saved wait is loaded")
-        session.selectedScript = "second"
+        waitFor({ !session.busy && session.execution.planEntries.count == 1 })
+        try check(session.execution.planEntries.first?.waitSeconds == "600", "saved wait is loaded")
+        session.execution.selectedScript = "second"
         session.addPlanEntry()
         session.addPlanEntry()
-        let duplicate = session.planEntries.last!.id
+        let duplicate = session.execution.planEntries.last!.id
         session.movePlanEntry(duplicate, by: -1)
         session.removePlanEntry(duplicate)
-        try check(session.planEntries.map(\\.name) == ["first", "second"], "duplicate removal uses occurrence identity")
-        session.planEntries[0].waitSeconds = "12"
+        try check(session.execution.planEntries.map(\\.name) == ["first", "second"], "duplicate removal uses occurrence identity")
+        session.execution.planEntries[0].waitSeconds = "12"
         session.reloadScripts()
         waitFor({ !session.busy })
-        try check(session.planEntries[0].waitSeconds == "12", "reload preserves unsaved edits")
+        try check(session.execution.planEntries[0].waitSeconds == "12", "reload preserves unsaved edits")
         session.savePlan()
         waitFor({ !session.busy })
         session.reloadScripts()
         waitFor({ !session.busy })
-        try check(session.planEntries[0].waitSeconds == "12", "save survives reload")
-        session.useSavedPlan = true
+        try check(session.execution.planEntries[0].waitSeconds == "12", "save survives reload")
+        session.execution.useSavedPlan = true
         session.startScript()
-        waitFor({ session.runPhase == .finished })
+        waitFor({ session.execution.runPhase == .finished })
         try check(session.status.contains("完成"), "submitted plan finishes")
         let starts = events(root).filter { $0["event"] as? String == "plan.start" }
         let params = starts.first?["params"] as? [String: Any]
@@ -199,15 +199,15 @@ func exercise() throws {
         try check(count(root, "plan.save") == 1, "run does not coordinate a second save request")
         return
     }
-    session.selectedScript = scenario
+    session.execution.selectedScript = scenario
     session.startScript()
-    waitFor({ session.runRunning })
-    try check(session.runPhase == .running, "script starts")
+    waitFor({ session.execution.isRunning })
+    try check(session.execution.runPhase == .running, "script starts")
     try check(!session.canOperate && !session.canSwitchWorkspace && !session.canRestartBackend,
               "actual running script retains resource ownership")
     if scenario == "natural" || scenario == "timed-out" || scenario == "cleanup-error" {
-        waitFor({ !session.runRunning })
-        try check(session.runPhase == .finished && session.canOperate, "normal completion releases execution")
+        waitFor({ !session.execution.isRunning })
+        try check(session.execution.runPhase == .finished && session.canOperate, "normal completion releases execution")
         let expected = scenario == "timed-out" ? "超时" : scenario == "cleanup-error" ? "回收失败" : "完成"
         try check(session.status.contains(expected), "execution outcome has a visible localized status")
         return
@@ -218,25 +218,25 @@ func exercise() throws {
     }
     session.stopScript()
     session.stopScript()
-    try check(session.runPhase == .stopping && !session.canStopScript, "stop intent is immediate and idempotent")
+    try check(session.execution.runPhase == .stopping && !session.canStopScript, "stop intent is immediate and idempotent")
     if scenario == "confirmed" || scenario == "race" || scenario == "terminal-race" {
-        waitFor({ !session.runRunning })
-        try check(session.runPhase == .finished && session.canOperate, "confirmed stop releases execution")
+        waitFor({ !session.execution.isRunning })
+        try check(session.execution.runPhase == .finished && session.canOperate, "confirmed stop releases execution")
         try check(session.status == "已取消", "confirmed stop keeps terminal result")
-        try check(!session.runLog.contains("stale-run"), "an older running reply cannot replace completion")
+        try check(!session.execution.runLog.contains("stale-run"), "an older running reply cannot replace completion")
         if scenario == "race" {
-            session.selectedScript = "stuck"
+            session.execution.selectedScript = "stuck"
             session.startScript()
-            waitFor({ session.runRunning })
+            waitFor({ session.execution.isRunning })
             waitFor({ false }, timeout: 0.8)
-            try check(session.runPhase == .running && !session.runLog.contains("stale-run"),
+            try check(session.execution.runPhase == .running && !session.execution.runLog.contains("stale-run"),
                       "old run responses cannot finish a new run")
         }
         try check(count(root, "script.stop") == 1, "repeated stop sends one command")
         return
     }
     waitFor({ false }, timeout: scenario == "stuck" ? 4 : 0.8)
-    try check(session.runRunning && session.runPhase == .stopping, "unconfirmed stop retains actual occupancy")
+    try check(session.execution.isRunning && session.execution.runPhase == .stopping, "unconfirmed stop retains actual occupancy")
     try check(session.status.contains("等待"), "polling preserves stop intent")
     try check(!session.canOperate && !session.canSwitchWorkspace && session.canRestartBackend,
               "stopping permits explicit recovery while retaining workspace")
@@ -259,13 +259,13 @@ func exercise() throws {
     session.restartBackend()
     try check(session.companionTarget == nil, "backend shutdown detaches its companion")
     session.start(workspace: root, python: python, sourceRoot: root)
-    try check(session.phase == .stopping && session.runRunning, "restart waits for actual old process exit")
+    try check(session.phase == .stopping && session.execution.isRunning, "restart waits for actual old process exit")
     try check(!session.canRestartBackend && !session.canSwitchWorkspace, "backend shutdown owns management")
     waitFor({ false }, timeout: 0.15)
-    try check(session.phase == .stopping && session.runRunning && count(root, "started") == 1,
+    try check(session.phase == .stopping && session.execution.isRunning && count(root, "started") == 1,
               "late old replies cannot clear the exit barrier")
-    waitFor({ session.phase == .ready && session.permissionsKnown }, timeout: 12)
-    try check(session.phase == .ready && session.runPhase == .idle && session.canOperate,
+    waitFor({ session.phase == .ready && session.permissions.known }, timeout: 12)
+    try check(session.phase == .ready && session.execution.runPhase == .idle && session.canOperate,
               "explicit restart creates a fresh idle backend")
     try check(count(root, "started") == 2 && count(root, "script.start") == 1,
               "restart is single and never replays tasks")
@@ -301,8 +301,16 @@ def lifecycle_binary(tmp_path_factory):
             "swiftc",
             "-module-cache-path",
             str(folder / "cache"),
-            str(source / "CanvasGeometry.swift"),
-            str(source / "Session.swift"),
+            str(source / "Preparation/CanvasGeometry.swift"),
+            str(source / "Backend/BackendClient.swift"),
+            str(source / "Backend/DiagnosticsLog.swift"),
+            str(source / "Backend/PermissionState.swift"),
+            str(source / "Preparation/PreparationState.swift"),
+            str(source / "Observation/ObservationFormatter.swift"),
+            str(source / "Observation/ObservationState.swift"),
+            str(source / "Execution/PlanDraft.swift"),
+            str(source / "Execution/ExecutionState.swift"),
+            str(source / "Backend/Session.swift"),
             str(harness),
             "-o",
             str(binary),

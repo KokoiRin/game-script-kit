@@ -48,7 +48,7 @@ def build_app(
             raise ValueError(f"unsupported macOS architecture: {architecture}")
         binary = package / ".build/direct/StarDesktop"
         binary.parent.mkdir(parents=True, exist_ok=True)
-        sources = sorted((package / "Sources/StarDesktop").glob("*.swift"))
+        sources = sorted((package / "Sources/StarDesktop").rglob("*.swift"))
         if not sources:
             raise ValueError("StarDesktop Swift sources not found")
         subprocess.run(
