@@ -32,16 +32,16 @@ class FakeRunLogger:
     """收集脚本运行测试中的运行日志。"""
 
     def __init__(self) -> None:
-        """初始化日志列表。"""
+        """分开收集文本与结构化事件，供运行结果和日志策略分别断言。"""
         self.messages: list[str] = []
         self.events = []
 
     def log(self, message: str) -> None:
-        """记录一条运行日志。"""
+        """保留运行文本的原始顺序，供测试核对诊断内容。"""
         self.messages.append(message)
 
     def log_event(self, event) -> None:
-        """记录一条结构化运行事件。"""
+        """保留完整事件对象，供测试断言生命周期状态与结束原因。"""
         self.events.append(event)
 
 

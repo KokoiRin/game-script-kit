@@ -54,12 +54,12 @@ class FakeKeyReader:
 
 class FakeClock:
     def __init__(self) -> None:
-        """初始化可控时钟。"""
+        """从零开始计时并单独收集休眠时长，使显示节奏与轮询节奏可分别断言。"""
         self.now = 0.0
         self.sleeps: list[float] = []
 
     def __call__(self) -> float:
-        """返回当前 fake 时间。"""
+        """每次返回最后手动推进的时刻，重复读钟保持同值。"""
         return self.now
 
     def sleep(self, seconds: float) -> None:

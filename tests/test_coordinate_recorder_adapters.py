@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import namedtuple
 from types import SimpleNamespace
 
 import pytest
@@ -14,9 +15,14 @@ from game_automation.platform.local_desktop.entrypoints.cli import main
 from game_automation.portable.domain import Point
 
 
-def test_pyautogui_pointer_reader_returns_point_from_tuple() -> None:
-    """验证 pyautogui tuple 坐标会转换为 Point。"""
-    backend = SimpleNamespace(position=lambda: (12, 34))
+@pytest.mark.parametrize(
+    "position",
+    [(12, 34), namedtuple("Position", "x y")(12, 34), (12.9, 34.8)],
+    ids=["tuple", "pyautogui-namedtuple", "integer-conversion"],
+)
+def test_pyautogui_pointer_reader_returns_point_from_tuple(position) -> None:
+    """验证普通元组与 PyAutoGUI 的具名元组共用解包，并保持整数转换。"""
+    backend = SimpleNamespace(position=lambda: position)
 
     assert PyAutoGuiPointerPositionReader(backend=backend).current_position() == Point(
         12, 34

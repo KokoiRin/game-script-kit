@@ -14,7 +14,7 @@ from tests.support.function_tasks import function_task
 
 class Device:
     def __init__(self):
-        """收集点击。"""
+        """隔离本次原生会话收到的点位，供入口测试核对坐标转换次数。"""
         self.clicks = []
 
     def click(self, point):
@@ -122,14 +122,14 @@ def test_cleanup_failure_emits_only_failed_terminal_event():
 
     class Logger:
         def __init__(self):
-            """收集结构化事件。"""
+            """保留本例全部结构化事件，使测试能检查清理之后发布的唯一终态。"""
             self.events = []
 
         def log(self, message):
             """接收普通诊断。"""
 
         def log_event(self, event):
-            """收集终态。"""
+            """保留所有事件供外层筛选终态，清理失败时也能检查是否曾误报成功。"""
             self.events.append(event)
 
     logger = Logger()
@@ -428,6 +428,10 @@ def test_native_runtime_control_drives_click_preparation_and_repeat_budget():
         def task_time(self):
             """提供平台定义的有效时间。"""
             return self.now
+
+        def execute_observation(self, action):
+            """观察沿用外层输入控制，无独立恢复。"""
+            return action()
 
         def execute_input(self, action):
             """用公开输入边界包住定位和投递。"""

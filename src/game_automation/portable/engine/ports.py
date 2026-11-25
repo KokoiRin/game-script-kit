@@ -33,6 +33,10 @@ class RuntimeControl(Protocol):
         """执行一次输入，平台只可重做尚未发送的准备工作。"""
         ...
 
+    def execute_observation(self, action: Callable[[], _InputResult]) -> _InputResult:
+        """在一致的窗口几何下完成有限观察，必要时整体重试。"""
+        ...
+
 
 class InputDevice(Protocol):
     def hotkey(self, keys: tuple[str, ...]) -> None:

@@ -53,6 +53,8 @@ SwiftUI/AppKit 壳 → 受管理的 Python 子进程 / desktop_backend
 
 [run_task](../src/game_automation/portable/application/task_run.py) 按任务需求创建运行依赖。真实执行要求任务声明 `target.backend` 为 `macos-window` 或 `macos-window-background`，只打开原生窗口会话，不提供桌面回退或命令行目标覆盖；dry-run 使用固定替身，不要求打开窗口。
 [run_task_plan](../src/game_automation/portable/application/run_plan.py) 编排已有任务及停止策略，单个任务仍交给注入的运行函数。
+工作区流程配置由 [project_run_plan](../src/game_automation/portable/application/project_run_plan.py) 读取，CLI 和原生后台共用计划用例。原生整套流程复用运行槽与取消信号，每项会话关闭后再等待并启动下一项。任务明确跳过的契约和配置边界见 [ADR 0017](adr/0017-saved-task-plans.md)。
+原生编辑草稿、工作区保存配置和本次执行快照分别持有。应用用例将提交的完整列表校验、保存并冻结后启动，条目按顺序保留重复任务。诊断由单任务执行器在资源关闭前采集为结果值，再由会话归档保存完整日志、结果和图片。职责与代价见 [ADR 0019](adr/0019-editable-plans-and-run-records.md)。
 窗口状态由该会话的状态端口读取 `assets/window-states.json`，不从控制台缓存取结果。
 新增执行入口复用这些用例；保持运行控制台聚焦运行与停止的理由见 [ADR 0004](adr/0004-small-console.md)，独立素材准备壳见 [ADR 0007](adr/0007-preparation-and-execution.md)。
 
@@ -155,3 +157,5 @@ Python 是唯一任务格式。任务自身使用函数、分支、循环和异�
 规则重复、修改一个行为需同步多个入口、或测试被迫读取内部细节时，先重新确认职责归属。
 局部重构应收拢本轮触达的复杂度；接口只少一层转发时，检查能否直接使用已有能力。
 跨模块的重要取舍写入 [ADR](adr/README.md)，现状和限制更新到 current-state；文档分工见 [ADR 0005](adr/0005-repository-documentation.md)。
+
+窗口平移与原生控制台布局分别由运行会话和原生窗口控制器拥有。运行使用有限操作几何快照，UI 消费具体窗口身份并独立采样布局。共同选窗规则及输入提交边界见 [ADR 0018](adr/0018-window-companion-and-movement.md)。

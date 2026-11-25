@@ -38,11 +38,11 @@ class FakeLogger:
     """记录图片查询产生的诊断日志。"""
 
     def __init__(self) -> None:
-        """初始化日志列表。"""
+        """为一次查询测试创建独立文本记录，便于核对可观察诊断。"""
         self.messages: list[str] = []
 
     def log(self, message: str) -> None:
-        """保存一条日志消息。"""
+        """保留查询产生的原始日志，供断言检查模板、耗时及匹配摘要。"""
         self.messages.append(message)
 
 

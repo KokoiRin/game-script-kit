@@ -64,6 +64,10 @@ class TaskTimeout(TimeoutError):
         self.scope_id = scope_id
 
 
+class TaskSkipped(Exception):
+    """表示任务确认当前不适用，并已完成继续后续任务所需的收尾。"""
+
+
 class TargetNotFound(RuntimeError):
     """表示必需图片在真正准备输入时未找到。"""
 
@@ -236,10 +240,15 @@ class TaskContext:
         """读取固定窗口内点位的当前颜色。"""
         target = PointRef(point) if isinstance(point, str) else point
         with self.operation("Observe", summary=f"color {point}"):
-            resolved = self.window.resolve(self.resources.resolve_point(target))
-            if self.color_reader is None:
-                raise RuntimeError("color reader is required for color lookup")
-            return self.color_reader.read_color(resolved)
+
+            def observe():
+                """解析和读取使用同一操作快照。"""
+                resolved = self.window.resolve(self.resources.resolve_point(target))
+                if self.color_reader is None:
+                    raise RuntimeError("color reader is required for color lookup")
+                return self.color_reader.read_color(resolved)
+
+            return self._observation(observe)
 
     def drag(
         self, start: Point, end: Point, *, duration: float = 0, path: str | None = None
@@ -534,6 +543,17 @@ class TaskContext:
         except TaskCancelledError as exc:
             raise RunCancelled(str(exc)) from exc
 
+    def _observation(self, operation: Callable[[], _Result]) -> _Result:
+        """通过运行控制完成有限观察，并保持取消的核心语义。"""
+        try:
+            return (
+                operation()
+                if self.runtime_control is None
+                else self.runtime_control.execute_observation(operation)
+            )
+        except TaskCancelledError as exc:
+            raise RunCancelled(str(exc)) from exc
+
     def _send_hotkey(self, keys: tuple[str, ...], path: str) -> None:
         """在组合键提交前检查取消与期限，并记录一次已发送输入。"""
         self.check_cancelled(check_guard=False)
@@ -561,15 +581,20 @@ class TaskContext:
         min_confidence: float | None = None,
     ) -> ImageMatch | None:
         """集中解析命名资源、窗口搜索区域和置信度，再读取一次图像。"""
-        return locate_image(
-            source,
-            image_locator=self.image_locator,
-            resources=self.resources,
-            region=region,
-            region_resolver=self.window.resolve_region,
-            min_confidence=min_confidence,
-            logger=self.logger,
-        ).match
+
+        def observe():
+            """搜索参数转换与图像结果共享本次窗口位置。"""
+            return locate_image(
+                source,
+                image_locator=self.image_locator,
+                resources=self.resources,
+                region=region,
+                region_resolver=self.window.resolve_region,
+                min_confidence=min_confidence,
+                logger=self.logger,
+            ).match
+
+        return self._observation(observe)
 
     def _resolve_target(self, target: Target, path: str) -> Point:
         """把纯目标值解析为本次固定窗口中的最终屏幕坐标。"""
@@ -613,8 +638,10 @@ class TaskContext:
         """拒绝未装配的状态能力，并读取本次运行的状态端口。"""
         if self.screen_state_reader is None:
             raise RuntimeError("screen state reader is required for state lookup")
-        return self.screen_state_reader.read_current_state(
-            min_confidence=min_confidence, logger=self.logger
+        return self._observation(
+            lambda: self.screen_state_reader.read_current_state(
+                min_confidence=min_confidence, logger=self.logger
+            )
         )
 
 

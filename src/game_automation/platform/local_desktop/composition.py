@@ -54,7 +54,7 @@ def build_local_control_application(
 
 
 def build_native_runtime_factory(project_root: Path):
-    """延迟导入原生工厂；每个控制应用保留独立租约，不共享采集源。"""
+    """创建使用进程级共享租约的原生工厂，每次运行会话独占自己的采集源。"""
     from game_automation.platform.macos.adapters.window_runtime import (
         MacOSRuntimeFactory,
     )

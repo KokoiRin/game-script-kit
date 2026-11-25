@@ -8,6 +8,17 @@ struct WindowChoice: Identifiable {
     let title: String
 }
 
+struct CompanionTarget: Equatable {
+    let pid: Int32
+    let windowNumber: UInt32
+}
+
+struct PlanEntry: Identifiable, Equatable {
+    let id = UUID()
+    var name: String
+    var waitSeconds: String = "0"
+}
+
 
 struct FrozenFrame {
     let id: String
@@ -48,6 +59,12 @@ final class DesktopSession: ObservableObject {
     @Published var resourceText = ""
     @Published var scripts: [String] = []
     @Published var selectedScript = ""
+    @Published private(set) var companionTarget: CompanionTarget?
+    @Published var useSavedPlan = false
+    @Published var savedPlanName = ""
+    private var savedPlanBaseline = ""
+    @Published var planEntries: [PlanEntry] = []
+    @Published var runArtifactsPath = ""
     @Published var scriptDetails = ""
     @Published var runLog = ""
     @Published private(set) var runPhase: RunPhase = .idle
@@ -95,6 +112,7 @@ final class DesktopSession: ObservableObject {
     private var deadlines: [Int: DispatchWorkItem] = [:]
     private var pollTimer: Timer?
     private var polling = false
+    private var companionPolling = false
     private var runGeneration = UUID()
     private var observationPolling = false
     private var observationTimer: Timer?
@@ -115,6 +133,8 @@ final class DesktopSession: ObservableObject {
         self.python = python
         self.sourceRoot = sourceRoot
         phase = .starting
+        companionTarget = nil
+        companionPolling = false
         runGeneration = UUID()
         runPhase = .idle
         polling = false
@@ -134,6 +154,8 @@ final class DesktopSession: ObservableObject {
         errorMessage = ""
         status = "正在启动本地后台…"
         scripts = []; selectedScript = ""; scriptDetails = ""; runLog = ""
+        useSavedPlan = false; savedPlanName = ""; savedPlanBaseline = ""
+        planEntries = []; runArtifactsPath = ""
         windows = []; selectedWindow = ""; clearFrame()
         buffer.removeAll(keepingCapacity: false)
         let child = Process(), stdinPipe = Pipe(), stdoutPipe = Pipe(), stderrPipe = Pipe()
@@ -184,8 +206,12 @@ final class DesktopSession: ObservableObject {
                     self.phase = .ready
                     self.status = "就绪。素材准备和脚本运行使用同一受管理的后台。"
                     self.refreshPermissions()
+                    self.refreshCompanionTarget()
                     self.pollTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
-                        Task { @MainActor in self?.pollRun() }
+                        Task { @MainActor in
+                            self?.pollRun()
+                            self?.refreshCompanionTarget()
+                        }
                     }
                 case .failure(let error): self.failProtocol(error.localizedDescription)
                 }
@@ -216,6 +242,7 @@ final class DesktopSession: ObservableObject {
         }
         guard phase != .stopping else { return }
         phase = .stopping; busy = true
+        companionTarget = nil
         runGeneration = UUID()
         if runRunning { runPhase = .stopping }
         observationGeneration = UUID()
@@ -261,6 +288,8 @@ final class DesktopSession: ObservableObject {
         let expected = phase == .stopping
         releasePipes()
         process = nil
+        companionTarget = nil
+        companionPolling = false
         ownsProcessGroup = false
         pollTimer?.invalidate(); pollTimer = nil
         observationTimer?.invalidate(); observationTimer = nil
@@ -706,7 +735,17 @@ final class DesktopSession: ObservableObject {
         perform("script.reload") { [weak self] result in
             guard let self else { return }
             self.scripts = result["scripts"] as? [String] ?? []
-            self.selectedScript = self.scripts.first ?? ""
+            if !self.scripts.contains(self.selectedScript) { self.selectedScript = self.scripts.first ?? "" }
+            let plan = result["plan"] as? Object ?? [:]
+            if self.savedPlanBaseline.isEmpty || self.draftFingerprint == self.savedPlanBaseline {
+                self.savedPlanName = plan["name"] as? String ?? "我的流程"
+                self.planEntries = (plan["items"] as? [Object] ?? []).compactMap { item in
+                    guard let name = item["name"] as? String else { return nil }
+                    return PlanEntry(name: name, waitSeconds: (item["wait_after_seconds"] as? NSNumber)?.stringValue ?? "0")
+                }
+                self.savedPlanBaseline = self.draftFingerprint
+            }
+            if let error = result["plan_error"] as? String, !error.isEmpty { self.errorMessage = error }
             let errors = result["errors"] as? [Object] ?? []
             self.scriptDetails = errors.compactMap { $0["message"] as? String }.joined(separator: "\n")
             if !errors.isEmpty { self.errorMessage = self.scriptDetails }
@@ -715,24 +754,119 @@ final class DesktopSession: ObservableObject {
     }
 
     func describeScript() {
+        refreshCompanionTarget()
+        if useSavedPlan { scriptDetails = ""; return }
         guard !selectedScript.isEmpty else { return }
         perform("script.details", ["name": selectedScript]) { [weak self] result in
+            guard self?.useSavedPlan == false else { return }
             let steps = result["steps"] as? [String] ?? []
             let checks = (result["readiness"] as? [[String]] ?? []).map { $0.joined(separator: " · ") }
             self?.scriptDetails = (steps + [""] + checks).joined(separator: "\n")
         }
     }
 
+    private func refreshCompanionTarget() {
+        guard phase == .ready, !companionPolling else { return }
+        companionPolling = true
+        let child = process
+        let name = selectedScript
+        let saved = useSavedPlan
+        call("companion.target", ["file": name, "use_saved_plan": saved]) { [weak self] reply in
+            guard let self, self.process === child, self.phase == .ready else { return }
+            self.companionPolling = false
+            guard self.selectedScript == name, self.useSavedPlan == saved else { return }
+            if case .success(let result) = reply,
+               let target = result["target"] as? Object,
+               let pid = target["pid"] as? Int32,
+               let number = target["window_number"] as? UInt32 {
+                self.companionTarget = CompanionTarget(pid: pid, windowNumber: number)
+            } else {
+                self.companionTarget = nil
+            }
+        }
+    }
+
     func startScript() {
         guard canOperate, dryRun || requirePermission("accessibility") else { return }
+        if useSavedPlan {
+            guard let payload = planPayload() else { return }
+            beginRun(plan: payload)
+        } else {
+            beginRun()
+        }
+    }
+
+    private var draftFingerprint: String {
+        let value: Object = ["name": savedPlanName, "items": planEntries.map { ["name": $0.name, "wait": $0.waitSeconds] }]
+        return pretty(value)
+    }
+
+    func addPlanEntry() {
+        guard canOperate, !selectedScript.isEmpty else { return }
+        planEntries.append(PlanEntry(name: selectedScript))
+    }
+
+    func movePlanEntry(_ id: UUID, by offset: Int) {
+        guard canOperate, let index = planEntries.firstIndex(where: { $0.id == id }) else { return }
+        let destination = index + offset
+        guard planEntries.indices.contains(destination) else { return }
+        planEntries.swapAt(index, destination)
+    }
+
+    func removePlanEntry(_ id: UUID) {
+        guard canOperate else { return }
+        planEntries.removeAll { $0.id == id }
+    }
+
+    func savePlan() {
+        guard let payload = planPayload() else { return }
+        let fingerprint = draftFingerprint
+        perform("plan.save", ["plan": payload]) { [weak self] _ in
+            self?.savedPlanBaseline = fingerprint
+            self?.status = "流程已保存"
+        }
+    }
+
+    private func planPayload() -> Object? {
+        guard !savedPlanName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !planEntries.isEmpty else {
+            errorMessage = "请填写流程名称并添加至少一个任务。"
+            return nil
+        }
+        var items: [Object] = []
+        for entry in planEntries {
+            guard let seconds = Double(entry.waitSeconds), seconds.isFinite, seconds >= 0 else {
+                errorMessage = "\(entry.name) 的等待秒数需要是大于或等于 0 的数字。"
+                return nil
+            }
+            items.append(["name": entry.name, "wait_after_seconds": seconds])
+        }
+        return ["name": savedPlanName, "items": items]
+    }
+
+    func openRunRecords() {
+        guard let workspace else { return }
+        let folder = runArtifactsPath.isEmpty ? workspace.appendingPathComponent(".star/runs") : URL(fileURLWithPath: runArtifactsPath)
+        if FileManager.default.fileExists(atPath: folder.path) { NSWorkspace.shared.open(folder) }
+        else { errorMessage = "当前工作区还没有保存的运行记录。" }
+    }
+
+    private func beginRun(plan: Object? = nil) {
+        guard canOperate else { return }
         runGeneration = UUID()
         let generation = runGeneration
         polling = false
         runPhase = .idle
         runLog = ""
-        perform("script.start", ["name": selectedScript, "dry_run": dryRun,
-                                 "dry_run_color": dryRunColor, "dry_run_screen_state": dryRunState]) { [weak self] result in
+        runArtifactsPath = ""
+        var params: Object = ["name": selectedScript, "dry_run": dryRun,
+                              "dry_run_color": dryRunColor, "dry_run_screen_state": dryRunState]
+        if let plan { params["plan"] = plan }
+        let fingerprint = draftFingerprint
+        perform(useSavedPlan ? "plan.start" : "script.start", params) { [weak self] result in
             guard let self, self.runGeneration == generation, self.phase == .ready else { return }
+            if plan != nil, result["finish_reason"] as? String != "configuration_failed", result["finish_reason"] as? String != "task_not_found" {
+                self.savedPlanBaseline = fingerprint
+            }
             self.renderRun(result)
         }
     }
@@ -771,8 +905,9 @@ final class DesktopSession: ObservableObject {
         let stdout = result["stdout"] as? String ?? "", stderr = result["stderr"] as? String ?? ""
         let text = stdout + (stderr.isEmpty ? "" : "\n提示与错误：\n" + stderr)
         if runLog != text { runLog = text }
+        runArtifactsPath = result["artifacts_path"] as? String ?? ""
         let reason = result["finish_reason"] as? String ?? "idle"
-        let labels = ["completed": "脚本执行完成", "cancelled": "已取消", "configuration_failed": "配置错误",
+        let labels = ["completed": "脚本执行完成", "skipped": "已跳过", "cancelled": "已取消", "configuration_failed": "配置错误",
                       "setup_failed": "运行环境不可用", "failed": "运行失败", "timed_out": "任务等待超时",
                       "cleanup_failed": "运行资源回收失败", "stopped_unmet_condition": "条件未满足，已停止", "idle": "脚本未运行"]
         switch runPhase {

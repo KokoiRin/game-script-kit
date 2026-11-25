@@ -14,41 +14,41 @@ from game_automation.portable.domain.image_matching import ImageTemplate
 
 
 class UnknownPointNameError(LookupError):
-    """表示脚本引用了未注册的点位名称。"""
+    """资源目录解析点位别名失败时抛出，调用者可单独捕获并报告缺失点位。"""
 
 
 class UnknownImageNameError(LookupError):
-    """表示脚本引用了未注册的图片名称。"""
+    """资源目录解析图片别名失败时抛出，共享搜索的缺图诊断也沿用此类型。"""
 
 
 class UnknownRegionNameError(LookupError):
-    """表示脚本引用了未注册的区域名称。"""
+    """搜索引用的区域别名缺失时抛出，用于判断是否需要补充共享区域。"""
 
 
 class UnknownImageSearchNameError(LookupError):
-    """表示脚本引用了未注册的图片搜索名称。"""
+    """命名搜索缺失时抛出，用于触发共享配置加载或生成缺失搜索诊断。"""
 
 
 def _validate_point_name(name: str) -> None:
-    """校验点位名称必须非空。"""
+    """拒绝空白点位名，其余名称原样保留以供目录精确查找。"""
     if not name.strip():
         raise ValueError("point name cannot be empty")
 
 
 def _validate_image_name(name: str) -> None:
-    """校验图片名称必须非空。"""
+    """拒绝空白图片名，其余名称原样保留以供目录精确查找。"""
     if not name.strip():
         raise ValueError("image name cannot be empty")
 
 
 def _validate_region_name(name: str) -> None:
-    """校验区域名称必须非空。"""
+    """拒绝空白区域名，其余名称原样保留以供目录精确查找。"""
     if not name.strip():
         raise ValueError("region name cannot be empty")
 
 
 def _validate_image_search_name(name: str) -> None:
-    """校验图片搜索名称必须非空。"""
+    """拒绝空白搜索名，其余名称原样保留以供目录精确查找。"""
     if not name.strip():
         raise ValueError("image search name cannot be empty")
 
@@ -58,7 +58,7 @@ class PointRef:
     name: str
 
     def __post_init__(self) -> None:
-        """校验点位引用名称必须非空。"""
+        """构造点位引用时拒绝空白名，名称存在性延迟到资源解析时检查。"""
         _validate_point_name(self.name)
 
     def offset(self, *, x: int = 0, y: int = 0):
@@ -73,7 +73,7 @@ class ImageRef:
     name: str
 
     def __post_init__(self) -> None:
-        """校验图片引用名称必须非空。"""
+        """构造图片引用时拒绝空白名，模板来源由运行时资源目录解析。"""
         _validate_image_name(self.name)
 
 
@@ -82,7 +82,7 @@ class RegionRef:
     name: str
 
     def __post_init__(self) -> None:
-        """校验区域引用名称必须非空。"""
+        """构造区域引用时拒绝空白名，实际矩形由资源目录解析。"""
         _validate_region_name(self.name)
 
 
@@ -91,7 +91,7 @@ class SearchRef:
     name: str
 
     def __post_init__(self) -> None:
-        """校验图片搜索引用名称必须非空。"""
+        """构造搜索引用时拒绝空白名，图片和区域在目录补齐后解析。"""
         _validate_image_search_name(self.name)
 
 
@@ -101,7 +101,7 @@ class NamedPoint:
     point: Point
 
     def __post_init__(self) -> None:
-        """校验命名点位名称必须非空。"""
+        """在点位进入资源目录前校验名称，重复名称由目录统一拒绝。"""
         _validate_point_name(self.name)
 
 
@@ -111,7 +111,7 @@ class NamedImage:
     template: ImageTemplate
 
     def __post_init__(self) -> None:
-        """校验命名图片名称必须非空。"""
+        """在图片进入资源目录前校验名称，实际模板文件由运行前检查验证。"""
         _validate_image_name(self.name)
 
 
@@ -121,7 +121,7 @@ class NamedRegion:
     region: Rect
 
     def __post_init__(self) -> None:
-        """校验命名区域名称必须非空。"""
+        """在区域进入资源目录前校验名称，几何不变量由所持有的 Rect 保证。"""
         _validate_region_name(self.name)
 
 
@@ -145,7 +145,7 @@ class NamedImageSearch:
     search: ImageSearchSpec
 
     def __post_init__(self) -> None:
-        """校验命名图片搜索名称必须非空。"""
+        """在搜索进入资源目录前校验名称，关联资源可在后续合并共享配置时补齐。"""
         _validate_image_search_name(self.name)
 
 
@@ -161,7 +161,7 @@ class TargetCatalog:
     _search_map: Mapping[str, ImageSearchSpec] = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
-        """建立资源名称到资源值的查找表。"""
+        """分别为四种资源建立索引，拒绝同类重名，允许不同资源类型使用相同名称。"""
         point_map = {}
         for item in self.points:
             if item.name in point_map:

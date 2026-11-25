@@ -44,11 +44,11 @@ target-version = "py314"
 
 [tool.ruff.lint]
 select = [
-    "E4", "E7", "E9",  # 基础语法与代码错误
-    "F",               # 未使用导入、未定义名称等
-    "I",               # 导入排序
-    "UP",              # Python 新版本写法
-    "B",               # 常见易错写法
+    "E4", "E7", "E9",
+    "F",
+    "I",
+    "UP",
+    "B",
 ]
 
 [tool.coverage.run]

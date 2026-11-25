@@ -625,7 +625,7 @@ class FrozenBackend:
         self.identity = identity
 
     def screenshot(self):
-        """返回本轮已经取得的图像。"""
+        """把本轮已有图像借给匹配器，重复查询复用同一内容。"""
         return self.image
 
     def size(self):

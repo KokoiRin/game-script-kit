@@ -6,8 +6,11 @@
 
 import math
 import time
+from contextlib import contextmanager
 from importlib import import_module
 from itertools import count
+
+from game_automation.portable.domain import Point
 
 BACKGROUND_DISPATCH_FLAG = (
     0x00100000  # Command位，按外部实测recipe用于后台投递；不是NonCoalesced。
@@ -74,6 +77,7 @@ class MacOSBackgroundWindowInputDevice:
         )
         self._clock, self._sleep = clock, sleep
         self._held = False
+        self._held_local = None
         self._last_frontmost_pid = None
 
     def _framework(self):
@@ -101,13 +105,24 @@ class MacOSBackgroundWindowInputDevice:
     def _mouse(self, kind, point, *, release=False):
         """构造完整单一路径事件，保留NSEvent自动填充的窗口字段。"""
         q, appkit = self.q, self._framework()
-        frontmost = self._last_frontmost_pid if release else self._require_ready()
+        dragging = kind == q.kCGEventLeftMouseDragged
+        frontmost = (
+            self._last_frontmost_pid if release or dragging else self._require_ready()
+        )
         types = {
             q.kCGEventMouseMoved: appkit.NSEventTypeMouseMoved,
             q.kCGEventLeftMouseDown: appkit.NSEventTypeLeftMouseDown,
             q.kCGEventLeftMouseUp: appkit.NSEventTypeLeftMouseUp,
+            q.kCGEventLeftMouseDragged: appkit.NSEventTypeLeftMouseDragged,
         }
-        rect = self.session.window.rect
+        rect = getattr(self.session, "rect", self.session.window.rect)
+        if release and self._held_local is not None:
+            if hasattr(self.session, "release_point"):
+                point, rect = self.session.release_point(self._held_local)
+            else:
+                point = Point(
+                    rect.left + self._held_local.x, rect.top + self._held_local.y
+                )
         base = (point.x - rect.left, rect.height - (point.y - rect.top))
         native = appkit.NSEvent.mouseEventWithType_location_modifierFlags_timestamp_windowNumber_context_eventNumber_clickCount_pressure_(
             types[kind],
@@ -118,7 +133,7 @@ class MacOSBackgroundWindowInputDevice:
             None,
             next(_EVENT_NUMBERS),
             1,
-            1.0 if kind == q.kCGEventLeftMouseDown else 0.0,
+            1.0 if kind == q.kCGEventLeftMouseDown or dragging else 0.0,
         )
         event = None if native is None else native.CGEvent()
         if event is None:
@@ -144,25 +159,33 @@ class MacOSBackgroundWindowInputDevice:
         if logger is not None:
             logger.log(
                 f"input transport=background-pid-experiment backend=macos-window-background pid={self.pid} "
-                f"frontmost_pid={frontmost} frontmost_evidence={'cached-release' if release else 'checked'} window_id={self.session.binding.number} kind={kind} "
+                f"frontmost_pid={frontmost} frontmost_evidence={'cached-release' if release else 'cached-drag' if dragging else 'checked'} window_id={self.session.binding.number} kind={kind} "
                 f"global_point={point} window_local={local} subtype=3 flags=0x100000 private_window_location=True"
             )
-        if not release:
+        if dragging:
+            # 已提交手势遇到展示中断，停止移动并立即释放，交回会话等待恢复。
+            if self.session.check_window() == {}:
+                return False
+            self._held_local = Point(point.x - rect.left, point.y - rect.top)
+        elif not release:
             self._require_ready()
         if kind == q.kCGEventLeftMouseDown:
             self.session.commit_input()
+            self._held_local = Point(point.x - rect.left, point.y - rect.top)
             self._held = True
         q.CGEventPostToPid(self.pid, event)
+        return True
 
-    def click(self, target):
-        """后台投递primer、按下和50ms后配对释放，并撤销旧视觉证明。"""
+    @contextmanager
+    def _pressed(self, target):
+        """投递按下，在退出或失败时释放最后的局部点并撤销旧帧。"""
         self.session.validate_point(target)
         self._require_ready()
         try:
             self._mouse(self.q.kCGEventMouseMoved, target)
             try:
                 self._mouse(self.q.kCGEventLeftMouseDown, target)
-                self._hold_mouse(0.05)
+                yield
             finally:
                 if self._held:
                     try:
@@ -171,6 +194,11 @@ class MacOSBackgroundWindowInputDevice:
                         self._held = False
         finally:
             self.session.input_finished()
+
+    def click(self, target):
+        """后台投递一次点击，按住五十毫秒后释放。"""
+        with self._pressed(target):
+            self._hold_mouse(0.05)
 
     def _hold_mouse(self, duration_seconds):
         """按住使用系统时间，只检查取消，保证及时进入释放路径。"""
@@ -199,5 +227,17 @@ class MacOSBackgroundWindowInputDevice:
         raise NotImplementedError("后台点击试验尚不支持hotkey")
 
     def drag_to(self, start, end, duration_seconds=0.0):
-        """明确拒绝尚未验证的后台拖拽能力。"""
-        raise NotImplementedError("后台点击试验尚不支持drag")
+        """按住后沿窗口内线段投递移动，并在最后到达的位置释放。"""
+        if not math.isfinite(duration_seconds) or duration_seconds < 0:
+            raise ValueError("drag duration must be finite and nonnegative")
+        self.session.validate_point(end)
+        steps = max(1, math.ceil(duration_seconds / 0.02))
+        with self._pressed(start):
+            for index in range(1, steps + 1):
+                self._hold_mouse(duration_seconds / steps)
+                point = Point(
+                    round(start.x + (end.x - start.x) * index / steps),
+                    round(start.y + (end.y - start.y) * index / steps),
+                )
+                if not self._mouse(self.q.kCGEventLeftMouseDragged, point):
+                    break

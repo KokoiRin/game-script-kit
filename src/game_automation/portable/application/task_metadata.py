@@ -26,7 +26,7 @@ from game_automation.portable.domain.task import TaskTarget
 
 
 def parse_task_resources(value: Any, *, asset_root: Path) -> TargetCatalog:
-    """解析 TASK 中的局部资源声明。"""
+    """将四类局部资源表转成 catalog，省略的表使用空值，未知字段立即报错。"""
     if not isinstance(value, dict):
         raise ValueError("task resources must be an object")
     _reject_unknown_fields(
@@ -41,7 +41,7 @@ def parse_task_resources(value: Any, *, asset_root: Path) -> TargetCatalog:
 
 
 def _parse_points(value: Any) -> tuple[NamedPoint, ...]:
-    """解析命名点位表。"""
+    """按声明顺序建立命名点位，坐标按严格整数字段校验。"""
     if not isinstance(value, dict):
         raise ValueError("task resources points must be an object")
     return tuple(
@@ -51,7 +51,7 @@ def _parse_points(value: Any) -> tuple[NamedPoint, ...]:
 
 
 def _parse_images(value: Any, *, asset_root: Path) -> tuple[NamedImage, ...]:
-    """解析命名图片表。"""
+    """将图片相对路径绑定素材根，再与声明名称组成图片资源。"""
     if not isinstance(value, dict):
         raise ValueError("task resources images must be an object")
     return tuple(
@@ -66,7 +66,7 @@ def _parse_images(value: Any, *, asset_root: Path) -> tuple[NamedImage, ...]:
 
 
 def _parse_regions(value: Any) -> tuple[NamedRegion, ...]:
-    """解析命名区域表。"""
+    """按声明顺序建立窗口相对区域，四个坐标和尺寸字段使用严格整数校验。"""
     if not isinstance(value, dict):
         raise ValueError("task resources regions must be an object")
     return tuple(
@@ -78,7 +78,7 @@ def _parse_regions(value: Any) -> tuple[NamedRegion, ...]:
 
 
 def _parse_searches(value: Any) -> tuple[NamedImageSearch, ...]:
-    """解析命名图片搜索表。"""
+    """将搜索项关联到图片别名，保留可选区域与阈值，并拒绝未知字段。"""
     if not isinstance(value, dict):
         raise ValueError("task resources searches must be an object")
     searches = []
@@ -110,7 +110,7 @@ def _parse_searches(value: Any) -> tuple[NamedImageSearch, ...]:
 
 
 def _parse_point(value: Any, *, field: str) -> Point:
-    """解析 x/y 坐标对象。"""
+    """要求坐标对象只含 x 和 y，拒绝布尔值及非整数坐标。"""
     if not isinstance(value, dict):
         raise ValueError(f"{field} must be an object")
     _reject_unknown_fields(value, {"x", "y"}, field=field)
@@ -121,7 +121,7 @@ def _parse_point(value: Any, *, field: str) -> Point:
 
 
 def _parse_rect(value: Any, *, field: str) -> Rect:
-    """解析矩形区域对象。"""
+    """要求矩形对象只含位置和尺寸四字段，并由 Rect 校验正向宽高。"""
     if not isinstance(value, dict):
         raise ValueError(f"{field} must be an object")
     _reject_unknown_fields(value, {"left", "top", "width", "height"}, field=field)
@@ -151,14 +151,14 @@ def _parse_region_ref(value: Any) -> RegionRef | Rect | None:
 
 
 def _parse_optional_confidence(value: Any) -> float | None:
-    """解析可选置信度。"""
+    """缺省时保留资源阈值继承语义，显式值通过排除布尔值的数字校验。"""
     if value is None:
         return None
     return _number_value(value, "min_confidence")
 
 
 def _required_text(data: dict[str, Any], key: str, field: str) -> str:
-    """读取必填字符串字段。"""
+    """同时校验字段存在及文本非空，错误消息包含调用方传入的字段位置。"""
     if key not in data:
         raise ValueError(f"{field} is required")
     return _text_value(data[key], field)

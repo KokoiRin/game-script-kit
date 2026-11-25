@@ -78,7 +78,7 @@ class Source:
         return Image.new("RGB", (160, 120))
 
     def close(self):
-        """记录源已释放。"""
+        """设置可观察的关闭标记，供测试确认恢复或取消之后采集源仍被回收。"""
         self.closed = True
 
 
@@ -105,22 +105,17 @@ def setup(source_factory=None):
     return session, binding, source, clock, messages
 
 
-def test_background_move_waits_for_original_geometry_and_fresh_proof():
-    """短暂窗口变化恢复后返回新画面，任务时间不包含暂停。"""
+def test_background_move_adopts_new_geometry_and_fresh_proof():
+    """平移后在新位置继续，暂停只包含稳定和新画面等待。"""
     session, binding, source, clock, messages = setup()
-    binding.bounds["X"] = 101
-
-    def restore():
-        """半秒后恢复原始几何。"""
-        if clock() >= 10.5:
-            binding.bounds["X"] = 100
-
-    clock.on_sleep = restore
+    binding.bounds["X"] = 301
     with session.screenshot() as image:
         assert image.size == (160, 120)
-    assert clock() >= 10.5
-    assert session.task_time() < 10.1
-    assert source.proof.captured_at > 10.5
+    assert session.rect == Rect(301, 200, 80, 60)
+    assert binding.bounds["X"] == 301
+    assert clock() < 10.1
+    assert session.task_time() == 10
+    assert source.proof.captured_at > 10
     assert sum("runtime paused" in message for message in messages) == 1
     assert sum("runtime resumed" in message for message in messages) == 1
 
@@ -238,16 +233,17 @@ def test_ordinary_wait_excludes_presentation_pause():
         clock=clock,
         sleep=clock.sleep,
     )
-    binding.bounds["X"] = 101
+    binding.bounds["Width"] = 81
 
     def restore():
-        """系统时间过半秒才结束暂停。"""
+        """尺寸变化仍需要恢复素材尺寸，平移位置无需还原。"""
         if clock() >= 10.5:
-            binding.bounds["X"] = 100
+            binding.bounds.update(Width=80, X=301)
 
     clock.on_sleep = restore
     adapter.wait(0.1)
     assert clock() >= 10.6
+    assert session.rect.left == 301
     assert session.task_time() == pytest.approx(10.1)
 
 
@@ -391,3 +387,265 @@ def test_move_during_first_frame_wait_recovers_using_full_session_geometry():
         assert sum("runtime resumed" in message for message in messages) == 1
     finally:
         session.close()
+
+
+def test_point_preparation_retries_at_new_origin_without_returning_to_old_position():
+    """准备后平移会重新解析整个点位且只提交一次。"""
+    from game_automation.platform.macos.adapters.window_runtime import SessionWindow
+
+    session, binding, _, _, _ = setup()
+    window = SessionWindow(session)
+    attempts, sent = [], []
+
+    def prepare():
+        """模拟解析之后、最终提交之前平移。"""
+        point = window.resolve(Point(5, 6))
+        attempts.append(point)
+        if len(attempts) == 1:
+            binding.bounds.update(X=500, Y=600)
+        session.validate_point(point)
+        session.commit_input()
+        sent.append(point)
+
+    session.execute_input(prepare)
+    assert attempts == [Point(105, 206), Point(505, 606)]
+    assert sent == [Point(505, 606)]
+
+
+def test_color_retries_resolution_when_window_moves_during_capture():
+    """截图中途移动时重做局部点解析，取色不会混用两个原点。"""
+    from game_automation.platform.macos.adapters.window_runtime import SessionWindow
+    from game_automation.platform.macos.adapters.window_vision import WindowColorReader
+    from game_automation.portable.domain import Color
+
+    session, binding, source, _, _ = setup()
+    capture = source.screenshot
+    reads = []
+
+    def screenshot():
+        """首张画面触发移动，后续帧包含固定局部颜色。"""
+        image = capture()
+        reads.append(1)
+        image.putpixel((10, 12), (21, 22, 23))
+        if len(reads) == 1:
+            binding.bounds.update(X=500, Y=600)
+        return image
+
+    source.screenshot = screenshot
+    context = TaskContext(
+        SessionWindow(session),
+        function_task("color", "pass").resources,
+        device=SimpleNamespace(),
+        color_reader=WindowColorReader(session),
+        runtime_control=session,
+    )
+    assert context.color(Point(5, 6)) == Color(21, 22, 23)
+    assert len(reads) >= 3
+    assert session.rect.left == 500
+
+
+def test_roi_and_match_share_snapshot_after_observation_retries():
+    """ROI及匹配结果整轮重试，原生适配器继续接收全局坐标。"""
+    from game_automation.platform.macos.adapters.window_runtime import SessionWindow
+    from game_automation.platform.macos.adapters.window_vision import WindowImageLocator
+
+    session, binding, _, _, _ = setup()
+    regions = []
+
+    class Locator:
+        def __init__(self, *, backend):
+            """借用同一会话采集边界。"""
+            self.backend = backend
+
+        def locate(self, template, *, region, **kwargs):
+            """定位期间移动，使外层观察丢弃旧结果。"""
+            regions.append(region)
+            if len(regions) == 1:
+                binding.bounds.update(X=700, Y=800)
+            with self.backend.screenshot():
+                return ImageMatch(Rect(5, 6, 2, 2), 1)
+
+    locator = WindowImageLocator(session, locator_factory=Locator)
+    window = SessionWindow(session)
+    result = session.execute_observation(
+        lambda: locator.locate(
+            ImageTemplate("unused.png"),
+            region=window.resolve_region(Rect(1, 2, 30, 20)),
+        )
+    )
+    assert regions == [Rect(1, 2, 30, 20), Rect(1, 2, 30, 20)]
+    assert result.rect == Rect(705, 806, 2, 2)
+
+
+def test_nested_observation_retries_whole_uncommitted_input():
+    """输入内观察遇到平移时重新执行外层准备，避免部分坐标过期。"""
+    from game_automation.platform.macos.adapters.window_runtime import SessionWindow
+
+    session, binding, _, _, _ = setup()
+    window, attempts, sent = SessionWindow(session), [], []
+
+    def prepare():
+        """保存先解析的点，再通过嵌套观察检测移动。"""
+        point = window.resolve(Point(1, 2))
+        attempts.append(point)
+
+        def observe():
+            """第一次嵌套读取触发新位置。"""
+            if len(attempts) == 1:
+                binding.bounds.update(X=500)
+            session.check_window()
+
+        session.execute_observation(observe)
+        session.commit_input()
+        sent.append(point)
+
+    session.execute_input(prepare)
+    assert attempts == [Point(101, 202), Point(501, 202)]
+    assert sent == [Point(501, 202)]
+
+
+def test_background_up_keeps_down_local_anchor_after_movement():
+    """按下之后移动只释放原局部点，下一次点击使用新位置。"""
+    from game_automation.platform.macos.adapters.window_background_input import (
+        MacOSBackgroundWindowInputDevice,
+    )
+    from game_automation.platform.macos.adapters.window_runtime import SessionWindow
+    from tests.test_window_background_input import AppKit, Quartz
+
+    session, binding, _, clock, _ = setup()
+    q = Quartz()
+    q.kCGWindowBounds = "bounds"
+    binding.quartz = q
+    post = q.CGEventPostToPid
+
+    def post_and_move(pid, event):
+        """真实投递替身在按下后移动窗口。"""
+        post(pid, event)
+        if event["kind"] == "down":
+            binding.bounds.update(X=500, Y=600)
+
+    q.CGEventPostToPid = post_and_move
+    device = MacOSBackgroundWindowInputDevice(
+        session,
+        appkit=AppKit,
+        window_location_setter=lambda event, point: event.update(local=point),
+        frontmost_pid=lambda: 42,
+        clock=clock,
+        sleep=clock.sleep,
+    )
+    window = SessionWindow(session)
+    session.execute_input(lambda: device.click(window.resolve(Point(5, 6))))
+    assert [e["kind"] for _, e in q.events] == ["move", "down", "up"]
+    assert q.events[-1][1]["local"] == (5, 6)
+    assert q.events[-1][1]["global"] == (505, 606)
+    session.execute_input(lambda: device.click(window.resolve(Point(5, 6))))
+    assert q.events[-2][1]["global"] == (505, 606)
+
+
+def test_continuously_moving_window_remains_cancellable():
+    """连续拖动稳定等待不会阻塞停止。"""
+    session, binding, _, clock, _ = setup()
+    binding.bounds.update(X=101)
+    clock.on_sleep = lambda: binding.bounds.update(X=binding.bounds["X"] + 1)
+    session.cancellation = SimpleNamespace(is_cancelled=lambda: clock() >= 10.1)
+    with pytest.raises(TaskCancelledError):
+        session.execute_observation(lambda: None)
+    assert clock() < 10.2
+
+
+def test_cancel_after_background_down_still_releases_at_moved_local_point():
+    """移动后立即取消仍发送一次原局部点释放，不重放点击。"""
+    from game_automation.platform.macos.adapters.window_background_input import (
+        MacOSBackgroundWindowInputDevice,
+    )
+    from game_automation.platform.macos.adapters.window_runtime import SessionWindow
+    from tests.test_window_background_input import AppKit, Quartz
+
+    session, binding, _, clock, _ = setup()
+    q, cancelled = Quartz(), []
+    q.kCGWindowBounds = "bounds"
+    binding.quartz = q
+    session.cancellation = SimpleNamespace(is_cancelled=lambda: bool(cancelled))
+    post = q.CGEventPostToPid
+
+    def post_and_cancel(pid, event):
+        """按下后立刻平移并收到停止请求。"""
+        post(pid, event)
+        if event["kind"] == "down":
+            binding.bounds.update(X=500, Y=600)
+            cancelled.append(True)
+
+    q.CGEventPostToPid = post_and_cancel
+    device = MacOSBackgroundWindowInputDevice(
+        session,
+        appkit=AppKit,
+        window_location_setter=lambda event, point: event.update(local=point),
+        frontmost_pid=lambda: 42,
+        clock=clock,
+        sleep=clock.sleep,
+    )
+    with pytest.raises(TaskCancelledError):
+        session.execute_input(
+            lambda: device.click(SessionWindow(session).resolve(Point(5, 6)))
+        )
+    assert [e["kind"] for _, e in q.events] == ["move", "down", "up"]
+    assert q.events[-1][1]["local"] == (5, 6)
+    assert q.events[-1][1]["global"] == (505, 606)
+
+
+def test_foreground_hotkey_translation_preserves_pairing_and_current_focus():
+    """组合键提交后平移继续核验当前绑定窗口，按键保持逆序释放。"""
+    from game_automation.platform.macos.adapters.window_input import (
+        MacOSWindowInputDevice,
+    )
+    from tests.test_window_input import Quartz
+
+    session, binding, _, clock, _ = setup()
+    session.backend = "macos-window"
+    q = Quartz()
+    q.kCGWindowBounds = "bounds"
+    binding.quartz = q
+    post = q.CGEventPost
+
+    def post_and_move(tap, event):
+        """首个修饰键提交后移动同一窗口。"""
+        post(tap, event)
+        if len(q.events) == 1:
+            binding.bounds.update(X=500, Y=600)
+
+    q.CGEventPost = post_and_move
+    device = MacOSWindowInputDevice(
+        session,
+        quartz=q,
+        activation=lambda *args: 42,
+        frontmost_pid=lambda: 42,
+        keyboard_focus=lambda pid: SimpleNamespace(
+            title="页面", rect=session.current_rect()
+        ),
+        clock=clock,
+        sleep=clock.sleep,
+    )
+    session.execute_input(lambda: device.hotkey(("ctrl", "a")))
+    assert [event["kind"] for _, event in q.events] == [
+        (59, True),
+        (0, True),
+        (0, False),
+        (59, False),
+    ]
+    assert session.rect == Rect(500, 600, 80, 60)
+
+
+def test_foreground_wait_excludes_translation_recovery_pause():
+    """前台普通等待也使用扣除平移恢复暂停的有效任务时间。"""
+    from game_automation.platform.macos.adapters.window_input import (
+        MacOSWindowInputDevice,
+    )
+
+    session, binding, _, clock, _ = setup()
+    session.backend = "macos-window"
+    binding.bounds.update(X=501)
+    device = MacOSWindowInputDevice(session, clock=clock, sleep=clock.sleep)
+    device.wait(0.1)
+    assert clock() == pytest.approx(10.14)
+    assert session.task_time() == pytest.approx(10.1)
+    assert session.rect.left == 501

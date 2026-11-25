@@ -18,7 +18,7 @@ class PyAutoGuiPointerPositionReader(PointerPositionReader):
         self._backend = backend if backend is not None else self._load_backend()
 
     def current_position(self) -> Point:
-        """读取 pyautogui 当前鼠标坐标并转换为 Point。"""
+        """按 PyAutoGUI 二元坐标契约解包结果，将两个分量转为整数领域点。"""
         try:
             position = self._backend.position()
         except Exception as exc:
@@ -26,13 +26,7 @@ class PyAutoGuiPointerPositionReader(PointerPositionReader):
                 "failed to read pointer position. Check desktop automation permissions."
             ) from exc
 
-        # pyautogui 可能返回 Point-like 对象，也可能在测试中返回 tuple。
-        if hasattr(position, "x") and hasattr(position, "y"):
-            x = position.x
-            y = position.y
-        else:
-            x = position[0]
-            y = position[1]
+        x, y = position
         return Point(int(x), int(y))
 
     def _load_backend(self) -> ModuleType:

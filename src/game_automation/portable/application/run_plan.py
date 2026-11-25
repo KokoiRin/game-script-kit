@@ -8,22 +8,39 @@ from __future__ import annotations
 
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from math import isfinite
 
 from game_automation.portable.domain.task import FunctionTask
 
 
 @dataclass(frozen=True, slots=True)
 class TaskPlanItem:
-    """描述一轮计划里的单个任务项。"""
+    """保存启动前解析的任务与模拟图片，任务后等待在该项会话关闭后执行。"""
 
     name: str
     task: FunctionTask
     dry_run_images: tuple[str, ...] = ()
+    wait_after_seconds: float = 0
+
+    def __post_init__(self) -> None:
+        """要求任务后的等待为有限非负秒数。"""
+        validate_plan_wait(self.wait_after_seconds)
+
+
+def validate_plan_wait(seconds: float) -> None:
+    """校验任务后的等待值，供配置读取和计划项共用。"""
+    if (
+        isinstance(seconds, bool)
+        or not isinstance(seconds, int | float)
+        or not isfinite(seconds)
+        or seconds < 0
+    ):
+        raise ValueError("wait_after_seconds must be finite and non-negative")
 
 
 @dataclass(frozen=True, slots=True)
 class TaskPlanRunResult:
-    """表达单个任务运行后可被计划聚合的结果。"""
+    """由注入的单任务执行器返回，计划同时消费退出码和结束原因以决定后续项。"""
 
     exit_code: int
     finish_reason: str = "completed"
@@ -33,7 +50,7 @@ class TaskPlanRunResult:
 
 @dataclass(frozen=True, slots=True)
 class TaskPlanItemResult:
-    """记录计划中某个任务项的执行结果。"""
+    """以从一开始的执行序号区分重复任务，保存该次退出结果及捕获输出。"""
 
     index: int
     task_name: str
@@ -45,7 +62,7 @@ class TaskPlanItemResult:
 
 @dataclass(frozen=True, slots=True)
 class TaskPlanResult:
-    """记录一轮计划的整体结果。"""
+    """保留已尝试条目的有序结果，整轮结束原因由停止与失败策略汇总。"""
 
     exit_code: int
     finish_reason: str
@@ -60,8 +77,11 @@ def run_task_plan(
     *,
     run_item: RunPlanItemRunner,
     continue_on_error: bool = False,
+    wait: Callable[[float], bool] | None = None,
 ) -> TaskPlanResult:
     """按顺序运行一轮任务计划，并根据失败策略决定是否继续。"""
+    if any(item.wait_after_seconds for item in items) and wait is None:
+        raise ValueError("a cancellable wait is required for delayed plan items")
     item_results: list[TaskPlanItemResult] = []
     first_error_code = 0
     first_incomplete_reason = "completed"
@@ -90,7 +110,10 @@ def run_task_plan(
                 finish_reason="cleanup_failed",
                 items=tuple(item_results),
             )
-        incomplete = result.exit_code != 0 or result.finish_reason != "completed"
+        incomplete = result.exit_code != 0 or result.finish_reason not in {
+            "completed",
+            "skipped",
+        }
         if incomplete and first_incomplete_reason == "completed":
             first_incomplete_reason = (
                 result.finish_reason
@@ -102,6 +125,13 @@ def run_task_plan(
                 first_error_code = result.exit_code
         if incomplete and not continue_on_error:
             break
+        if (
+            result.finish_reason == "completed"
+            and result.exit_code == 0
+            and item.wait_after_seconds
+        ):
+            if not wait(item.wait_after_seconds):
+                return TaskPlanResult(130, "cancelled", tuple(item_results))
     exit_code = first_error_code
     return TaskPlanResult(
         exit_code=exit_code,

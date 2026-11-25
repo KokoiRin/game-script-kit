@@ -1,7 +1,8 @@
 """定义任务窗口，以及窗口内坐标到已绑定窗口屏幕位置的解析规则。
 
 本 module 只负责坐标解析；它不读写真实窗口，也不选择或激活应用。
-真实运行由原生窗口会话提供 AreaWindow。未绑定窗口只用于不接触桌面的 dry-run。
+真实运行时，原生窗口会话按当前操作的矩形调用 AreaWindow 换算坐标。
+dry-run 的 UnboundWindow 原样传递任务的相对坐标。
 """
 
 from __future__ import annotations

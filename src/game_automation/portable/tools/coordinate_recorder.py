@@ -66,7 +66,6 @@ class CoordinateRecorder:
             if self._should_stop():
                 break
 
-            # 显示和按键检查节奏分离：这里按更短的按键检测间隔休眠。
             self.sleeper(self.poll_interval_seconds)
 
         self._print_recorded_positions()
@@ -79,7 +78,7 @@ class CoordinateRecorder:
         return RecordedPoint(point=point, color=color)
 
     def _print_current_position(self) -> None:
-        """读取并打印当前鼠标坐标和颜色。"""
+        """为当前读数加 current 前缀，便于与按键触发的 recorded 输出区分。"""
         record = self._read_current_record()
         self.output(f"current: {record.point} {record.color}")
 
@@ -94,7 +93,7 @@ class CoordinateRecorder:
         return self.key_reader.is_pressed("q") or self.key_reader.is_pressed("Q")
 
     def _print_recorded_positions(self) -> None:
-        """打印本次运行记录到的所有坐标和颜色。"""
+        """按录入顺序输出从一开始的编号，空结果明确显示 none。"""
         self.output("recorded points:")
         if not self.recorded:
             self.output("(none)")

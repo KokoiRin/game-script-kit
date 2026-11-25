@@ -14,7 +14,7 @@ class Point:
     y: int
 
     def offset(self, *, x: int = 0, y: int = 0) -> Point:
-        """返回基于当前点位偏移后的新点位。"""
+        """返回叠加位移的不可变点位，连续偏移可相加。"""
         return Point(self.x + x, self.y + y)
 
 

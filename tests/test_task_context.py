@@ -51,7 +51,7 @@ class World:
         return self.now - self.paused
 
     def click(self, target):
-        """记录实际送出的点击。"""
+        """按顺序记下提交点位，供测试核对重定位后的输入次数与位置。"""
         self.actions.append(("click", target))
 
     def drag_to(self, start, end, duration_seconds=0):
@@ -59,7 +59,7 @@ class World:
         self.actions.append(("drag", start, end, duration_seconds))
 
     def hotkey(self, keys):
-        """记录设备收到的一组按键。"""
+        """把一次组合键作为一个原子请求记录，供测试核对取消后的剩余输入。"""
         self.actions.append(("hotkey", keys))
 
     def wait(self, seconds):
@@ -83,7 +83,7 @@ class World:
         return Color(1, 2, 3)
 
     def is_cancelled(self):
-        """返回用户是否已请求取消。"""
+        """返回测试可随设备操作改变的停止标记，供核心验证取消优先级。"""
         return self.cancelled
 
     def log(self, message):
@@ -286,8 +286,12 @@ def test_input_preparation_uses_shared_runtime_control_once():
         """记录每次完整输入准备的执行。"""
 
         def __init__(self):
-            """初始化准备计数。"""
+            """从零记录完整输入准备次数，供测试断言一次动作只经过一个控制边界。"""
             self.calls = 0
+
+        def execute_observation(self, action):
+            """观察沿用外层输入控制，无独立恢复。"""
+            return action()
 
         def execute_input(self, action):
             """由控制边界完成一次输入准备和提交。"""
@@ -378,6 +382,10 @@ def test_window_recovery_repeats_only_unsent_input_preparation():
 
     class RecoveryControl:
         """模拟已有原生会话的未提交准备恢复。"""
+
+        def execute_observation(self, action):
+            """观察沿用外层输入控制，无独立恢复。"""
+            return action()
 
         def execute_input(self, action):
             """只重试尚未提交的准备回调。"""

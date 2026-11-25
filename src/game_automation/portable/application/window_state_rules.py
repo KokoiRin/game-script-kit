@@ -54,7 +54,7 @@ class WindowStateRules:
 
 
 def rules_path(workspace: Path) -> Path:
-    """返回当前工作区的窗口识别配置路径。"""
+    """返回受工作区边界约束的状态文件路径，拒绝越界素材目录与配置符号链接。"""
     assets = (workspace / "assets").resolve()
     if not assets.is_relative_to(workspace.resolve()):
         raise ValueError("素材目录必须位于当前工作区内")

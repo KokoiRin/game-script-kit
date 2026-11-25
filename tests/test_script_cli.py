@@ -208,7 +208,7 @@ def test_star_cli_lists_good_scripts_and_reports_bad_file(
 def test_star_cli_details_describes_file_backed_script(
     monkeypatch, tmp_path, capsys
 ) -> None:
-    """验证 details 子命令可以展示文件脚本步骤和依赖。"""
+    """验证文件任务详情展示任务名、来源文件和声明的点位依赖。"""
     script_dir = tmp_path / TASK_FOLDER
     script_dir.mkdir()
     (script_dir / "user.py").write_text(
@@ -443,7 +443,7 @@ def test_star_cli_runs_named_script_with_dry_run(capsys) -> None:
 
 
 def test_star_cli_shows_script_details(capsys) -> None:
-    """验证 details 子命令会展示脚本步骤和依赖检查。"""
+    """验证图片任务详情展示 Python 入口、模板路径和依赖检查。"""
     assert main(["details", "click-image-demo"]) == 0
 
     output = capsys.readouterr().out
@@ -518,7 +518,7 @@ def test_star_cli_details_shows_point_dependencies(monkeypatch, capsys) -> None:
 
 
 def test_star_cli_shows_wait_until_screen_state_details(capsys) -> None:
-    """验证 details 子命令会展示状态等待步骤和状态依赖。"""
+    """验证任务详情列出所需状态，状态配置不可用时标为未知。"""
     assert main(["details", "wait-until-screen-state-demo"]) == 0
 
     output = capsys.readouterr().out
@@ -538,7 +538,7 @@ def test_star_cli_details_reports_unknown_script(capsys) -> None:
 
 
 def test_star_cli_runs_repeat_demo_with_dry_run(capsys) -> None:
-    """验证 repeat-demo 的 dry-run 会展开 Repeat 内部步骤。"""
+    """验证 repeat-demo 模拟运行先等待两秒，再依次输出五组点击和等待。"""
     assert main(["run", "repeat-demo", "--dry-run"]) == 0
 
     output = capsys.readouterr().out.splitlines()
@@ -645,7 +645,7 @@ def test_star_cli_runs_wait_until_color_demo_with_custom_dry_run_color(capsys) -
 
 
 def test_star_cli_reports_color_wait_timeout(capsys) -> None:
-    """验证条件等待脚本 dry-run 默认颜色超时时正常退出。"""
+    """验证模拟颜色未满足等待条件时，CLI 以退出码 1 结束并向 stderr 报告超时。"""
     assert main(["run", "wait-until-color-demo", "--dry-run"]) == 1
 
     captured = capsys.readouterr()
@@ -679,7 +679,7 @@ def test_star_cli_runs_wait_until_image_demo_with_dry_run_image(capsys) -> None:
 
 
 def test_star_cli_reports_image_wait_timeout(capsys) -> None:
-    """验证图片等待脚本 dry-run 默认未找到时正常退出。"""
+    """验证模拟图片等待超时时，CLI 以退出码 1 结束并向 stderr 报告超时。"""
     assert main(["run", "wait-until-image-demo", "--dry-run"]) == 1
 
     captured = capsys.readouterr()
@@ -946,7 +946,7 @@ def test_star_cli_ui_starts_native_desktop(monkeypatch, capsys) -> None:
     calls = []
 
     def fake_launch(**kwargs):
-        """记录原生桌面启动参数。"""
+        """捕获壳启动参数并返回成功，让 CLI 映射测试可以检查传入的工作区。"""
         calls.append(kwargs)
         return 0
 
@@ -1046,11 +1046,11 @@ def test_star_cli_recorder_reports_color_reader_setup_error(
 
     class FakePointerReader:
         def __init__(self) -> None:
-            """创建 fake 坐标 reader。"""
+            """允许指针依赖先完成构造，使测试故障精确发生在后续取色初始化阶段。"""
 
     class FakeKeyReader:
         def __init__(self) -> None:
-            """创建 fake 按键 reader。"""
+            """提供可检查的关闭状态，使后续取色初始化失败时仍能断言终端已回收。"""
             self.closed = False
 
         def close(self) -> None:

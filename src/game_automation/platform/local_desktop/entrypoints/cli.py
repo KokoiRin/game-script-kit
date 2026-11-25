@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import io
 import sys
+import time
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
@@ -20,6 +21,7 @@ from game_automation.portable.application.project_assets import (
     PROJECT_ROOT,
     image_asset_root,
 )
+from game_automation.portable.application.project_run_plan import load_saved_run_plan
 from game_automation.portable.application.project_tasks import (
     ProjectTaskCatalogResult,
     load_project_task_catalog_result,
@@ -43,7 +45,7 @@ from game_automation.portable.application.task_resources import (
 
 
 def _run_list(args: argparse.Namespace) -> int:
-    """列出所有可用任务。"""
+    """逐行输出所选工作区的有效任务名，坏文件诊断写入 stderr，查询返回 0。"""
     catalog_result = _load_cli_task_catalog_result(
         args.project_root,
     )
@@ -54,7 +56,7 @@ def _run_list(args: argparse.Namespace) -> int:
 
 
 def _run_task(args: argparse.Namespace) -> int:
-    """按名称运行任务。"""
+    """校验任务和资源后执行一次，返回任务退出码，名称缺失为 1，配置错误为 2。"""
     if args.dry_run_script_images and not args.dry_run:
         print("--dry-run-script-images requires --dry-run", file=sys.stderr)
         return 2
@@ -105,6 +107,23 @@ def _run_plan(args: argparse.Namespace) -> int:
     if args.dry_run_script_images and not args.dry_run:
         print("--dry-run-script-images requires --dry-run", file=sys.stderr)
         return 2
+    args.plan_waits = ()
+    if args.saved:
+        if args.names:
+            print("--saved cannot be combined with task names", file=sys.stderr)
+            return 2
+        try:
+            plan = load_saved_run_plan(args.project_root)
+            if plan is None:
+                raise ValueError("no saved run plan in this workspace")
+        except ValueError as exc:
+            print(str(exc), file=sys.stderr)
+            return 2
+        args.names = [entry.name for entry in plan.entries]
+        args.plan_waits = tuple(entry.wait_after_seconds for entry in plan.entries)
+    if not args.names:
+        print("provide task names or --saved", file=sys.stderr)
+        return 2
 
     plan_items_result = _resolve_plan_items(args)
     if isinstance(plan_items_result, int):
@@ -121,9 +140,21 @@ def _run_plan(args: argparse.Namespace) -> int:
             project_root=args.project_root,
         ),
         continue_on_error=args.continue_on_error,
+        wait=lambda seconds: _wait_plan(seconds, dry_run=args.dry_run),
     )
     _print_run_plan_result(result)
     return result.exit_code
+
+
+def _wait_plan(seconds: float, *, dry_run: bool) -> bool:
+    """等待任务后的空档，模拟直接略过时长，Ctrl+C 取消整轮。"""
+    print(f"任务后等待 {seconds:g} 秒" + ("（模拟跳过实际等待）" if dry_run else ""))
+    try:
+        if not dry_run:
+            time.sleep(seconds)
+        return True
+    except KeyboardInterrupt:
+        return False
 
 
 def _resolve_plan_items(args: argparse.Namespace) -> tuple[TaskPlanItem, ...] | int:
@@ -143,7 +174,7 @@ def _resolve_plan_items(args: argparse.Namespace) -> tuple[TaskPlanItem, ...] | 
             return 2
         tasks.append((task_name, task))
     items: list[TaskPlanItem] = []
-    for task_name, task in tasks:
+    for index, (task_name, task) in enumerate(tasks):
         try:
             task = prepare_task_resources(task, args.project_root)
         except (LookupError, ValueError) as exc:
@@ -159,7 +190,12 @@ def _resolve_plan_items(args: argparse.Namespace) -> tuple[TaskPlanItem, ...] | 
             except (LookupError, ValueError) as exc:
                 print(f"task details configuration failed: {exc}", file=sys.stderr)
                 return 2
-        items.append(TaskPlanItem(task_name, task, dry_run_images=dry_run_images))
+        delay = args.plan_waits[index] if args.plan_waits else 0
+        items.append(
+            TaskPlanItem(
+                task_name, task, dry_run_images=dry_run_images, wait_after_seconds=delay
+            )
+        )
     return tuple(items)
 
 
@@ -216,7 +252,7 @@ def _print_run_plan_item_result(item: TaskPlanItemResult) -> None:
 
 
 def _run_details(args: argparse.Namespace) -> int:
-    """按名称展示任务详情。"""
+    """输出任务入口和依赖检查，任务缺失返回 1，配置错误或资源缺失返回 2。"""
     try:
         task = _load_cli_task_catalog_result(
             args.project_root,
@@ -252,7 +288,7 @@ def _print_task_config_errors(catalog_result: ProjectTaskCatalogResult) -> None:
 
 
 def _describe_task(task, project_root: Path) -> TaskDetailsResult:
-    """生成 CLI 复用的任务详情。"""
+    """使用当前工作区的素材根和状态名称生成详情，保持查询与运行的资源来源一致。"""
     return describe_task_details(
         task,
         asset_root=image_asset_root(project_root),
@@ -300,7 +336,7 @@ def _print_task_details(details: TaskDetailsResult) -> None:
 
 
 def _print_section(title: str, lines: tuple[str, ...]) -> None:
-    """打印一个带标题的详情分组。"""
+    """按原顺序为每项加列表前缀，空组显示“无”。"""
     print(f"{title}：")
     if not lines:
         print("- 无")
@@ -310,7 +346,7 @@ def _print_section(title: str, lines: tuple[str, ...]) -> None:
 
 
 def _readiness_status_label(status: str) -> str:
-    """把 readiness 状态转换成 CLI 展示标签。"""
+    """将已就绪和缺失映射为固定标签，其余状态统一显示为未知。"""
     if status == "ok":
         return "[OK]"
     if status == "missing":
@@ -319,7 +355,7 @@ def _readiness_status_label(status: str) -> str:
 
 
 def _run_recorder(args: argparse.Namespace) -> int:
-    """启动坐标记录工具。"""
+    """组装终端记录器，结束或初始化失败时回收已创建的按键读取器。"""
     from game_automation.platform.desktop.adapters import (
         PyAutoGuiPixelColorReader,
         PyAutoGuiPointerPositionReader,
@@ -438,7 +474,12 @@ def main(argv: list[str] | None = None) -> int:
     run_plan_parser = subparsers.add_parser(
         "run-plan", help="Run many named tasks in order."
     )
-    run_plan_parser.add_argument("names", nargs="+", help="Task names to run in order.")
+    run_plan_parser.add_argument("names", nargs="*", help="Task names to run in order.")
+    run_plan_parser.add_argument(
+        "--saved",
+        action="store_true",
+        help="Run .star/run-plan.json from this workspace.",
+    )
     run_plan_mode = run_plan_parser.add_mutually_exclusive_group()
     run_plan_mode.add_argument(
         "--dry-run",

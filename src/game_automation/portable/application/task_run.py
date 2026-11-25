@@ -8,8 +8,9 @@
 from __future__ import annotations
 
 from contextlib import ExitStack
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from time import monotonic
+from traceback import format_exc
 
 from game_automation.portable.adapters.dry_run import (
     DryRunInputDevice,
@@ -21,6 +22,7 @@ from game_automation.portable.application.function_task_run import run_function_
 from game_automation.portable.application.runtime_ports import (
     RuntimeFactory,
     RuntimePorts,
+    RuntimeWindowIdentity,
 )
 from game_automation.portable.application.task_dependencies import (
     validate_task_resource_references,
@@ -51,7 +53,11 @@ from game_automation.portable.engine.run_events import (
 from game_automation.portable.engine.runtime_requirements import (
     inspect_runtime_requirements,
 )
-from game_automation.portable.engine.task_context import TargetNotFound, TaskContext
+from game_automation.portable.engine.task_context import (
+    TargetNotFound,
+    TaskContext,
+    TaskSkipped,
+)
 
 _REAL_TARGET_REQUIRED = (
     "real run requires target.backend macos-window or macos-window-background"
@@ -59,10 +65,21 @@ _REAL_TARGET_REQUIRED = (
 
 
 @dataclass(frozen=True, slots=True)
+class TaskDiagnostic:
+    """携带已冻结的窗口证据，资源关闭后仍可保存。"""
+
+    png: bytes | None = field(default=None, repr=False)
+    capture_error: str | None = None
+    traceback: str | None = None
+    window: RuntimeWindowIdentity | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class TaskRunResult:
     exit_code: int
     error_message: str | None = None
     finish_reason: str = "completed"
+    diagnostic: TaskDiagnostic | None = None
 
 
 def run_task(
@@ -76,6 +93,7 @@ def run_task(
     cancellation_token: CancellationToken | None = None,
     logger: RunLogger | None = None,
     emit_step_events: bool = False,
+    collect_diagnostics: bool = False,
 ) -> TaskRunResult:
     """运行一份已解析任务，并返回入口层可直接映射的结果。"""
     if emit_step_events:
@@ -88,6 +106,9 @@ def run_task(
     stage = "setup"
     execution_message = None
     result = TaskRunResult(1, "task run did not finish", "failed")
+    ports = None
+    diagnostic = None
+    traceback_text = ""
     try:
         validate_task_resource_references(task)
         if dry_run:
@@ -130,8 +151,13 @@ def run_task(
         run_function_task(prepared_task, context, cancellation_token=cancellation_token)
         result = TaskRunResult(0)
     except (TaskCancelledError, RunCancelled) as exc:
+        traceback_text = format_exc()
         result = TaskRunResult(130, str(exc), "cancelled")
+    except TaskSkipped as exc:
+        result = TaskRunResult(0, finish_reason="skipped")
+        execution_message = str(exc)
     except Exception as exc:
+        traceback_text = format_exc()
         if stage == "setup":
             reason = (
                 "configuration_failed"
@@ -151,9 +177,12 @@ def run_task(
         else:
             result = TaskRunResult(1, f"task run failed: {exc}", "failed")
     finally:
+        if collect_diagnostics:
+            diagnostic = _capture_diagnostic(ports, dry_run=dry_run)
         try:
             stack.close()
         except Exception as exc:
+            traceback_text += "\n" + format_exc()
             message = f"runtime cleanup failed: {exc}"
             if logger is not None:
                 logger.log(message)
@@ -169,6 +198,10 @@ def run_task(
         result = TaskRunResult(
             130, result.error_message or "task run cancelled", "cancelled"
         )
+    if diagnostic is not None and result.finish_reason not in {"completed", "skipped"}:
+        result = replace(
+            result, diagnostic=replace(diagnostic, traceback=traceback_text or None)
+        )
     details = {"exit_code": str(result.exit_code)}
     if result.exit_code == 0 and result.finish_reason != "completed":
         details["reason"] = execution_message or ""
@@ -182,6 +215,19 @@ def run_task(
         enabled=emit_step_events,
     )
     return result
+
+
+def _capture_diagnostic(ports: RuntimePorts | None, *, dry_run: bool) -> TaskDiagnostic:
+    """在关闭前冻结候选帧，采集故障保留为诊断值。"""
+    window = None if ports is None else ports.window_identity
+    try:
+        if dry_run:
+            raise RuntimeError("模拟运行未采集真实窗口")
+        if ports is None or ports.capture_diagnostic is None:
+            raise RuntimeError("初始化阶段未取得目标窗口采集端口")
+        return TaskDiagnostic(png=ports.capture_diagnostic(), window=window)
+    except Exception as exc:
+        return TaskDiagnostic(capture_error=str(exc), window=window)
 
 
 def _open_native_ports(

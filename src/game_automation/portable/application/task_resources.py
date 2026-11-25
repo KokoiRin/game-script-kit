@@ -79,7 +79,7 @@ def merge_target_catalogs(shared: TargetCatalog, local: TargetCatalog) -> Target
 
 
 def _merge_named_resources(shared, local):
-    """按名称合并资源元组。"""
+    """保留未被覆盖的共享条目，再追加全部局部条目，同名时局部资源优先。"""
     local_names = {item.name for item in local}
     return (*tuple(item for item in shared if item.name not in local_names), *local)
 

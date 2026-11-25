@@ -6,7 +6,7 @@ from game_automation.portable.domain import AreaWindow, Point, Rect, UnboundWind
 
 
 def test_screen_window_returns_point_unchanged() -> None:
-    """验证屏幕窗口直接使用屏幕坐标。"""
+    """验证未绑定窗口原样返回任务提供的相对点位。"""
     point = Point(10, 20)
 
     assert UnboundWindow().resolve(point) == point
@@ -27,7 +27,7 @@ def test_area_window_does_not_clamp_out_of_bounds_point() -> None:
 
 
 def test_screen_window_preserves_image_search_region() -> None:
-    """验证屏幕窗口保持整屏默认和显式屏幕搜索区域。"""
+    """验证未绑定窗口原样返回 None 或任务指定的相对搜索区域。"""
     region = Rect(10, 20, 30, 40)
 
     assert UnboundWindow().resolve_region(None) is None

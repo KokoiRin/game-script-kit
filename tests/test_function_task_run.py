@@ -39,11 +39,11 @@ class Token:
     """提供可由测试线程请求的取消信号。"""
 
     def __init__(self):
-        """创建尚未取消的事件。"""
+        """为后台执行与测试主线程创建共享事件，供测试触发协作取消。"""
         self.event = Event()
 
     def is_cancelled(self):
-        """读取当前取消请求。"""
+        """返回跨线程事件状态，供任务 tracing 和上下文的取消检查读取。"""
         return self.event.is_set()
 
 
@@ -184,11 +184,11 @@ def test_native_function_helpers_share_one_runtime_and_window(tmp_path):
         """记录已发送的绝对坐标。"""
 
         def __init__(self):
-            """初始化动作记录。"""
+            """为本次会话隔离点击序列，使测试能核对辅助函数是否共用同一设备。"""
             self.clicks = []
 
         def click(self, target):
-            """记录一个原子点击。"""
+            """保留传入的全局点位，以便断言窗口原点只被加一次。"""
             self.clicks.append(target)
 
     class Factory:

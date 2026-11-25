@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 
 @dataclass(frozen=True, slots=True)
 class TaskRunEvent:
-    """记录任务运行中的一个可观察事件。"""
+    """携带操作路径、状态及字符串详情，供日志与入口共同消费执行证据。"""
 
     event_type: str
     step_path: str = ""

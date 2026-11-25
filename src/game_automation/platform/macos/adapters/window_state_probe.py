@@ -122,7 +122,7 @@ class MacOSWindowStateProbe:
 
     @property
     def candidate_count(self) -> int:
-        """返回本探测器配置的搜索素材数量。"""
+        """返回配置候选总数，供界面与本轮实际检查数及跳过数对照。"""
         return len(self._candidates)
 
     def read(self, *, default_min_confidence=0.9) -> ScreenStateProbeResult:

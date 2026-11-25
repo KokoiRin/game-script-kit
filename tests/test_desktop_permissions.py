@@ -104,6 +104,10 @@ def test_permission_request_is_rejected_during_script_run(tmp_path, permissions)
             """提供无配置错误的控制服务。"""
             return ()
 
+        def describe_saved_plan(self):
+            """提供未配置整套流程的查询结果。"""
+            return {}
+
         def current_task_run(self):
             """模拟运行中的公开会话状态。"""
             return SimpleNamespace(running=True)

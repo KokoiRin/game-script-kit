@@ -14,6 +14,24 @@ from game_automation.portable.domain.color_pattern import (
 )
 from game_automation.portable.domain.geometry import Point, Rect
 
+_ANCHOR_GRID = {
+    "center": (1, 1),
+    "top_left": (0, 0),
+    "top_center": (1, 0),
+    "top_right": (2, 0),
+    "left_center": (0, 1),
+    "right_center": (2, 1),
+    "bottom_left": (0, 2),
+    "bottom_center": (1, 2),
+    "bottom_right": (2, 2),
+}
+
+
+def validate_image_anchor(anchor: str) -> None:
+    """校验与匹配结果共用的九种锚点名称，未知名称抛出 ValueError。"""
+    if anchor not in _ANCHOR_GRID:
+        raise ValueError(f"unknown image anchor: {anchor}")
+
 
 @dataclass(frozen=True, slots=True)
 class ImageTemplate:
@@ -41,31 +59,13 @@ class ImageMatch:
         return self.point_at("center")
 
     def point_at(self, anchor: str) -> Point:
-        """按 anchor 名称返回匹配区域内的点位。"""
-        points = {
-            "center": Point(
-                self.rect.left + self.rect.width // 2,
-                self.rect.top + self.rect.height // 2,
-            ),
-            "top_left": Point(self.rect.left, self.rect.top),
-            "top_center": Point(self.rect.left + self.rect.width // 2, self.rect.top),
-            "top_right": Point(self.rect.left + self.rect.width, self.rect.top),
-            "left_center": Point(self.rect.left, self.rect.top + self.rect.height // 2),
-            "right_center": Point(
-                self.rect.left + self.rect.width, self.rect.top + self.rect.height // 2
-            ),
-            "bottom_left": Point(self.rect.left, self.rect.top + self.rect.height),
-            "bottom_center": Point(
-                self.rect.left + self.rect.width // 2, self.rect.top + self.rect.height
-            ),
-            "bottom_right": Point(
-                self.rect.left + self.rect.width, self.rect.top + self.rect.height
-            ),
-        }
-        try:
-            return points[anchor]
-        except KeyError as exc:
-            raise ValueError(f"unknown image anchor: {anchor}") from exc
+        """按九宫格锚点计算点位，中心向下取整，右侧与底侧使用矩形边界坐标。"""
+        validate_image_anchor(anchor)
+        column, row = _ANCHOR_GRID[anchor]
+        return Point(
+            self.rect.left + self.rect.width * column // 2,
+            self.rect.top + self.rect.height * row // 2,
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,7 +74,7 @@ class ImageLookupResult:
 
     @property
     def found(self) -> bool:
-        """判断本次图片查询是否找到匹配。"""
+        """由本次匹配结果推导命中标记，调用本属性沿用已有查询结果。"""
         return self.match is not None
 
     @property
@@ -160,7 +160,7 @@ class ImageBatchMatchResult:
 
     @property
     def found(self) -> bool:
-        """判断批量匹配中该模板是否命中。"""
+        """仅实际命中的模板返回真值，未命中和跳过可再通过 skipped 区分。"""
         return self.match is not None
 
     @property

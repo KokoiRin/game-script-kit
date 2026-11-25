@@ -94,7 +94,7 @@ class TaskFlowScenario:
                 self._loading_until = self._clock() + self._loading_delay_seconds
             elif action == "confirm_task":
                 self._state = "completed"
-            else:  # pragma: no cover - allowed actions are closed above.
+            else:  # pragma: no cover
                 raise ScenarioActionError(f"unsupported scenario action: {action}")
             self._append_event(
                 kind="action",

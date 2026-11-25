@@ -30,11 +30,11 @@ class World:
         self.reads = 0
 
     def clock(self):
-        """返回有效任务时间。"""
+        """返回由输入和观察共同推进的有效时间，使期限测试具有确定性。"""
         return self.now
 
     def is_cancelled(self):
-        """读取用户终止请求。"""
+        """返回测试设定的停止标记，以验证取消与超时或平台故障的优先级。"""
         return self.cancelled
 
     def click(self, point):
@@ -231,6 +231,10 @@ def test_uncommitted_recovery_relocates_before_only_submission():
     class RecoverControl:
         """丢弃第一次尚未提交的准备结果。"""
 
+        def execute_observation(self, action):
+            """观察沿用外层输入控制，无独立恢复。"""
+            return action()
+
         def execute_input(self, operation):
             """在定位返回前模拟一次可恢复展示变化。"""
             try:
@@ -262,6 +266,10 @@ def test_committed_input_is_never_replayed_after_recovery_consumes_budget():
 
     class RecoverAfterCommit:
         """模拟必要释放完成后才返回的平台控制。"""
+
+        def execute_observation(self, action):
+            """观察沿用外层输入控制，无独立恢复。"""
+            return action()
 
         def execute_input(self, operation):
             """提交一次输入，再模拟有效任务时间经过。"""

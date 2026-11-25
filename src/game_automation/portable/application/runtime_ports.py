@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from typing import Protocol
@@ -25,6 +26,14 @@ from game_automation.portable.engine.runtime_requirements import RuntimeRequirem
 
 
 @dataclass(frozen=True, slots=True)
+class RuntimeWindowIdentity:
+    """向控制台发布当前会话实际绑定的系统窗口身份。"""
+
+    pid: int
+    window_number: int
+
+
+@dataclass(frozen=True, slots=True)
 class RuntimePorts:
     """聚合本次运行共享同一窗口与图像源的端口。"""
 
@@ -34,6 +43,8 @@ class RuntimePorts:
     image_locator: ScreenImageLocator | None = None
     screen_state_reader: ScreenStateReader | None = None
     control: RuntimeControl | None = None
+    window_identity: RuntimeWindowIdentity | None = None
+    capture_diagnostic: Callable[[], bytes] | None = None
 
 
 class RuntimeFactory(Protocol):

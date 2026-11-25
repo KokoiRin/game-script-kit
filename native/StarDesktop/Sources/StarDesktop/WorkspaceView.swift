@@ -5,6 +5,8 @@ struct WorkspaceView: View {
     @ObservedObject var session: DesktopSession
     @State var tab = "observe"
     @State var floating = true
+    @State private var selectedPlanEntry: UUID?
+    @State private var runLogExpanded = false
     let chooseWorkspace: () -> Void
     let changeCompactLayout: (Bool) -> Void
     let changeFloating: (Bool) -> Void
@@ -199,17 +201,25 @@ struct WorkspaceView: View {
 
     private var execution: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Picker("脚本", selection: $session.selectedScript) {
-                    Text("请选择脚本").tag("")
-                    ForEach(session.scripts, id: \.self) { Text($0).tag($0) }
-                }.onChange(of: session.selectedScript) { _ in session.describeScript() }
-                Button("重新加载", action: session.reloadScripts).disabled(!session.canOperate)
-            }.disabled(!session.canOperate)
+            Toggle("编排列表", isOn: $session.useSavedPlan)
+                .onChange(of: session.useSavedPlan) { _ in session.describeScript() }
+                .disabled(!session.canOperate)
+            if session.useSavedPlan {
+                planEditor
+            } else {
+                HStack {
+                    Picker("脚本", selection: $session.selectedScript) {
+                        Text("请选择脚本").tag("")
+                        ForEach(session.scripts, id: \.self) { Text($0).tag($0) }
+                    }.onChange(of: session.selectedScript) { _ in session.describeScript() }
+                    Button("重新加载", action: session.reloadScripts)
+                }
+                .disabled(!session.canOperate)
+            }
             HStack {
                 Toggle("模拟运行", isOn: $session.dryRun).toggleStyle(.checkbox)
                 Spacer()
-                Button("运行", action: session.startScript).disabled(!session.canOperate || session.selectedScript.isEmpty)
+                Button("运行", action: session.startScript).disabled(!session.canOperate || (session.useSavedPlan ? session.planEntries.isEmpty : session.selectedScript.isEmpty))
             }.disabled(!session.canOperate)
             if session.dryRun {
                 HStack {
@@ -220,18 +230,132 @@ struct WorkspaceView: View {
                 Text("真实运行会控制当前桌面；当前点位和状态区域仍按脚本及运行配置解析。")
                     .font(.caption).foregroundStyle(.secondary)
             }
-            GroupBox("入口与依赖") {
+            if !session.useSavedPlan {
+              GroupBox("入口与依赖") {
                 ScrollView { Text(session.scriptDetails.isEmpty ? "读取脚本后显示入口和依赖。" : session.scriptDetails)
                     .font(.system(.caption, design: .monospaced)).textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading).fixedSize(horizontal: false, vertical: true) }
                     .frame(height: 150)
+              }
             }
-            GroupBox("运行记录") {
+            DisclosureGroup(isExpanded: $runLogExpanded) {
                 ScrollView { Text(session.runLog.isEmpty ? "暂无运行记录。" : session.runLog)
                     .font(.system(.caption, design: .monospaced)).textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading).fixedSize(horizontal: false, vertical: true) }
-                    .frame(maxHeight: .infinity)
+                    .frame(minHeight: 80, idealHeight: 160, maxHeight: 200)
+            } label: {
+                HStack {
+                    Text("运行记录")
+                    Spacer()
+                    Button("打开记录文件夹", action: session.openRunRecords).font(.caption)
+                }
             }
         }.padding(compact ? 0 : 14)
+    }
+
+    private var planEditor: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                TextField("流程名称", text: $session.savedPlanName)
+                Button("保存", action: session.savePlan).disabled(session.planEntries.isEmpty)
+                Button("重新加载", action: session.reloadScripts)
+            }
+            HStack(alignment: .top, spacing: 8) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("全部脚本").font(.caption).foregroundStyle(.secondary)
+                    List(session.scripts, id: \.self, selection: scriptSelection) { name in
+                        Text(name).lineLimit(1).truncationMode(.middle).help(name)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .contentShape(Rectangle())
+                            .simultaneousGesture(TapGesture(count: 2).onEnded {
+                                guard session.canOperate else { return }
+                                session.selectedScript = name
+                                session.addPlanEntry()
+                                selectedPlanEntry = session.planEntries.last?.id
+                            })
+                            .tag(name)
+                    }
+                    .listStyle(.plain)
+                    .border(Color.secondary.opacity(0.2))
+                    Button("添加到右侧") {
+                        session.addPlanEntry()
+                        selectedPlanEntry = session.planEntries.last?.id
+                    }.disabled(session.selectedScript.isEmpty)
+                }.frame(maxWidth: .infinity)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("执行顺序").font(.caption).foregroundStyle(.secondary)
+                    List(session.planEntries, selection: $selectedPlanEntry) { entry in
+                        Text(entry.name).lineLimit(1).truncationMode(.middle).help(entry.name)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .contentShape(Rectangle())
+                            .simultaneousGesture(TapGesture(count: 2).onEnded {
+                                guard session.canOperate else { return }
+                                session.removePlanEntry(entry.id)
+                                if selectedPlanEntry == entry.id { selectedPlanEntry = nil }
+                            })
+                            .tag(entry.id)
+                    }
+                    .listStyle(.plain)
+                    .border(Color.secondary.opacity(0.2))
+                    HStack(spacing: 8) {
+                        Button {
+                            if let id = selectedPlanEntry { session.movePlanEntry(id, by: -1) }
+                        } label: { Image(systemName: "arrow.up") }
+                        .accessibilityLabel("上移任务")
+                        .disabled(selectedPlanIndex == nil || selectedPlanIndex == 0)
+                        Button {
+                            if let id = selectedPlanEntry { session.movePlanEntry(id, by: 1) }
+                        } label: { Image(systemName: "arrow.down") }
+                        .accessibilityLabel("下移任务")
+                        .disabled(selectedPlanIndex == nil || selectedPlanIndex == session.planEntries.count - 1)
+                        Button {
+                            if let id = selectedPlanEntry { session.removePlanEntry(id) }
+                            selectedPlanEntry = nil
+                        } label: { Image(systemName: "minus") }
+                        .accessibilityLabel("移除任务")
+                        .disabled(selectedPlanIndex == nil)
+                        Spacer(minLength: 0)
+                    }
+                }.frame(maxWidth: .infinity)
+            }.frame(minHeight: 130, maxHeight: .infinity)
+            HStack(spacing: 5) {
+                Spacer()
+                Text("完成后等待").foregroundStyle(.secondary)
+                TextField("秒数", text: selectedPlanWait).frame(width: 65)
+                    .textFieldStyle(.roundedBorder).accessibilityLabel("选中任务完成后等待秒数")
+                Text("秒").foregroundStyle(.secondary)
+            }
+            .font(.caption)
+            .disabled(selectedPlanIndex == nil)
+        }
+        .disabled(!session.canOperate)
+    }
+
+    private var scriptSelection: Binding<String?> {
+        Binding(
+            get: { session.selectedScript.isEmpty ? nil : session.selectedScript },
+            set: { value in
+                session.selectedScript = value ?? ""
+                session.describeScript()
+            }
+        )
+    }
+
+    private var selectedPlanIndex: Int? {
+        session.planEntries.firstIndex { $0.id == selectedPlanEntry }
+    }
+
+    private var selectedPlanWait: Binding<String> {
+        Binding(
+            get: {
+                guard let index = selectedPlanIndex else { return "" }
+                return session.planEntries[index].waitSeconds
+            },
+            set: { value in
+                if let index = selectedPlanIndex {
+                    session.planEntries[index].waitSeconds = value
+                }
+            }
+        )
     }
 }

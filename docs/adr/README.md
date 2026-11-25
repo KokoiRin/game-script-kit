@@ -38,6 +38,12 @@ ADR 保存重要设计取舍的状态、理由和代价。下表收录当前已�
 
 | [0016](0016-native-window-only-runtime.md) | accepted | 真实运行只使用 Python 任务和原生窗口，去掉屏幕坐标与 screen-states | 用户确认保留 Python 任务并收成单一执行模型 |
 
+| [0017](0017-saved-task-plans.md) | accepted | 保存已有任务顺序、任务后等待与明确跳过，CLI 和原生壳共用编排 | 用户要求日常整套流程与活动不可用后继续 |
+
+| [0018](0018-window-companion-and-movement.md) | accepted | 控制台始终贴右、非激活显示与同一运行窗口平移后继续 | 用户确认固定尺寸、允许越屏并要求移动后接续 |
+
+| [0019](0019-editable-plans-and-run-records.md) | accepted | 可编辑重复任务列表、原子启动快照与本地运行诊断 | 用户要求自行编排角色日常并在失败时留档 |
+
 ## 如何新增
 
 只有出现需要保留理由的重要取舍时再新增；小修不要求写 ADR，也不要求每次修改更新所有文档。讨论尚未形成决定时，可直接写设计稿，不必先建 ADR。

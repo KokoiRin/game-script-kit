@@ -97,7 +97,7 @@ def test_batch_probe_uses_one_frame_for_all_templates_and_relative_regions(tmp_p
 
     class Source:
         def __init__(self):
-            """初始化截图次数。"""
+            """从零收集本轮截图调用次数，使多模板测试能断言只采集一帧。"""
             self.calls = 0
 
         def screenshot(self):

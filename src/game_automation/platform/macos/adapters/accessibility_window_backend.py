@@ -110,7 +110,7 @@ class MacOSAccessibilityWindowBackend(MacOSWindowBackend):
         raise _raise_error(window.title)
 
     def _read_ax_windows(self, pid: int) -> tuple[object, ...]:
-        """读取一个应用进程的 Accessibility 顶层窗口列表。"""
+        """返回指定 PID 的 AX 窗口元组，系统查询失败时抛出权限诊断。"""
         accessibility = self._accessibility
         application_element = accessibility.AXUIElementCreateApplication(pid)
         error, windows = accessibility.AXUIElementCopyAttributeValue(
@@ -126,7 +126,7 @@ class MacOSAccessibilityWindowBackend(MacOSWindowBackend):
         return tuple(windows or ())
 
     def _read_ax_text(self, element: object, attribute: object) -> str:
-        """读取可空 Accessibility 文本属性。"""
+        """返回去除首尾空白的 AX 文本，属性缺失或读取失败时返回空字符串。"""
         error, value = self._accessibility.AXUIElementCopyAttributeValue(
             element,
             attribute,
@@ -205,7 +205,7 @@ class MacOSAccessibilityWindowBackend(MacOSWindowBackend):
             if any(
                 _application_name_matches(name, requested) for name in names if name
             ):
-                pids.append(int(_objc_value(running_application, "processIdentifier")))
+                pids.append(int(running_application.processIdentifier()))
         return frozenset(pids)
 
 
@@ -237,21 +237,15 @@ def _read_ax_pair(
     return None
 
 
-def _objc_value(instance: object, attribute: str) -> object:
-    """兼容读取 PyObjC 无参方法或测试替身属性。"""
-    value = getattr(instance, attribute)
-    return value() if callable(value) else value
-
-
 def _optional_objc_text(instance: object, attribute: str) -> str:
-    """读取可空 PyObjC 文本属性并归一化为空字符串。"""
-    value = _objc_value(instance, attribute)
+    """调用指定的 PyObjC 无参文本访问器，将 None 归一化为空字符串。"""
+    value = getattr(instance, attribute)()
     return "" if value is None else str(value)
 
 
 def _running_application_executable_name(running_application: object) -> str:
     """读取运行应用可执行文件名，缺失 URL 时返回空字符串。"""
-    executable_url = _objc_value(running_application, "executableURL")
+    executable_url = running_application.executableURL()
     if executable_url is None:
         return ""
     return _optional_objc_text(executable_url, "lastPathComponent")

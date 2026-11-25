@@ -10,7 +10,7 @@ import io
 import threading
 from collections import deque
 from collections.abc import Callable
-from contextlib import redirect_stderr, redirect_stdout
+from contextlib import contextmanager, redirect_stderr, redirect_stdout
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -19,10 +19,29 @@ from game_automation.portable.application.project_assets import (
     PROJECT_ROOT,
     image_asset_root,
 )
-from game_automation.portable.application.runtime_ports import RuntimeFactory
+from game_automation.portable.application.project_run_plan import (
+    SavedPlanEntry,
+    SavedRunPlan,
+    load_saved_run_plan,
+    save_run_plan,
+    saved_run_plan_data,
+)
+from game_automation.portable.application.run_archive import RunArchive
+from game_automation.portable.application.run_plan import (
+    TaskPlanItem,
+    TaskPlanRunResult,
+    run_task_plan,
+)
+from game_automation.portable.application.runtime_ports import (
+    RuntimeFactory,
+    RuntimeWindowIdentity,
+)
 from game_automation.portable.application.task_catalog import (
     TaskCatalog,
     TaskNotFoundError,
+)
+from game_automation.portable.application.task_dependencies import (
+    validate_task_resource_references,
 )
 from game_automation.portable.application.task_details import (
     TaskDetailsResult,
@@ -34,7 +53,7 @@ from game_automation.portable.application.task_resources import (
     prepare_task_resources,
 )
 from game_automation.portable.application.task_run import run_task
-from game_automation.portable.domain.task import FunctionTask
+from game_automation.portable.domain.task import FunctionTask, TaskTarget
 from game_automation.portable.engine.run_events import (
     TaskRunEvent,
     format_task_run_event,
@@ -59,11 +78,39 @@ class TaskRunStatus:
     stderr: str = ""
     finish_reason: str = "idle"
     events: tuple[TaskRunEvent, ...] = ()
+    artifacts_path: str = ""
 
     def __post_init__(self) -> None:
         """运行中的状态默认使用 running 作为结束原因占位。"""
         if self.running and self.finish_reason == "idle":
             object.__setattr__(self, "finish_reason", "running")
+
+
+@dataclass(frozen=True, slots=True)
+class CompanionSelection:
+    """提供本次运行已验证的窗口身份或空闲时的目标声明。"""
+
+    running: bool
+    target: TaskTarget | None = None
+    window: RuntimeWindowIdentity | None = None
+
+
+class _TrackedRuntimeFactory:
+    """将真实会话身份交给运行状态，关闭后撤销该身份。"""
+
+    def __init__(self, factory, session):
+        """借用底层工厂及本次运行状态。"""
+        self._factory, self._session = factory, session
+
+    @contextmanager
+    def open(self, target, requirements, cancellation, logger):
+        """只在底层独占会话实际打开期间发布窗口身份。"""
+        with self._factory.open(target, requirements, cancellation, logger) as ports:
+            self._session.set_window(ports.window_identity)
+            try:
+                yield ports
+            finally:
+                self._session.set_window(None)
 
 
 class _CancellationFlag:
@@ -72,28 +119,33 @@ class _CancellationFlag:
         self._event = threading.Event()
 
     def cancel(self) -> None:
-        """请求后台任务取消运行。"""
+        """持久设置线程安全停止标记，执行线程在后续取消检查点读取它。"""
         self._event.set()
 
     def is_cancelled(self) -> bool:
-        """返回后台任务是否已收到取消请求。"""
+        """读取停止请求标记，返回真值仅表示已请求取消。"""
         return self._event.is_set()
+
+    def wait(self, seconds: float) -> bool:
+        """等待指定秒数，收到取消立即返回未完成。"""
+        return not self._event.wait(seconds)
 
 
 class _ThreadSafeRunLog:
-    def __init__(self) -> None:
+    def __init__(self, archive: RunArchive | None = None) -> None:
         """初始化线程安全 stdout/stderr 缓冲。"""
         self._lock = threading.Lock()
         self._stdout = io.StringIO()
         self._stderr = io.StringIO()
         self._events: deque[TaskRunEvent] = deque(maxlen=2048)
+        self._archive = archive
 
     def stdout_writer(self):
-        """返回用于重定向 stdout 的 writer。"""
+        """创建接入当前会话 stdout 缓冲与归档的写入器，供 redirect_stdout 使用。"""
         return _RunLogWriter(self.write_stdout)
 
     def stderr_writer(self):
-        """返回用于重定向 stderr 的 writer。"""
+        """创建接入当前会话 stderr 缓冲与归档的写入器，供 redirect_stderr 使用。"""
         return _RunLogWriter(self.write_stderr)
 
     def log(self, message: str) -> None:
@@ -109,17 +161,27 @@ class _ThreadSafeRunLog:
                     details={key: value[:4096] for key, value in event.details.items()},
                 )
             )
-            self._append(self._stdout, f"{format_task_run_event(event)}\n")
+            text = f"{format_task_run_event(event)}\n"
+            self._persist("stdout", text)
+            self._append(self._stdout, text)
 
     def write_stdout(self, text: str) -> None:
-        """追加一段 stdout 文本。"""
+        """在日志锁内同时写 stdout 归档和有界界面缓冲。"""
         with self._lock:
+            self._persist("stdout", text)
             self._append(self._stdout, text)
 
     def write_stderr(self, text: str) -> None:
-        """追加一段 stderr 文本。"""
+        """在日志锁内同时写 stderr 归档和有界界面缓冲。"""
         with self._lock:
+            self._persist("stderr", text)
             self._append(self._stderr, text)
+
+    def _persist(self, channel: str, text: str) -> None:
+        """把完整文本交给当前运行归档。"""
+        if self._archive is None:
+            return
+        self._archive.write(channel, text)
 
     @staticmethod
     def _append(stream: io.StringIO, text: str) -> None:
@@ -147,7 +209,7 @@ class _ThreadSafeRunLog:
 
 class _RunLogWriter:
     def __init__(self, write_text: Callable[[str], None]) -> None:
-        """保存日志写入函数。"""
+        """借用调用方的追加函数，将标准流写入转交给所属会话。"""
         self._write_text = write_text
 
     def write(self, text: str) -> int:
@@ -161,7 +223,7 @@ class _RunLogWriter:
 
 class _StringRunLogger:
     def __init__(self, stream: io.StringIO) -> None:
-        """保存同步运行时要写入的文本流。"""
+        """借用调用方的内存流，同步诊断与任务输出汇入同一捕获结果。"""
         self._stream = stream
 
     def log(self, message: str) -> None:
@@ -174,26 +236,47 @@ class _StringRunLogger:
 
 
 class _BackgroundScriptRun:
-    def __init__(self) -> None:
-        """初始化后台脚本会话状态。"""
+    def __init__(self, archive: RunArchive | None = None) -> None:
+        """为本次运行创建独立取消标记和日志缓冲，并以运行中状态等待线程结算。"""
         self.cancellation = _CancellationFlag()
-        self.log = _ThreadSafeRunLog()
+        self.archive = archive
+        self.log = _ThreadSafeRunLog(archive)
         self._lock = threading.Lock()
         self._running = True
         self._exit_code: int | None = None
         self._finish_reason = "running"
+        self._window: RuntimeWindowIdentity | None = None
+        self._last_window: RuntimeWindowIdentity | None = None
+
+    def set_window(self, window: RuntimeWindowIdentity | None) -> None:
+        """在会话开启和关闭边界发布不可变窗口身份。"""
+        with self._lock:
+            self._window = window
+            if window is not None:
+                self._last_window = window
+
+    def companion_selection(self) -> CompanionSelection:
+        """运行间隙沿用本次已验证身份，新运行拥有独立状态。"""
+        with self._lock:
+            return CompanionSelection(
+                self._running, window=self._window or self._last_window
+            )
 
     def finish(self, exit_code: int, finish_reason: str) -> None:
-        """记录后台脚本结束状态。"""
+        """先结算持久记录，再在状态锁内发布退出码与结束原因。"""
+        if self.archive is not None:
+            self.archive.finish(exit_code, finish_reason)
         with self._lock:
             self._running = False
             self._exit_code = exit_code
             self._finish_reason = finish_reason
 
     def snapshot(self) -> TaskRunStatus:
-        """返回后台脚本当前状态快照。"""
+        """组合当前日志、事件和归档警告，运行期间统一返回 running 结束原因。"""
         stdout, stderr = self.log.snapshot()
         events = self.log.snapshot_events()
+        if self.archive is not None and self.archive.warnings:
+            stderr += "\n" + "\n".join(self.archive.warnings)
         with self._lock:
             return TaskRunStatus(
                 running=self._running,
@@ -202,6 +285,9 @@ class _BackgroundScriptRun:
                 stderr=stderr,
                 finish_reason="running" if self._running else self._finish_reason,
                 events=events,
+                artifacts_path=str(self.archive.path)
+                if self.archive and self.archive.path
+                else "",
             )
 
 
@@ -229,7 +315,7 @@ class LocalControlApplication:
         return self._project_root
 
     def list_tasks(self) -> tuple[str, ...]:
-        """返回 UI 可展示的任务名称列表。"""
+        """按 catalog 的注册顺序提供任务名，供界面展示当前工作区的有效任务。"""
         return self._catalog.list_names()
 
     def list_task_config_errors(self) -> tuple[TaskLoadError, ...]:
@@ -239,6 +325,26 @@ class LocalControlApplication:
     def list_window_state_names(self) -> tuple[str, ...]:
         """列出窗口规则中的界面状态名称，配置不可用时返回空列表。"""
         return load_task_state_names(None, self._project_root) or ()
+
+    def companion_selection(
+        self, name: str = "", *, use_saved_plan: bool = False
+    ) -> CompanionSelection:
+        """运行时采用真实绑定，空闲时从选中任务或唯一共同声明选择目标。"""
+        with self._run_lock:
+            if self._current_run is not None:
+                active = self._current_run.companion_selection()
+                if active.running:
+                    return active
+        if use_saved_plan:
+            plan = load_saved_run_plan(self._project_root)
+            names = () if plan is None else tuple(item.name for item in plan.entries)
+        else:
+            names = (name,) if name else self.list_tasks()
+        targets = {self._catalog.get(item).target for item in names}
+        targets.discard(None)
+        return CompanionSelection(
+            False, target=next(iter(targets)) if len(targets) == 1 else None
+        )
 
     def describe_task(self, name: str) -> TaskDetailsResult:
         """返回 UI 可展示的任务入口和依赖摘要。"""
@@ -310,7 +416,108 @@ class LocalControlApplication:
         dry_run_screen_state: str = "未知",
         dry_run_images: tuple[str, ...] = (),
     ) -> TaskRunStatus:
-        """启动一个后台任务运行会话。"""
+        """复用唯一运行槽启动单项任务，返回启动状态或已经占用该槽的会话状态。"""
+        return self._start_tasks(
+            (SavedPlanEntry(name),),
+            dry_run=dry_run,
+            dry_run_color=dry_run_color,
+            dry_run_screen_state=dry_run_screen_state,
+            dry_run_images=dry_run_images,
+        )
+
+    def describe_saved_plan(self) -> dict:
+        """读取流程名称与顺序，逐项展示任务的依赖诊断。"""
+        plan = load_saved_run_plan(self._project_root)
+        if plan is None:
+            return {}
+        steps = []
+        for index, entry in enumerate(plan.entries, 1):
+            details = self.describe_task(entry.name)
+            if details.exit_code:
+                raise ValueError(
+                    f"plan item {entry.name}: {details.stderr or details.readiness}"
+                )
+            delay = (
+                f"，结束后等待 {entry.wait_after_seconds:g} 秒"
+                if entry.wait_after_seconds
+                else ""
+            )
+            steps.append(f"{index}. {entry.name}{delay}")
+        return {**saved_run_plan_data(plan), "steps": steps}
+
+    def read_saved_plan(self) -> dict:
+        """返回原始流程条目，允许界面修复失效的任务引用。"""
+        plan = load_saved_run_plan(self._project_root)
+        return {} if plan is None else saved_run_plan_data(plan)
+
+    def save_plan(self, plan: SavedRunPlan) -> dict:
+        """空闲时校验完整任务引用并原子保存当前流程。"""
+        with self._run_lock:
+            if self._current_run is not None and self._current_run.snapshot().running:
+                raise RuntimeError("a task is running; stop it before editing the plan")
+            for entry in plan.entries:
+                validate_task_resource_references(
+                    self._task_with_shared_resources(self._catalog.get(entry.name))
+                )
+            save_run_plan(self._project_root, plan)
+        return saved_run_plan_data(plan)
+
+    def start_saved_plan(
+        self,
+        *,
+        dry_run: bool,
+        dry_run_color: str = "#000000",
+        dry_run_screen_state: str = "未知",
+    ) -> TaskRunStatus:
+        """启动工作区保存的整套流程，复用单任务的运行槽与取消信号。"""
+        try:
+            plan = load_saved_run_plan(self._project_root)
+            if plan is None:
+                raise ValueError("no saved run plan in this workspace")
+        except ValueError as exc:
+            return TaskRunStatus(
+                False, 2, stderr=str(exc), finish_reason="configuration_failed"
+            )
+        return self._start_tasks(
+            plan.entries,
+            dry_run=dry_run,
+            dry_run_color=dry_run_color,
+            dry_run_screen_state=dry_run_screen_state,
+            dry_run_images=(),
+            is_plan=True,
+        )
+
+    def start_plan(
+        self,
+        plan: SavedRunPlan,
+        *,
+        dry_run: bool,
+        dry_run_color: str = "#000000",
+        dry_run_screen_state: str = "未知",
+    ) -> TaskRunStatus:
+        """在同一运行锁内保存当前草稿并启动其冻结快照。"""
+        return self._start_tasks(
+            plan.entries,
+            dry_run=dry_run,
+            dry_run_color=dry_run_color,
+            dry_run_screen_state=dry_run_screen_state,
+            dry_run_images=(),
+            is_plan=True,
+            plan_to_save=plan,
+        )
+
+    def _start_tasks(
+        self,
+        entries: tuple[SavedPlanEntry, ...],
+        *,
+        dry_run: bool,
+        dry_run_color: str,
+        dry_run_screen_state: str,
+        dry_run_images: tuple[str, ...],
+        is_plan: bool = False,
+        plan_to_save: SavedRunPlan | None = None,
+    ) -> TaskRunStatus:
+        """预先解析所有任务并启动同一个后台工作线程。"""
         with self._run_lock:
             if self._current_run is not None and self._current_run.snapshot().running:
                 current = self._current_run.snapshot()
@@ -321,35 +528,45 @@ class LocalControlApplication:
                     stderr=current.stderr + "task is already running\n",
                     finish_reason=current.finish_reason,
                     events=current.events,
+                    artifacts_path=current.artifacts_path,
                 )
-            try:
-                task = self._task_with_shared_resources(self._catalog.get(name))
-            except TaskNotFoundError as exc:
-                return TaskRunStatus(
-                    running=False,
-                    exit_code=1,
-                    stderr=str(exc),
-                    finish_reason="task_not_found",
-                )
-            except (LookupError, ValueError) as exc:
-                return TaskRunStatus(
-                    running=False,
-                    exit_code=2,
-                    stderr=f"task resource configuration failed: {exc}\n",
-                    finish_reason="configuration_failed",
-                )
-
-            session = _BackgroundScriptRun()
+            archive = RunArchive(self._project_root, entries, dry_run=dry_run)
+            session = _BackgroundScriptRun(archive)
             self._current_run = session
+            try:
+                items = []
+                for entry in entries:
+                    task = self._task_with_shared_resources(
+                        self._catalog.get(entry.name)
+                    )
+                    if is_plan:
+                        validate_task_resource_references(task)
+                    images = dry_run_images
+                    if dry_run and is_plan:
+                        images = self.describe_task(entry.name).image_dependencies
+                    items.append(
+                        TaskPlanItem(entry.name, task, images, entry.wait_after_seconds)
+                    )
+                if plan_to_save is not None:
+                    save_run_plan(self._project_root, plan_to_save)
+            except TaskNotFoundError as exc:
+                session.log.write_stderr(str(exc))
+                session.finish(1, "task_not_found")
+                return session.snapshot()
+            except (LookupError, ValueError, OSError) as exc:
+                session.log.write_stderr(f"task resource configuration failed: {exc}\n")
+                session.finish(2, "configuration_failed")
+                return session.snapshot()
+
             thread = threading.Thread(
                 target=self._run_task_session,
                 args=(
-                    task,
+                    tuple(items),
                     dry_run,
                     dry_run_color,
                     dry_run_screen_state,
-                    dry_run_images if dry_run else (),
                     session,
+                    is_plan,
                 ),
                 daemon=True,
             )
@@ -358,14 +575,14 @@ class LocalControlApplication:
             return session.snapshot()
 
     def current_task_run(self) -> TaskRunStatus:
-        """返回当前后台任务运行状态。"""
+        """未启动过任务时返回空闲值，已有会话则返回其快照并保留完成结果。"""
         with self._run_lock:
             if self._current_run is None:
                 return TaskRunStatus(running=False)
             return self._current_run.snapshot()
 
     def stop_running_task(self) -> TaskRunStatus:
-        """请求停止当前后台任务运行。"""
+        """设置当前会话的取消标记后立即返回快照，实际线程退出由等待接口确认。"""
         with self._run_lock:
             if self._current_run is None:
                 return TaskRunStatus(
@@ -385,34 +602,77 @@ class LocalControlApplication:
 
     def _run_task_session(
         self,
-        task: FunctionTask,
+        items: tuple[TaskPlanItem, ...],
         dry_run: bool,
         dry_run_color: str,
         dry_run_screen_state: str,
-        dry_run_images: tuple[str, ...],
         session: _BackgroundScriptRun,
+        is_plan: bool,
     ) -> None:
         """在后台线程中运行任务并写入会话状态。"""
         exit_code, finish_reason = 1, "failed"
+        item_index = 0
         try:
             with (
                 redirect_stdout(session.log.stdout_writer()),
                 redirect_stderr(session.log.stderr_writer()),
             ):
-                result = run_task(
-                    task,
-                    dry_run=dry_run,
-                    dry_run_color=dry_run_color,
-                    dry_run_images=dry_run_images,
-                    dry_run_screen_state=dry_run_screen_state,
-                    real_runtime_factory=self._real_runtime_factory,
-                    cancellation_token=session.cancellation,
-                    logger=session.log,
-                    emit_step_events=True,
+
+                def run_item(item):
+                    """运行一项独立窗口任务并记录顺序与结果。"""
+                    if session.cancellation.is_cancelled():
+                        return TaskPlanRunResult(130, "cancelled")
+                    nonlocal item_index
+                    item_index += 1
+                    if session.archive is not None:
+                        session.archive.start_item(item_index)
+                    session.log.log(f"流程进度 {item_index}/{len(items)}")
+                    session.log.log(f"开始任务 {item.name}")
+                    outcome = run_task(
+                        item.task,
+                        dry_run=dry_run,
+                        dry_run_color=dry_run_color,
+                        dry_run_images=item.dry_run_images if dry_run else (),
+                        dry_run_screen_state=dry_run_screen_state,
+                        real_runtime_factory=(
+                            None
+                            if self._real_runtime_factory is None
+                            else _TrackedRuntimeFactory(
+                                self._real_runtime_factory, session
+                            )
+                        ),
+                        cancellation_token=session.cancellation,
+                        logger=session.log,
+                        emit_step_events=True,
+                        collect_diagnostics=True,
+                    )
+                    if session.archive is not None:
+                        session.archive.finish_item(item_index, outcome)
+                    if outcome.error_message:
+                        session.log.write_stderr(f"{outcome.error_message}\n")
+                    session.log.log(f"任务结束 {item.name} · {outcome.finish_reason}")
+                    return TaskPlanRunResult(outcome.exit_code, outcome.finish_reason)
+
+                def wait_after(seconds):
+                    """在已关闭上一任务窗口会话后执行可取消等待。"""
+                    if session.archive is not None:
+                        session.archive.wait_after()
+                    session.log.log(
+                        f"任务后等待 {seconds:g} 秒"
+                        + ("（模拟跳过实际等待）" if dry_run else "")
+                    )
+                    return (
+                        not session.cancellation.is_cancelled()
+                        if dry_run
+                        else session.cancellation.wait(seconds)
+                    )
+
+                result = (
+                    run_task_plan(items, run_item=run_item, wait=wait_after)
+                    if is_plan
+                    else run_item(items[0])
                 )
             exit_code, finish_reason = result.exit_code, result.finish_reason
-            if result.error_message is not None:
-                session.log.write_stderr(f"{result.error_message}\n")
         except Exception as exc:
             message = f"unexpected task run failure: {type(exc).__name__}: {exc}"
             session.log.write_stderr(f"{message}\n")
@@ -425,6 +685,8 @@ class LocalControlApplication:
             )
         finally:
             # 会话状态由本层持有，即使用例漏掉异常归一化也必须释放运行槽位。
+            if session.cancellation.is_cancelled():
+                exit_code, finish_reason = 130, "cancelled"
             session.finish(exit_code, finish_reason)
 
     def _image_asset_root(self) -> Path:

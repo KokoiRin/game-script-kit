@@ -70,7 +70,7 @@ def test_native_launcher_interrupt_requests_graceful_termination(tmp_path, monke
             return 0
 
         def send_signal(self, signum):
-            """记录退出请求。"""
+            """只收集信号编号，使测试可核对中断请求的转发顺序。"""
             calls.append(("signal", signum))
 
     monkeypatch.setattr(

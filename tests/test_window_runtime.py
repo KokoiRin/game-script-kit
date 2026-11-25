@@ -41,7 +41,7 @@ class Clock:
         self.now = 10.0
 
     def __call__(self):
-        """返回当前时间。"""
+        """返回受睡眠替身推进的时刻，供新帧与恢复期限使用同一时间源。"""
         return self.now
 
     def sleep(self, amount):
@@ -121,17 +121,13 @@ def test_color_uses_independent_pixel_ratios_and_global_origin():
         WindowColorReader(session).read_color(Point(99, 206))
 
 
-def test_session_rejects_move_and_replacement_before_capture():
-    """位置变化和身份替换都不能继续读取旧窗口。"""
+def test_session_rejects_replacement_before_capture():
+    """稳定身份丢失仍明确失败，不更换目标。"""
     session, source, binding, _ = setup_session()
-    binding.bounds["X"] = 101
-    with pytest.raises(WindowCaptureError, match="位置"):
-        session.screenshot()
-    assert source.captures == 0
-    binding.bounds["X"] = 100
     binding.error = "window replaced"
     with pytest.raises(WindowCaptureError, match="replaced"):
         session.screenshot()
+    assert source.captures == 0
 
 
 def test_input_requires_newer_sequence_and_later_system_timestamp():
@@ -398,7 +394,7 @@ def test_factory_uses_new_owned_source_for_each_successful_or_cancelled_run(
     )
     target = TaskTarget("Example", "Game", 80, 60, backend="macos-window")
     with factory.open(target, RuntimeRequirements(), None, None) as first:
-        assert first.window == AreaWindow(candidate.rect)
+        assert first.window.resolve(Point(0, 0)) == Point(100, 200)
     with pytest.raises(TaskCancelledError):
         with factory.open(target, RuntimeRequirements(), None, None):
             raise TaskCancelledError("cancel")
@@ -492,18 +488,52 @@ def test_session_selects_isolated_background_device_with_same_visual_source(
         {"X": 100, "Y": 190, "Width": 80, "Height": 60},
     ],
 )
-def test_window_move_error_reports_original_and_current_geometry(bounds):
-    """移动错误必须提供前后逻辑矩形，以区分系统调整和素材问题。"""
+def test_window_move_waits_for_fresh_source_in_new_geometry(bounds):
+    """平移会采纳新位置，过期源仍必须失败。"""
     session, source, binding, _ = setup_session()
     binding.bounds = bounds
-    with pytest.raises(WindowCaptureError) as caught:
+    with pytest.raises(WindowCaptureError, match="新窗口画面"):
         session.screenshot()
-    message = str(caught.value)
-    assert "位置已变化" in message
-    assert "原窗口=(100, 200, 80, 60)" in message
-    assert (
-        f"当前窗口={(bounds['X'], bounds['Y'], bounds['Width'], bounds['Height'])}"
-        in message
+    assert session.rect == Rect(bounds["X"], bounds["Y"], 80, 60)
+    assert source.captures > 0
+
+
+def test_diagnostic_waits_for_lazy_first_frame_without_cancel_recovery():
+    """诊断只读等待首帧，已经取消也能有界取得画面。"""
+    from game_automation.platform.macos.adapters.window_stream import WindowFramePending
+
+    session, source, _, clock = setup_session()
+    original = source.screenshot
+    calls = []
+
+    def lazy_frame():
+        """首读模拟流启动后尚无画面。"""
+        calls.append(1)
+        if len(calls) == 1:
+            raise WindowFramePending("pending")
+        return original()
+
+    source.screenshot = lazy_frame
+    assert session.capture_diagnostic().startswith(b"\x89PNG")
+    assert len(calls) == 2 and clock.now >= 10.02
+
+
+def test_diagnostic_stale_frame_has_bounded_wait():
+    """旧缓存不会使诊断无限等待。"""
+    session, _, _, clock = setup_session((FrameProof(1, 1),))
+    with pytest.raises(WindowCaptureError, match="超时"):
+        session.capture_diagnostic()
+    assert 11 <= clock.now < 11.1
+
+
+def test_diagnostic_requires_a_frame_after_last_input():
+    """点击后立即失败时，诊断画面必须越过同一次输入的源帧屏障。"""
+    session, source, _, clock = setup_session(
+        (FrameProof(1, 9.9), FrameProof(1, 9.9), FrameProof(2, 10.02))
     )
-    assert "重新运行" in message
-    assert source.captures == 0
+    session.screenshot().close()
+    session.input_finished()
+    assert session.capture_diagnostic().startswith(b"\x89PNG")
+    assert source.proof.sequence == 2
+    assert source.proof.captured_at == 10.02
+    assert clock.now >= 10.02

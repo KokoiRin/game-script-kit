@@ -14,7 +14,8 @@ from game_automation.portable.application.ports import FocusedApplicationWindow
 from game_automation.portable.domain import Rect
 
 
-def test_macos_accessibility_backend_reads_and_converts_ax_windows() -> None:
+@pytest.mark.parametrize("application", ["safari", "Safari浏览器", "com.apple.Safari"])
+def test_macos_accessibility_backend_reads_and_converts_ax_windows(application) -> None:
     """验证 backend 读取目标应用具名窗口及其 Accessibility 矩形。"""
 
     class FakeAccessibility:
@@ -64,18 +65,18 @@ def test_macos_accessibility_backend_reads_and_converts_ax_windows() -> None:
     class FakeExecutableURL:
         @staticmethod
         def lastPathComponent():
-            """返回稳定可执行文件名。"""
+            """提供英文可执行名，与中文显示名共同验证应用名匹配。"""
             return "Safari"
 
     class FakeRunningApplication:
         @staticmethod
         def localizedName():
-            """返回本地化应用名。"""
+            """提供中文应用名，与英文可执行名区分两种应用标识。"""
             return "Safari浏览器"
 
         @staticmethod
         def bundleIdentifier():
-            """返回 bundle id。"""
+            """提供主应用的完整 bundle id，便于与 Web Content 辅助进程区分。"""
             return "com.apple.Safari"
 
         @staticmethod
@@ -85,7 +86,7 @@ def test_macos_accessibility_backend_reads_and_converts_ax_windows() -> None:
 
         @staticmethod
         def processIdentifier():
-            """返回应用 pid。"""
+            """固定主应用 PID 为 42，后续 AX 查询必须使用该进程。"""
             return 42
 
     class FakeHelperApplication:
@@ -96,7 +97,7 @@ def test_macos_accessibility_backend_reads_and_converts_ax_windows() -> None:
 
         @staticmethod
         def bundleIdentifier():
-            """返回辅助进程 bundle id。"""
+            """提供带 WebContent 后缀的辅助进程标识，检验精确匹配是否排除近似名称。"""
             return "com.apple.Safari.WebContent"
 
         @staticmethod
@@ -106,20 +107,20 @@ def test_macos_accessibility_backend_reads_and_converts_ax_windows() -> None:
             class HelperExecutableURL:
                 @staticmethod
                 def lastPathComponent():
-                    """返回辅助进程可执行文件名。"""
+                    """提供带空格后缀的辅助程序名，检验主程序名是否被错误地按前缀匹配。"""
                     return "Safari Web Content"
 
             return HelperExecutableURL()
 
         @staticmethod
         def processIdentifier():
-            """返回辅助进程 pid。"""
+            """将辅助进程固定为 PID 43，使测试能识别错误的 AX 查询目标。"""
             return 43
 
     class FakeWorkspace:
         @staticmethod
         def runningApplications():
-            """返回当前运行应用。"""
+            """同时返回主应用与名称近似的辅助进程，迫使选择逻辑区分两者。"""
             return (FakeRunningApplication(), FakeHelperApplication())
 
     class FakeNSWorkspace:
@@ -136,7 +137,7 @@ def test_macos_accessibility_backend_reads_and_converts_ax_windows() -> None:
         appkit=FakeAppKit(),
     )
 
-    assert backend.list_windows("safari") == (
+    assert backend.list_windows(application) == (
         MacOSWindowCandidate(42, 1, "Star 视觉自动化靶场", Rect(100, 200, 800, 600)),
     )
 
@@ -151,7 +152,7 @@ def test_macos_accessibility_backend_raises_matching_ax_window() -> None:
         kAXRaiseAction = "raise"
 
         def __init__(self) -> None:
-            """初始化 AX 调用记录。"""
+            """收集本例的 AX Raise 请求，供断言核对目标窗口。"""
             self.actions = []
 
         def AXUIElementCreateApplication(self, pid):

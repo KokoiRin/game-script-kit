@@ -114,7 +114,7 @@ class _RunBodyVisitor(ast.NodeVisitor):
     """检查入口自身的生成器语法，允许辅助函数使用自己的执行形式。"""
 
     def __init__(self) -> None:
-        """初始化入口是否包含 yield 的检查结果。"""
+        """将当前入口标为同步函数，随后仅由该入口作用域内的 yield 改变判定。"""
         self.is_generator = False
 
     def visit_Yield(self, node: ast.Yield) -> None:

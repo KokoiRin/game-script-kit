@@ -110,7 +110,7 @@ def _describe_readiness(
     supported_image_suffixes: frozenset[str],
     state_names: tuple[str, ...] | None,
 ) -> tuple[tuple[str, str, str], ...]:
-    """生成任务详情中的运行前依赖检查结果。"""
+    """逐项返回标签、就绪状态和原因，缺少状态配置时保留未知，资源缺失时保留诊断。"""
     checks = []
     for name in analysis.state_names:
         checks.append(_screen_state_readiness(name, state_names=state_names))
@@ -140,7 +140,7 @@ def _resolved_image_paths(
     *,
     resources: TargetCatalog,
 ) -> tuple[str, ...]:
-    """按脚本阅读顺序收集可直接传给 dry-run 的图片模板路径。"""
+    """按图片依赖的传入顺序收集可解析的模板路径，同一路径只保留首次出现的位置。"""
     images: list[str] = []
     for image in image_sources:
         try:
@@ -164,7 +164,7 @@ def _image_readiness_dependency(
     *,
     resources: TargetCatalog,
 ) -> _ImageReadinessDependency:
-    """把图片引用转换成依赖检查项。"""
+    """解析失败时保留图片、搜索或区域的缺失类型，供详情生成准确的资源诊断。"""
     label = f"图片: {_describe_image(image)}"
     if isinstance(image, ImageRef):
         try:

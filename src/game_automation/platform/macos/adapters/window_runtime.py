@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import io
 import threading
 import time
 from contextlib import contextmanager
@@ -22,13 +23,15 @@ from game_automation.platform.macos.adapters.window_stream import (
     WindowStreamSource,
 )
 from game_automation.portable.application.capture_errors import WindowCaptureError
-from game_automation.portable.application.runtime_ports import RuntimePorts
+from game_automation.portable.application.runtime_ports import (
+    RuntimePorts,
+    RuntimeWindowIdentity,
+)
 from game_automation.portable.application.window_state_rules import (
     load_window_state_rules,
 )
-from game_automation.portable.domain import AreaWindow
+from game_automation.portable.domain import AreaWindow, Point, Rect
 from game_automation.portable.engine.cancellation import TaskCancelledError
-from game_automation.portable.preparation.models import DesktopWindow
 
 
 class NativeRuntimeLease:
@@ -101,36 +104,14 @@ class MacOSRuntimeFactory:
             rules = load_window_state_rules(self.workspace)
             if (rules.width, rules.height) != (target.width, target.height):
                 raise ValueError("目标窗口尺寸与状态素材不符")
-            if self._backend_factory is None:
-                from game_automation.platform.macos.adapters.accessibility_window_backend import (
-                    MacOSAccessibilityWindowBackend,
-                )
-
-                backend = MacOSAccessibilityWindowBackend()
-            else:
-                backend = self._backend_factory()
-            matches = [
-                w
-                for w in backend.list_windows(target.application)
-                if w.title == target.window_title
-            ]
-            if len(matches) != 1:
-                raise WindowCaptureError(
-                    "目标窗口标题必须唯一且可见，请打开指定游戏窗口"
-                )
-            selected = matches[0]
-            if (selected.rect.width, selected.rect.height) != (
-                target.width,
-                target.height,
-            ):
-                raise ValueError("目标窗口尺寸与脚本素材不符，请恢复窗口尺寸后重试")
-            window = DesktopWindow(
-                f"{selected.pid}:{selected.window_number}",
-                target.application,
-                selected.title,
-                selected.rect,
+            from game_automation.platform.macos.adapters.task_window import (
+                resolve_task_window,
             )
-            binding = self._binding_factory(window)
+
+            backend = None if self._backend_factory is None else self._backend_factory()
+            window, binding = resolve_task_window(
+                target, backend=backend, binding_factory=self._binding_factory
+            )
             factory = (
                 MacOSWindowSession
                 if self._session_factory is None
@@ -151,7 +132,7 @@ class MacOSRuntimeFactory:
             session.attach_source(source)
             if logger is not None:
                 logger.log(
-                    f"runtime backend={target.backend} pid={selected.pid} window_id={binding.number} "
+                    f"runtime backend={target.backend} pid={window.id.split(':', 1)[0]} window_id={binding.number} "
                     f"title={window.title!r} fixed_rect={window.rect} pixel_size={(rules.pixel_width, rules.pixel_height)} hz=5"
                 )
             yield session.ports(requirements)
@@ -180,6 +161,22 @@ class _InputNotCommitted(WindowCaptureError):
         """保留平台暂态原因供会话恢复。"""
         super().__init__(str(cause))
         self.cause = cause
+
+
+class SessionWindow:
+    """按会话当前操作快照转换坐标，不保存启动时的矩形副本。"""
+
+    def __init__(self, session):
+        """借用执行线程拥有的窗口会话。"""
+        self.session = session
+
+    def resolve(self, point):
+        """将任务局部点转换到本次操作的屏幕坐标。"""
+        return AreaWindow(self.session.rect).resolve(point)
+
+    def resolve_region(self, region):
+        """将任务搜索范围转换到同一操作快照。"""
+        return AreaWindow(self.session.rect).resolve_region(region)
 
 
 class MacOSWindowSession:
@@ -215,6 +212,14 @@ class MacOSWindowSession:
         self._paused_at = None
         self._paused_total = 0.0
         self._input_phase = None
+        self._rect = window.rect
+        self._operation_rect = None
+        self._deferred_cause = None
+
+    @property
+    def rect(self):
+        """返回有限操作固定的几何，空闲时返回最后采纳的位置。"""
+        return self._operation_rect or self._rect
 
     def attach_source(self, source):
         """仅绑定本会话独占的源，禁止运行中替换。"""
@@ -242,13 +247,50 @@ class MacOSWindowSession:
         else:
             device = MacOSWindowInputDevice(self)
         return RuntimePorts(
-            AreaWindow(self.window.rect),
+            SessionWindow(self),
             device,
             WindowColorReader(self) if requirements.needs_color_reader else None,
             WindowImageLocator(self) if requirements.needs_image_locator else None,
             WindowStateReader(self) if requirements.needs_screen_state_reader else None,
-            control=self if self.backend == "macos-window-background" else None,
+            control=self,
+            window_identity=RuntimeWindowIdentity(
+                int(self.window.id.split(":", 1)[0]), self.binding.number
+            ),
+            capture_diagnostic=self.capture_diagnostic,
         )
+
+    def capture_diagnostic(self):
+        """保存当前绑定窗口的最新有效源帧，绕过取消与恢复等待。"""
+        if self._source is None:
+            raise WindowCaptureError("运行窗口尚未建立采集源")
+        deadline = self._clock() + 1.0
+        while True:
+            try:
+                image = self._source.screenshot()
+            except WindowFramePending:
+                image = None
+            if image is not None:
+                try:
+                    proof = getattr(self._source, "proof", None)
+                    if (
+                        proof is not None
+                        and 0 <= self._clock() - proof.captured_at <= self._freshness
+                        and (
+                            self._after_input is None
+                            or (
+                                proof.sequence > self._after_sequence
+                                and proof.captured_at > self._after_input
+                            )
+                        )
+                    ):
+                        output = io.BytesIO()
+                        image.save(output, format="PNG")
+                        return output.getvalue()
+                finally:
+                    image.close()
+            if self._clock() >= deadline:
+                raise WindowCaptureError("诊断截图等待首帧或输入后新鲜画面超时")
+            self._sleep(0.02)
 
     def check_cancelled(self):
         """在每次系统边界与有界等待间保留取消优先。"""
@@ -261,17 +303,38 @@ class MacOSWindowSession:
         return now - self._paused_total
 
     def execute_input(self, action):
-        """仅重做按下前的完整准备，提交后保留当前调用栈。"""
+        """只重做未提交准备，已提交动作完成释放后再恢复。"""
+        return self._execute_operation(action)
+
+    def execute_observation(self, action):
+        """将点位解析和画面解释置于同一可重试的有限观察中。"""
+        return self._execute_operation(action)
+
+    def _execute_operation(self, action):
+        """嵌套读取借用外层快照，最外层拥有完整重试。"""
+        if self._operation_rect is not None:
+            return action()
         while True:
             self.check_window()
+            self._operation_rect = self._rect
             self._input_phase = _InputPhase.PREPARING
+            self._deferred_cause = None
             try:
-                return action()
+                result = action()
+                self.check_window()
             except _InputNotCommitted as exc:
                 cause = exc.cause
+            else:
+                cause = self._deferred_cause
+                if cause is None:
+                    return result
             finally:
+                committed = self._input_phase is _InputPhase.COMMITTED
                 self._input_phase = None
+                self._operation_rect = None
             self._recover(cause)
+            if committed:
+                return result
 
     def commit_input(self):
         """在系统按下调用之前标记提交，此后禁止重做准备回调。"""
@@ -279,23 +342,18 @@ class MacOSWindowSession:
             self._input_phase = _InputPhase.COMMITTED
 
     def _check_geometry(self):
-        """核对固定身份和完整原矩形，不读取或等待源画面。"""
+        """核对固定身份与本轮操作几何，不读取或等待源画面。"""
         self.check_cancelled()
         if self._closed:
             raise WindowCaptureError("原生运行会话已经关闭")
         item = self.binding.check()
         q = self.binding.quartz
-        rect = self.window.rect
+        rect = self.rect
         expected = (rect.left, rect.top, rect.width, rect.height)
         current = logical_bounds(item.get(q.kCGWindowBounds, {}))
         if current != expected:
-            advice = (
-                "请恢复原窗口"
-                if self.backend == "macos-window-background"
-                else "请停止后重新运行"
-            )
             raise WindowPresentationUnavailable(
-                f"运行中目标窗口位置已变化，原窗口={expected}，当前窗口={current}，{advice}"
+                f"运行中目标窗口几何变化，原窗口={expected}，当前窗口={current}，等待新位置与画面稳定"
             )
         return item
 
@@ -318,21 +376,60 @@ class MacOSWindowSession:
         return item
 
     def check_window(self):
-        """后台等待短暂展示变化，其他模式维持立即报告错误。"""
+        """核对绑定窗口，前后台均可从平移恢复，后台还可等待短暂的展示中断。"""
         while True:
             try:
                 return self._check_window_once()
             except WindowPresentationUnavailable as exc:
+                if self._input_phase is _InputPhase.COMMITTED:
+                    self._deferred_cause = exc
+                    return {}
                 self._presentation_unavailable(exc)
 
     def _presentation_unavailable(self, cause):
-        """准备区退出后重新定位，其余调用在原位置等待恢复。"""
-        if self.backend != "macos-window-background":
+        """未提交操作退出后整体重做，空闲读取等待当前窗口恢复。"""
+        if self.backend != "macos-window-background" and not self._position_changed():
             raise cause
         self._begin_pause(cause)
         if self._input_phase is _InputPhase.PREPARING:
             raise _InputNotCommitted(cause) from cause
         self._recover(cause)
+
+    def _position_changed(self):
+        """区分允许恢复的纯平移与前台后端原有终止故障。"""
+        item = self.binding.check()
+        bounds = logical_bounds(item.get(self.binding.quartz.kCGWindowBounds, {}))
+        r = self.rect
+        return (
+            bounds is not None
+            and bounds[2:] == (r.width, r.height)
+            and bounds[:2] != (r.left, r.top)
+        )
+
+    def _adopt_position(self):
+        """只采纳原绑定窗口的平移，尺寸仍由既有边界约束。"""
+        item = self.binding.check()
+        bounds = logical_bounds(item.get(self.binding.quartz.kCGWindowBounds, {}))
+        if bounds is not None and bounds[2:] == (self._rect.width, self._rect.height):
+            self._rect = Rect(*bounds)
+
+    def current_rect(self):
+        """读取同一绑定窗口当前矩形，供已提交事件与焦点核验使用。"""
+        item = self.binding.check()
+        bounds = logical_bounds(item.get(self.binding.quartz.kCGWindowBounds, {}))
+        rect = self.rect
+        if bounds is None or bounds[2:] != (rect.width, rect.height):
+            raise WindowPresentationUnavailable("当前绑定窗口尺寸与任务素材不符")
+        return Rect(*bounds)
+
+    def release_point(self, local):
+        """必要释放使用固定局部锚点，系统暂不可读时使用最后位置。"""
+        rect = self.rect
+        try:
+            rect = self.current_rect()
+        except Exception:
+            pass
+        return Point(rect.left + local.x, rect.top + local.y), rect
 
     def _begin_pause(self, cause):
         """一次暂停只记录一个开始点并撤销已有视觉证明。"""
@@ -343,11 +440,13 @@ class MacOSWindowSession:
                 self.logger.log(f"runtime paused backend={self.backend} reason={cause}")
 
     def _recover(self, cause):
-        """保留唯一源，等原几何和恢复之后的源事件再继续。"""
+        """保留唯一源，采纳稳定新位置并等更晚的源事件。"""
         self._begin_pause(cause)
         while True:
             self.check_cancelled()
             try:
+                self._adopt_position()
+                self._sleep(0.02)
                 self._check_window_once()
                 restored_at = self._clock()
                 sequence = getattr(getattr(self._source, "proof", None), "sequence", 0)
@@ -368,7 +467,7 @@ class MacOSWindowSession:
     def validate_point(self, point):
         """校验全局逻辑点必须在已绑定窗口内。"""
         self.check_window()
-        r = self.window.rect
+        r = self.rect
         if not (
             r.left <= point.x < r.left + r.width and r.top <= point.y < r.top + r.height
         ):

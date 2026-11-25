@@ -1,7 +1,7 @@
 """实现 dry-run adapter。
 
-本 module 只把输入动作打印到 stdout，并为条件脚本提供固定屏幕状态结果；
-它不执行真实输入动作、不读取真实屏幕，也不决定 dry-run 模式何时启用。
+输入设备将动作写入 stdout，模拟等待把声明的时长计入任务时钟。
+观察端口返回预设的颜色、图片匹配和界面状态，供运行用例在无桌面访问时执行任务。
 """
 
 from __future__ import annotations
@@ -41,12 +41,15 @@ class DryRunInputDevice(InputDevice):
         print(f"hotkey {'+'.join(keys)}")
 
     def click(self, target: Point) -> None:
+        """向 stdout 输出目标坐标，供调用方核对模拟点击。"""
         print(f"click {target}")
 
     def drag_to(self, start: Point, end: Point, duration_seconds: float = 0.0) -> None:
+        """输出拖拽起点、终点和时长，拖拽时长只用于展示。"""
         print(f"drag {start} -> {end} (duration={duration_seconds}s)")
 
     def wait(self, duration_seconds: float) -> None:
+        """输出等待时长并将其累加到模拟时钟，立即返回。"""
         print(f"wait {duration_seconds}s")
         self._waited += duration_seconds
 

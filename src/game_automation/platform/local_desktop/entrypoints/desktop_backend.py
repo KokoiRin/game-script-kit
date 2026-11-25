@@ -1,7 +1,7 @@
 """为原生桌面壳提供本地标准输入输出协议及可回收的后台会话。
 
-本 module 只映射准备与运行用例，不开启 HTTP、导入 GUI 或解释脚本步骤；
-PNG 通过独占临时文件交付，协议输出固定写入宿主传入的原始流。
+后台将素材准备、窗口观察、任务运行、权限和窗口跟随请求分派给对应用例或平台接口。
+准备页的截图通过临时文件交付，协议回复写入宿主传入的原始流，窗口界面由原生壳管理。
 """
 
 import argparse
@@ -16,6 +16,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import TextIO
 
+from game_automation.portable.application.project_run_plan import parse_saved_run_plan
 from game_automation.portable.domain.geometry import Point, Rect
 
 
@@ -55,6 +56,7 @@ class DesktopBackend:
         control_factory: Callable | None = None,
         permissions=None,
         observation_factory=None,
+        companion_resolver=None,
     ) -> None:
         """装配独立准备服务，延迟加载执行服务并创建单帧缓存。"""
         self.workspace = workspace.resolve()
@@ -68,6 +70,7 @@ class DesktopBackend:
             preparation = build_preparation_service(self.workspace)
         self.preparation = preparation
         self._observation_factory = observation_factory
+        self._companion_resolver = companion_resolver
         self._observation = None
         self._permissions = permissions
         self._control_factory = control_factory
@@ -112,7 +115,14 @@ class DesktopBackend:
         )
         if running and (
             method.startswith("preparation.")
-            or method in {"script.reload", "script.start", "permissions.request"}
+            or method
+            in {
+                "script.reload",
+                "script.start",
+                "plan.start",
+                "plan.save",
+                "permissions.request",
+            }
         ):
             raise RuntimeError(
                 "a script is running; stop it before preparing materials or starting another"
@@ -125,11 +135,37 @@ class DesktopBackend:
             "preparation.crop",
             "observation.rule.save",
             "script.start",
+            "plan.start",
             "permissions.request",
         }:
             raise RuntimeError("请先停止实时识别，再采集素材、申请权限或运行脚本")
         if running and method in {"observation.start", "observation.rule.save"}:
             raise RuntimeError("请先停止脚本，再启动实时识别或登记素材")
+        if method == "companion.target":
+            use_saved_plan = params.get("use_saved_plan", False)
+            if type(use_saved_plan) is not bool:
+                raise ValueError("use_saved_plan must be a boolean")
+            name = params.get("file", "")
+            if not isinstance(name, str):
+                raise ValueError("file must be text")
+            name = name.strip()
+            try:
+                selection = self._control().companion_selection(
+                    name, use_saved_plan=use_saved_plan
+                )
+                identity = selection.window
+                if not selection.running and selection.target is not None:
+                    resolver = self._companion_resolver
+                    if resolver is None:
+                        from game_automation.platform.macos.adapters.task_window import (
+                            resolve_companion_window,
+                        )
+
+                        resolver = resolve_companion_window
+                    identity = resolver(selection.target)
+                return {"target": None if identity is None else asdict(identity)}
+            except (LookupError, ValueError, RuntimeError) as exc:
+                return {"target": None, "message": str(exc)}
         if method == "observation.rules":
             from game_automation.portable.application.window_state_rules import (
                 list_window_state_rules,
@@ -274,12 +310,40 @@ class DesktopBackend:
             if method == "script.reload":
                 self._control_app = None
             app = self._control()
+            plan, plan_error = {}, ""
+            try:
+                plan = app.describe_saved_plan()
+            except ValueError as exc:
+                plan_error = str(exc)
+                try:
+                    plan = app.read_saved_plan()
+                except ValueError:
+                    pass
             return {
                 "scripts": list(app.list_tasks()),
                 "errors": [asdict(error) for error in app.list_task_config_errors()],
+                "plan": plan,
+                "plan_error": plan_error,
             }
         if method == "script.details":
             return asdict(self._control().describe_task(_text(params, "name")))
+        if method == "plan.save":
+            return self._control().save_plan(parse_saved_run_plan(params.get("plan")))
+        if method == "plan.start":
+            dry_run = params.get("dry_run", True)
+            if type(dry_run) is not bool:
+                raise ValueError("dry_run must be a boolean")
+            app = self._control()
+            options = dict(
+                dry_run=dry_run,
+                dry_run_color=_text(params, "dry_run_color", "#000000"),
+                dry_run_screen_state=_text(params, "dry_run_screen_state", "未知"),
+            )
+            if "plan" in params:
+                return _run_status(
+                    app.start_plan(parse_saved_run_plan(params["plan"]), **options)
+                )
+            return _run_status(app.start_saved_plan(**options))
         if method == "script.start":
             name = _text(params, "name")
             dry_run = params.get("dry_run", True)
@@ -334,6 +398,7 @@ def _run_status(status) -> dict:
         "finish_reason": status.finish_reason,
         "stdout": status.stdout[-65536:],
         "stderr": status.stderr[-8192:],
+        "artifacts_path": status.artifacts_path,
     }
 
 

@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 import Darwin
+import Combine
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
@@ -11,6 +12,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var python: URL?
     private var signalSources: [DispatchSourceSignal] = []
     private var wideFrame: CGRect?
+    private var companion: CompanionWindowController?
+    private var companionSubscription: AnyCancellable?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         Darwin.signal(SIGPIPE, SIG_IGN)
@@ -23,7 +26,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                                  chooseWorkspace: { [weak self] in self?.chooseWorkspace() },
                                  changeCompactLayout: { [weak self] in self?.setCompactLayout($0) },
                                  changeFloating: { [weak self] floating in self?.window?.level = floating ? .floating : .normal })
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1100, height: 850),
+        let window = CompanionConsoleWindow(contentRect: NSRect(x: 0, y: 0, width: 1100, height: 850),
                               styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
         window.title = "Star"
         window.isReleasedWhenClosed = false
@@ -32,6 +35,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         window.setFrameAutosaveName("StarMainWindow")
         if !window.setFrameUsingName("StarMainWindow") { window.center() }
         self.window = window
+        let companion = CompanionWindowController(window: window)
+        self.companion = companion
+        companionSubscription = session.$companionTarget.sink { [weak companion] target in
+            companion?.bind(target)
+        }
         if let screen = window.screen ?? NSScreen.main {
             let visible = screen.visibleFrame
             wideFrame = windowFrame(CGRect(x: visible.midX - 550, y: visible.midY - 425,
@@ -61,6 +69,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             let restored = wideFrame ?? CGRect(x: visible.minX, y: visible.minY, width: 1100, height: 850)
             window.setFrame(windowFrame(restored, fitting: visible), display: true)
         }
+        companion?.refresh()
     }
 
     private func configuredURL(_ variable: String, bundleKey: String) -> URL? {
@@ -123,6 +132,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        companion?.stop()
+        companionSubscription?.cancel()
         signalSources.forEach { $0.cancel() }
         signalSources.removeAll()
     }

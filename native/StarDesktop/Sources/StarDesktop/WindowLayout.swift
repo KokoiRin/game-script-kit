@@ -1,6 +1,23 @@
 import Foundation
 import CoreGraphics
 
+func companionFrame(target: CGRect, consoleSize: CGSize, desktopTop: CGFloat) -> CGRect {
+    CGRect(x: target.maxX, y: desktopTop - target.minY - consoleSize.height,
+           width: consoleSize.width, height: consoleSize.height)
+}
+
+struct CompanionVisibility {
+    private var wasFront = false
+    private var mouseWasDown = false
+
+    mutating func shouldReveal(targetIsFront: Bool, mouseDown: Bool, clickInsideTarget: Bool) -> Bool {
+        let reveal = targetIsFront && (!wasFront || (mouseDown && !mouseWasDown && clickInsideTarget))
+        wasFront = targetIsFront
+        mouseWasDown = mouseDown
+        return reveal
+    }
+}
+
 func usesCompactLayout(for tab: String) -> Bool {
     tab == "observe" || tab == "run"
 }

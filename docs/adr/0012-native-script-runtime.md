@@ -21,7 +21,7 @@
 
 ## 显式后台点击试验
 
-用户后续明确优先验证不激活目标的点击路径，因此保留前台 port，另设 `target.backend: "macos-window-background"`。两种模式由 `ScriptTarget.uses_native_window` 统一识别，共用固定窗口选择、窗口流、视觉端口及进程租约；CLI/UI 的状态依赖也统一读取窗口规则。后台模式仅支持 click/wait，hotkey/drag 明确报不支持，当前保留试验标记；已有下述本机同桌面单例证据，不代表通用应用兼容。
+用户后续明确优先验证不激活目标的点击路径，因此保留前台 port，另设 `target.backend: "macos-window-background"`。两种模式由 `ScriptTarget.uses_native_window` 统一识别，共用固定窗口选择、窗口流、视觉端口及进程租约；CLI/UI 的状态依赖也统一读取窗口规则。后台模式支持 click/wait；2026-11-18 为背包滚动补充同窗口内的按住拖动，hotkey 仍报不支持，当前保留试验标记；已有下述本机同桌面单例证据，不代表通用应用兼容。
 
 后台试验只使用一个 `background-pid-experiment` transport：NSEvent 关联固定窗口，设置全局点后用私有 `CGEventSetWindowLocation` 设置左上原点的窗口局部点，再写入 button=0、subtype=3、两个窗口字段及 Command 位 `0x100000`，依次向绑定 PID 投递 move primer、down、50ms 后 up。未同时实现或调用 SkyLight。后台模式不调用前台请求、全局会话投递或真实指针移动；目标进入前台后仍使用同一 PID 投递方式，前台 PID 仅作日志诊断。已尝试按下后的释放不被取消拦截，也不依赖新的前台状态查询；释放日志使用已确认缓存并明确标记。输入后仍要求新源证明。
 

@@ -824,6 +824,7 @@ def test_local_control_background_run_uses_screen_state_search_ref(tmp_path) -> 
 
 def test_local_control_can_stop_background_script_run() -> None:
     """验证 UI application 可以取消后台运行中的脚本。"""
+    unexpected_calls = []
     script = function_task(
         "long-loop",
         "for _ in range(1000):\n    ctx.wait(0.01)",
@@ -833,12 +834,16 @@ def test_local_control_can_stop_background_script_run() -> None:
 
     class SlowDevice(InputDevice):
         def click(self, target: Point) -> None:
-            """本测试不会点击。"""
+            """纯等待任务的点击记为错误，最终调用记录使取消也无法掩盖误输入。"""
+            unexpected_calls.append("click")
+            raise AssertionError("unexpected click call")
 
         def drag_to(
             self, start: Point, end: Point, duration_seconds: float = 0.0
         ) -> None:
-            """本测试不会拖拽。"""
+            """纯等待任务的拖拽记为错误，最终调用记录使取消也无法掩盖误输入。"""
+            unexpected_calls.append("drag_to")
+            raise AssertionError("unexpected drag_to call")
 
         def wait(self, duration_seconds: float) -> None:
             """短暂等待，让后台线程保持运行并允许停止请求进入。"""
@@ -861,9 +866,12 @@ def test_local_control_can_stop_background_script_run() -> None:
     assert final.finish_reason == "cancelled"
     assert "task run cancelled" in final.stderr
 
+    assert unexpected_calls == []
+
 
 def test_local_control_rejects_second_background_script_while_running() -> None:
     """验证已有后台脚本运行时不会启动第二个脚本。"""
+    unexpected_calls = []
     script = function_task(
         "long-loop",
         "for _ in range(1000):\n    ctx.wait(0.01)",
@@ -873,12 +881,16 @@ def test_local_control_rejects_second_background_script_while_running() -> None:
 
     class SlowDevice(InputDevice):
         def click(self, target: Point) -> None:
-            """本测试不会点击。"""
+            """运行槽互斥测试仅允许等待，点击会作为意外输入保留给最终断言。"""
+            unexpected_calls.append("click")
+            raise AssertionError("unexpected click call")
 
         def drag_to(
             self, start: Point, end: Point, duration_seconds: float = 0.0
         ) -> None:
-            """本测试不会拖拽。"""
+            """运行槽互斥测试仅允许等待，拖拽会作为意外输入保留给最终断言。"""
+            unexpected_calls.append("drag_to")
+            raise AssertionError("unexpected drag_to call")
 
         def wait(self, duration_seconds: float) -> None:
             """短暂等待，让后台线程保持运行。"""
@@ -900,9 +912,12 @@ def test_local_control_rejects_second_background_script_while_running() -> None:
     assert final.exit_code == 130
     assert final.finish_reason == "cancelled"
 
+    assert unexpected_calls == []
+
 
 def test_local_control_background_status_includes_image_match_logs() -> None:
     """验证后台脚本状态会展示图片匹配耗时日志。"""
+    unexpected_calls = []
     script = function_task(
         "image-loop",
         "ctx.wait_for(lambda: ctx.find(ImageTemplate('assets/start.png'), min_confidence=0.8) is not None, timeout=1, interval=0.1)",
@@ -913,15 +928,21 @@ def test_local_control_background_status_includes_image_match_logs() -> None:
 
     class FakeDevice(InputDevice):
         def click(self, target: Point) -> None:
-            """本测试不会点击。"""
+            """图片等待本例首轮即命中，点击请求记为超出任务声明的输入。"""
+            unexpected_calls.append("click")
+            raise AssertionError("unexpected click call")
 
         def drag_to(
             self, start: Point, end: Point, duration_seconds: float = 0.0
         ) -> None:
-            """本测试不会拖拽。"""
+            """图片等待本例首轮即命中，拖拽请求记为超出任务声明的输入。"""
+            unexpected_calls.append("drag_to")
+            raise AssertionError("unexpected drag_to call")
 
         def wait(self, duration_seconds: float) -> None:
-            """本测试中的条件会立即满足，不需要等待。"""
+            """图片首轮已命中仍请求等待时记录并报错，捕获多余的轮询。"""
+            unexpected_calls.append("wait")
+            raise AssertionError("unexpected wait call")
 
     class FakeImageLocator:
         def locate(self, template, *, region=None, min_confidence=1.0, logger=None):
@@ -945,9 +966,12 @@ def test_local_control_background_status_includes_image_match_logs() -> None:
     assert "confidence=0.91" in final.stdout
     assert any(event.event_type == "step_succeeded" for event in final.events)
 
+    assert unexpected_calls == []
+
 
 def test_local_control_runs_script_with_screen_state_condition(tmp_path) -> None:
     """验证本地控制真实脚本可通过状态探测判断当前界面。"""
+    unexpected_calls = []
     assets = tmp_path / "assets"
     assets.mkdir()
     (assets / "主页.png").write_bytes(b"fake")
@@ -994,10 +1018,14 @@ def test_local_control_runs_script_with_screen_state_condition(tmp_path) -> None
         def drag_to(
             self, start: Point, end: Point, duration_seconds: float = 0.0
         ) -> None:
-            """状态分支脚本不会拖拽。"""
+            """状态命中分支只允许预期点击，拖拽请求记为错误。"""
+            unexpected_calls.append("drag_to")
+            raise AssertionError("unexpected drag_to call")
 
         def wait(self, duration_seconds: float) -> None:
-            """状态命中后不会等待。"""
+            """状态已命中主页时应直接点击，进入等待分支记为错误。"""
+            unexpected_calls.append("wait")
+            raise AssertionError("unexpected wait call")
 
     class FakeStateReader:
         def read_current_state(self, *, min_confidence=0.8, logger=None):
@@ -1022,6 +1050,8 @@ def test_local_control_runs_script_with_screen_state_condition(tmp_path) -> None
     assert result.stderr == ""
     assert clicks == [Point(100, 200)]
     assert "screen state probe round current_state=主页" in result.stdout
+
+    assert unexpected_calls == []
 
 
 def test_local_control_lists_screen_state_names_from_config(tmp_path) -> None:
@@ -1251,7 +1281,7 @@ def test_local_control_unknown_script_has_explicit_finish_reason() -> None:
 
 
 def test_local_control_unmet_condition_is_not_reported_as_completed() -> None:
-    """等待目标未满足时，同步和后台均保留正常停止原因并跳过后续点击。"""
+    """等待图片超时时，同步与后台均返回退出码 1 和 timed_out，并跳过后续点击。"""
     script = function_task(
         "wait-for-image",
         "ctx.wait_for(lambda: ctx.find(ImageTemplate('missing.png'), min_confidence=None) is not None, timeout=0.1, interval=0.1)\n"
@@ -1304,6 +1334,7 @@ def test_local_control_live_invalid_state_config_finishes_with_failure(
     tmp_path,
 ) -> None:
     """等待期间状态配置损坏时返回失败结果，不让后台会话永远停在运行中。"""
+    unexpected_calls = []
     _write_home_state_config(tmp_path)
     config_path = tmp_path / "assets" / "window-states.json"
     original_config = config_path.read_text()
@@ -1317,7 +1348,9 @@ def test_local_control_live_invalid_state_config_finishes_with_failure(
 
     class IdleDevice:
         def wait(self, duration_seconds):
-            """状态读取在等待前失败，设备不会被调用。"""
+            """状态读取失败后仍尝试等待时记录并报错，防止流程吞掉错误。"""
+            unexpected_calls.append("wait")
+            raise AssertionError("unexpected wait call")
 
     class BrokenReader:
         def read_current_state(self, *, min_confidence=0.8, logger=None):
@@ -1343,3 +1376,5 @@ def test_local_control_live_invalid_state_config_finishes_with_failure(
     assert status.exit_code == 1
     assert status.finish_reason == "failed"
     assert "window state configuration failed" in status.stderr
+
+    assert unexpected_calls == []

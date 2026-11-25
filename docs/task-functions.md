@@ -70,6 +70,25 @@ TASK = {
 
 任务元信息必须是 Python 字面量，入口是接收一个位置参数的同步普通函数。名称重复和格式错误按文件报告。以下划线开头的文件可保存辅助代码，任务通过相对导入复用，例如 `from ._helpers import open_panel`。辅助模块在本次运行中加载，各次运行使用独立模块命名空间。
 
+## 保存整套流程
+
+在工作区 `.star/run-plan.json` 保存已有任务的执行顺序和任务后等待秒数。
+
+```json
+{
+  "name": "日常流程",
+  "items": [
+    {"name": "第一个任务"},
+    {"name": "第二个任务", "wait_after_seconds": 600},
+    {"name": "第三个任务"}
+  ]
+}
+```
+
+原生运行页开启“编排列表”后可直接添加、重复添加、排序和保存任务，使用方法见 [控制台任务编排](../README.md#在控制台编排任务)。CLI 使用 `star --workspace PATH run-plan --saved`，模拟时追加 `--dry-run`。正常完成第二个任务后等待 600 秒，再执行第三个。等待期间可停止整套流程，模拟直接略过实际等待。错误会停止流程并显示原因。
+
+任务已经确认当前不适用、且已返回后续任务需要的起点时，可 `raise TaskSkipped("跳过原因")`。从 `game_automation.task` 导入该异常。结果为 `skipped`，流程继续下一项。收尾失败可让原有异常传播，流程按失败结束。决定见 [ADR 0017](adr/0017-saved-task-plans.md)。
+
 ## 使用动作和观察接口
 
 作者可从 `game_automation.task` 导入 `TaskContext`、`TaskTimeout` 和 `TargetNotFound`。

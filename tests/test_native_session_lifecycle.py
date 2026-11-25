@@ -29,6 +29,7 @@ running = False
 name = ''
 stale_status = None
 stale_stop = None
+plan = dict(name='saved', items=[dict(name='first', wait_after_seconds=600)])
 
 def record(event, **fields):
     """记录后台实际收到的请求与进程事件。"""
@@ -56,11 +57,23 @@ record('started', overlap=overlap)
 for line in sys.stdin:
     request = json.loads(line)
     method = request['method']
-    record(method)
+    record(method, params=request["params"])
     if method == 'session.info':
         result = dict(protocol=1, process_group=0)
     elif method == 'permissions.status':
         result = dict(accessibility=True, screen_recording=True)
+    elif method == 'companion.target':
+        result = dict(target=dict(pid=1234, window_number=5678))
+    elif method == 'script.reload':
+        result = dict(scripts=['first', 'second'], plan=plan)
+    elif method == 'plan.save':
+        plan = request['params']['plan']
+        result = plan
+    elif method == 'plan.start':
+        plan = request['params']['plan']
+        name = 'natural'
+        running = True
+        result = dict(running=True, finish_reason='running')
     elif method == 'script.start':
         name = request['params']['name']
         running = True
@@ -151,7 +164,41 @@ func exercise() throws {
     }
     waitFor({ session.phase == .ready && session.permissionsKnown })
     try check(session.phase == .ready && session.canOperate, "backend becomes ready")
+    waitFor({ session.companionTarget != nil })
+    try check(session.companionTarget == CompanionTarget(pid: 1234, windowNumber: 5678),
+              "default observe session resolves a companion without loading scripts")
     try check(session.canSwitchWorkspace && session.canRestartBackend, "idle backend permits management")
+    if scenario == "plan-editor" {
+        session.reloadScripts()
+        waitFor({ !session.busy && session.planEntries.count == 1 })
+        try check(session.planEntries.first?.waitSeconds == "600", "saved wait is loaded")
+        session.selectedScript = "second"
+        session.addPlanEntry()
+        session.addPlanEntry()
+        let duplicate = session.planEntries.last!.id
+        session.movePlanEntry(duplicate, by: -1)
+        session.removePlanEntry(duplicate)
+        try check(session.planEntries.map(\\.name) == ["first", "second"], "duplicate removal uses occurrence identity")
+        session.planEntries[0].waitSeconds = "12"
+        session.reloadScripts()
+        waitFor({ !session.busy })
+        try check(session.planEntries[0].waitSeconds == "12", "reload preserves unsaved edits")
+        session.savePlan()
+        waitFor({ !session.busy })
+        session.reloadScripts()
+        waitFor({ !session.busy })
+        try check(session.planEntries[0].waitSeconds == "12", "save survives reload")
+        session.useSavedPlan = true
+        session.startScript()
+        waitFor({ session.runPhase == .finished })
+        try check(session.status.contains("完成"), "submitted plan finishes")
+        let starts = events(root).filter { $0["event"] as? String == "plan.start" }
+        let params = starts.first?["params"] as? [String: Any]
+        let submitted = params?["plan"] as? [String: Any]
+        try check(submitted?["name"] as? String == "saved", "one start request carries current draft")
+        try check(count(root, "plan.save") == 1, "run does not coordinate a second save request")
+        return
+    }
     session.selectedScript = scenario
     session.startScript()
     waitFor({ session.runRunning })
@@ -210,6 +257,7 @@ func exercise() throws {
     }
     session.restartBackend()
     session.restartBackend()
+    try check(session.companionTarget == nil, "backend shutdown detaches its companion")
     session.start(workspace: root, python: python, sourceRoot: root)
     try check(session.phase == .stopping && session.runRunning, "restart waits for actual old process exit")
     try check(!session.canRestartBackend && !session.canSwitchWorkspace, "backend shutdown owns management")
@@ -271,6 +319,7 @@ def lifecycle_binary(tmp_path_factory):
     "scenario",
     [
         "natural",
+        "plan-editor",
         "timed-out",
         "cleanup-error",
         "confirmed",

@@ -86,7 +86,7 @@ class ScreenStateCandidateResult:
 
     @property
     def found(self) -> bool:
-        """判断该候选界面是否在本轮探测中命中。"""
+        """命中标记来自本轮 match，未命中与跳过均返回假值。"""
         return self.match is not None
 
     @property
@@ -150,7 +150,7 @@ class ScreenStateProbeResult:
 
     @property
     def known(self) -> bool:
-        """判断本轮探测是否识别出了已知界面。"""
+        """存在可选中的命中候选时返回真值，全部未命中或跳过时保持未知。"""
         return self.selected_candidate is not None
 
     @property

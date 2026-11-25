@@ -9,7 +9,15 @@ from game_automation.portable.engine.cancellation import RunCancelled
 from game_automation.portable.engine.task_context import (
     TargetNotFound,
     TaskContext,
+    TaskSkipped,
     TaskTimeout,
 )
 
-__all__ = ["Point", "TaskContext", "TaskTimeout", "TargetNotFound", "RunCancelled"]
+__all__ = [
+    "Point",
+    "TaskContext",
+    "TaskTimeout",
+    "TaskSkipped",
+    "TargetNotFound",
+    "RunCancelled",
+]

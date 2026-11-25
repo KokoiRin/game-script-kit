@@ -109,7 +109,7 @@ class LatestWindowFrame:
 
 
 class WindowStreamSource:
-    """只在观察工作线程首次读取时启动系统流，频率跟随观察选项。"""
+    """供观察和任务运行共用的窗口流实现，首次取帧或检查可用性时按调用方指定的频率启动。"""
 
     capture_mode = "window_stream"
 
@@ -197,7 +197,7 @@ class NativeWindowStream:
     """隔离PyObjC、dispatch及系统surface生命周期，支持fake driver替换。"""
 
     def __init__(self):
-        """只在明确启动真实观察时加载macOS接口。"""
+        """创建原生采集驱动时加载 macOS 框架，供后续启动窗口流使用。"""
         try:
             import CoreMedia
             import dispatch

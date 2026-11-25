@@ -50,6 +50,7 @@ class AppKit:
     NSEventTypeMouseMoved = "move"
     NSEventTypeLeftMouseDown = "down"
     NSEventTypeLeftMouseUp = "up"
+    NSEventTypeLeftMouseDragged = "drag"
 
     class NSEvent:
         @staticmethod
@@ -70,6 +71,7 @@ class Quartz:
     kCGEventMouseMoved = "move"
     kCGEventLeftMouseDown = "down"
     kCGEventLeftMouseUp = "up"
+    kCGEventLeftMouseDragged = "drag"
     kCGMouseEventButtonNumber = 3
     kCGMouseEventSubtype = 7
     kCGMouseEventClickState = 1
@@ -90,11 +92,11 @@ class Quartz:
         return event["global"]
 
     def CGEventSetIntegerValueField(self, event, field, value):
-        """保存明确字段。"""
+        """将字段写入可检查的事件字典，使测试可在投递后核对完整窗口关联。"""
         event[field] = value
 
     def CGEventSetFlags(self, event, flags):
-        """保存后台command位。"""
+        """保留投递时设置的标志值，使断言能核对后台事件使用的 Command 位。"""
         event["flags"] = flags
 
     def CGEventPostToPid(self, pid, event):
@@ -197,14 +199,12 @@ def test_down_post_failure_still_releases_and_invalidates_old_frame():
     assert session.finished == 1
 
 
-def test_keyboard_and_drag_are_explicitly_unsupported():
+def test_keyboard_is_explicitly_unsupported():
     """未经实测的后台输入能力不默认为可用。"""
     q = Quartz()
     adapter = device(Session(q))
     with pytest.raises(NotImplementedError):
         adapter.hotkey(("command", "a"))
-    with pytest.raises(NotImplementedError):
-        adapter.drag_to(Point(105, 206), Point(110, 210))
     assert q.events == []
 
 
@@ -259,4 +259,32 @@ def test_release_does_not_depend_on_frontmost_read_after_down():
 
     device(session, frontmost=read_frontmost).click(Point(105, 206))
     assert [event["kind"] for _, event in q.events] == ["move", "down", "up"]
+    assert session.finished == 1
+
+
+def test_background_drag_moves_while_pressed_then_releases_at_end():
+    """一次后台拖动产生连续的窗口内移动，终点与释放点一致。"""
+    q = Quartz()
+    session = Session(q)
+    device(session).drag_to(Point(105, 206), Point(105, 246), 0.04)
+    assert [(pid, e["kind"], e["window-local"]) for pid, e in q.events] == [
+        (42, "move", (5, 6)),
+        (42, "down", (5, 6)),
+        (42, "drag", (5, 26)),
+        (42, "drag", (5, 46)),
+        (42, "up", (5, 46)),
+    ]
+    assert session.finished == 1
+
+
+def test_background_drag_releases_last_point_on_post_error():
+    """拖动投递出错后仍在最后尝试的位置释放并刷新画面。"""
+    q = Quartz(fail="drag")
+    session = Session(q)
+    with pytest.raises(RuntimeError, match="post failed"):
+        device(session).drag_to(Point(105, 206), Point(105, 246), 0.04)
+    assert [(e["kind"], e["window-local"]) for _, e in q.events][-2:] == [
+        ("drag", (5, 26)),
+        ("up", (5, 26)),
+    ]
     assert session.finished == 1

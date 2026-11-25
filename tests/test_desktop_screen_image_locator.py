@@ -41,11 +41,11 @@ class FailingScreenshotBackend:
 
 class FakeLogger:
     def __init__(self) -> None:
-        """初始化日志列表。"""
+        """为每个识图测试隔离诊断记录，后续可按阶段检查内容。"""
         self.messages: list[str] = []
 
     def log(self, message: str) -> None:
-        """记录一条日志消息。"""
+        """保留原始阶段日志和发生顺序，供匹配耗时断言使用。"""
         self.messages.append(message)
 
 

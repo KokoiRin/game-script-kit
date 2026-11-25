@@ -90,7 +90,7 @@ class Quartz:
         ]
 
     def CGEventCreateMouseEvent(self, source, kind, point, button):
-        """建立模拟鼠标事件。"""
+        """创建仅携带事件类型和屏幕点的字典，供后续字段设置与投递断言使用。"""
         return {"kind": kind, "point": point}
 
     def CGEventSetIntegerValueField(self, event, field, value):
@@ -113,7 +113,7 @@ class Quartz:
             raise RuntimeError("post failed")
 
     def CGEventCreateKeyboardEvent(self, source, code, down):
-        """建立模拟键盘事件。"""
+        """将键码与按下状态编码为事件类型，使测试可检查逆序释放和漏发情况。"""
         return {"kind": (code, down)}
 
     def CGEventSetLocation(self, event, point):
@@ -430,7 +430,7 @@ class ActivationClock:
         self.now = 1.0
 
     def __call__(self):
-        """读取单调时间。"""
+        """返回手动推进的激活轮询时钟，避免超时测试等待真实时间。"""
         return self.now
 
     def sleep(self, amount):

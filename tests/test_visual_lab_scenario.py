@@ -17,7 +17,7 @@ class ManualClock:
         self.now = 0.0
 
     def __call__(self) -> float:
-        """返回当前测试时间。"""
+        """返回手动推进的时刻，使加载状态转换只受本例指定的时间影响。"""
         return self.now
 
     def advance(self, seconds: float) -> None:

@@ -70,19 +70,27 @@ def test_image_lookup_result_exposes_missing_state() -> None:
     assert result.confidence is None
 
 
-def test_image_match_returns_common_anchor_points() -> None:
-    """验证图片匹配结果可以按 anchor 返回常用点位。"""
-    match = ImageMatch(Rect(10, 20, 30, 40), confidence=0.9)
-
-    assert match.point_at("center") == Point(25, 40)
-    assert match.point_at("top_left") == Point(10, 20)
-    assert match.point_at("top_center") == Point(25, 20)
-    assert match.point_at("top_right") == Point(40, 20)
-    assert match.point_at("left_center") == Point(10, 40)
-    assert match.point_at("right_center") == Point(40, 40)
-    assert match.point_at("bottom_left") == Point(10, 60)
-    assert match.point_at("bottom_center") == Point(25, 60)
-    assert match.point_at("bottom_right") == Point(40, 60)
+@pytest.mark.parametrize(
+    "rect, x, y",
+    [
+        (Rect(10, 20, 30, 40), (10, 25, 40), (20, 40, 60)),
+        (Rect(-10, -20, 5, 3), (-10, -8, -5), (-20, -19, -17)),
+        (Rect(10, 20, 1, 1), (10, 10, 11), (20, 20, 21)),
+    ],
+    ids=["even", "odd-negative-origin", "single-pixel"],
+)
+def test_image_match_returns_common_anchor_points(rect, x, y) -> None:
+    """验证九种锚点在奇数尺寸和单像素区域中保持中心取整与边界坐标语义。"""
+    match = ImageMatch(rect, confidence=0.9)
+    assert match.point_at("center") == Point(x[1], y[1])
+    assert match.point_at("top_left") == Point(x[0], y[0])
+    assert match.point_at("top_center") == Point(x[1], y[0])
+    assert match.point_at("top_right") == Point(x[2], y[0])
+    assert match.point_at("left_center") == Point(x[0], y[1])
+    assert match.point_at("right_center") == Point(x[2], y[1])
+    assert match.point_at("bottom_left") == Point(x[0], y[2])
+    assert match.point_at("bottom_center") == Point(x[1], y[2])
+    assert match.point_at("bottom_right") == Point(x[2], y[2])
 
 
 def test_image_match_rejects_unknown_anchor() -> None:

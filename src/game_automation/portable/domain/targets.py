@@ -9,7 +9,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from game_automation.portable.domain.geometry import Point, Rect
-from game_automation.portable.domain.image_matching import ImageTemplate
+from game_automation.portable.domain.image_matching import (
+    ImageTemplate,
+    validate_image_anchor,
+)
 from game_automation.portable.domain.point_aliases import (
     ImageRef,
     ImageSearchSpec,
@@ -26,12 +29,9 @@ class ImageTarget:
     anchor: str = "center"
 
     def __post_init__(self) -> None:
-        """校验图片目标最低匹配置信度必须大于 0 且不超过 1。"""
+        """构造时校验锚点名称及可选阈值，模板定位留给执行阶段。"""
         if self.min_confidence is not None and not 0 < self.min_confidence <= 1:
             raise ValueError(
                 "image target min_confidence must be greater than 0 and at most 1"
             )
-        from game_automation.portable.domain.image_matching import ImageMatch
-
-        # 用一个最小矩形复用领域 anchor 校验，避免在多个 module 维护合法值列表。
-        ImageMatch(Rect(0, 0, 1, 1), confidence=1.0).point_at(self.anchor)
+        validate_image_anchor(self.anchor)

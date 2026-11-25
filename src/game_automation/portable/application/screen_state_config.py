@@ -183,7 +183,7 @@ def _screen_state_search_name(
 
 
 def _parse_regions(value: Any) -> tuple[NamedRegion, ...]:
-    """解析配置中的命名区域表。"""
+    """按配置顺序建立命名区域，名称为空或区域格式无效时抛出 ValueError。"""
     if not isinstance(value, dict):
         raise ValueError("screen state config regions must be an object")
     regions = []
@@ -206,7 +206,7 @@ def _parse_region_ref(value: Any) -> Rect | RegionRef | None:
 
 
 def _parse_rect(value: Any, label: str) -> Rect:
-    """解析 JSON object 形式的矩形区域。"""
+    """将矩形四字段转为整数并校验正尺寸，缺字段的诊断带调用方提供的位置标签。"""
     if not isinstance(value, dict):
         raise ValueError(f"{label} must be an object")
     try:
@@ -221,7 +221,7 @@ def _parse_rect(value: Any, label: str) -> Rect:
 
 
 def _parse_optional_confidence(value: Any) -> float | None:
-    """解析可选最低置信度。"""
+    """缺省阈值保留为 None，显式值转为浮点数后限定在大于零且至多一的区间。"""
     if value is None:
         return None
     confidence = float(value)

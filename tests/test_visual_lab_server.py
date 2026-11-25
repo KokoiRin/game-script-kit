@@ -169,7 +169,7 @@ def _start_server(*, scenario: TaskFlowScenario | None = None):
 
 
 def _stop_server(server, thread: threading.Thread) -> None:
-    """停止并关闭测试用靶场 server。"""
+    """先停止服务循环，再有界等待线程退出并关闭监听套接字。"""
     server.shutdown()
     thread.join(timeout=2)
     server.server_close()

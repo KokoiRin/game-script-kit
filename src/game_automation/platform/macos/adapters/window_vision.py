@@ -22,7 +22,7 @@ class WindowColorReader:
     def read_color(self, point):
         """将全局逻辑点映射为窗口内原始像素点。"""
         self.session.validate_point(point)
-        r = self.session.window.rect
+        r = self.session.rect
         with self.session.screenshot() as image:
             x = int((point.x - r.left) * image.width / r.width)
             y = int((point.y - r.top) * image.height / r.height)
@@ -39,7 +39,7 @@ class WindowImageLocator:
         """全局 ROI 仅减一次窗口原点，并拒绝跨窗口区域。"""
         if region is None:
             return None
-        r = self.session.window.rect
+        r = self.session.rect
         local = Rect(
             region.left - r.left, region.top - r.top, region.width, region.height
         )
@@ -56,7 +56,7 @@ class WindowImageLocator:
         """匹配器返回的局部逻辑矩形仅加一次窗口原点。"""
         if rect is None:
             return None
-        r = self.session.window.rect
+        r = self.session.rect
         return Rect(rect.left + r.left, rect.top + r.top, rect.width, rect.height)
 
     def _global_match(self, match):

@@ -7,6 +7,8 @@
 import math
 import time
 
+from game_automation.portable.domain import Point
+
 # ANSI 虚拟键码；修饰键与普通键统一由一份表解释。
 KEY_CODES = dict(
     zip(
@@ -185,6 +187,7 @@ class MacOSWindowInputDevice:
             _read_frontmost_pid if frontmost_pid is None else frontmost_pid
         )
         self._mouse_held = False
+        self._held_local = None
         self._keyboard_focus = (
             _read_keyboard_focus if keyboard_focus is None else keyboard_focus
         )
@@ -283,7 +286,19 @@ class MacOSWindowInputDevice:
             q.kCGEventLeftMouseUp: appkit.NSEventTypeLeftMouseUp,
             q.kCGEventLeftMouseDragged: appkit.NSEventTypeLeftMouseDragged,
         }
-        r = self.session.window.rect
+        r = getattr(self.session, "rect", self.session.window.rect)
+        if (
+            kind == q.kCGEventLeftMouseUp
+            and self._held_local is not None
+            and hasattr(self.session, "release_point")
+        ):
+            point, r = self.session.release_point(self._held_local)
+        if kind == q.kCGEventLeftMouseDragged and hasattr(
+            self.session, "release_point"
+        ):
+            local_point = Point(point.x - r.left, point.y - r.top)
+            point, r = self.session.release_point(local_point)
+            self._held_local = local_point
         # NSEvent 使用窗口基坐标，原点在左下；port 输入仍是屏幕左上逻辑坐标。
         local = (point.x - r.left, r.height - (point.y - r.top))
         self._event_number += 1
@@ -326,6 +341,9 @@ class MacOSWindowInputDevice:
             self._check_foreground()
             if kind == q.kCGEventLeftMouseDown:
                 self._check_unobscured(point)
+                if hasattr(self.session, "commit_input"):
+                    self.session.commit_input()
+                self._held_local = Point(point.x - r.left, point.y - r.top)
                 self._mouse_held = True
         q.CGEventPost(q.kCGSessionEventTap, event)
 
@@ -339,12 +357,19 @@ class MacOSWindowInputDevice:
             try:
                 self._mouse(q.kCGEventLeftMouseDown, target)
                 # 游戏可能按帧轮询按下状态，零间隔释放会被整个采样周期跳过。
-                self.wait(0.05)
+                self._hold_mouse(0.05)
             finally:
                 self._release_mouse(target)
         finally:
             self.session.input_finished()
         self.session.check_window()
+
+    def _hold_mouse(self, seconds):
+        """按下后仅检查取消，避免恢复等待阻止必要释放。"""
+        deadline = self._clock() + seconds
+        while self._clock() < deadline:
+            self.session.check_cancelled()
+            self._sleep(min(0.02, deadline - self._clock()))
 
     def hotkey(self, keys):
         """按序发送按键并在失败或取消后逆序释放已尝试按下的键。"""
@@ -396,11 +421,18 @@ class MacOSWindowInputDevice:
         if down:
             self._check_foreground()
             focused = self._keyboard_focus(self.pid)
+            target_rect = (
+                self.session.current_rect()
+                if hasattr(self.session, "current_rect")
+                else self.session.window.rect
+            )
             if (
                 focused.title != self.session.window.title
-                or focused.rect != self.session.window.rect
+                or focused.rect != target_rect
             ):
                 raise RuntimeError("原生键盘焦点窗口与固定目标不符，已停止按键")
+            if hasattr(self.session, "commit_input"):
+                self.session.commit_input()
             if on_attempt is not None:
                 on_attempt()
         self.q.CGEventPost(self.q.kCGSessionEventTap, event)
@@ -437,10 +469,11 @@ class MacOSWindowInputDevice:
         """小片等待并检查取消与窗口身份，不阻塞整段脚本。"""
         if not math.isfinite(duration_seconds) or duration_seconds < 0:
             raise ValueError("wait duration must be finite and nonnegative")
-        deadline = self._clock() + duration_seconds
+        clock = getattr(self.session, "task_time", self._clock)
+        deadline = clock() + duration_seconds
         while True:
             self.session.check_window()
-            remaining = deadline - self._clock()
+            remaining = deadline - clock()
             if remaining <= 0:
                 return
             self._sleep(min(0.05, remaining))

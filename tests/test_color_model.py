@@ -8,7 +8,7 @@ from game_automation.portable.domain import Color
 
 
 def test_color_keeps_rgb_channels() -> None:
-    """验证颜色会保留红绿蓝三个通道。"""
+    """使用互不相同的三个通道值，检验构造时通道顺序是否被交换。"""
     color = Color(red=1, green=2, blue=3)
 
     assert color.red == 1

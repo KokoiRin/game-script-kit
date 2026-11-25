@@ -1,7 +1,7 @@
 """通过图像定位端口执行一轮界面状态探测。
 
-本 module 负责把多个界面候选逐个交给 ScreenImageLocator，并汇总为领域结果；
-它不读取 assets 目录、不创建真实 adapter，也不处理 HTTP 或 UI 会话。
+调用方提供候选序列和图像定位端口。本模块优先批量定位，仅有单图端口时逐项查找，
+再将匹配和跳过的候选汇总为领域结果。截图与模板匹配由定位端口负责。
 """
 
 from __future__ import annotations
@@ -33,7 +33,7 @@ def probe_screen_state(
     logger: RunLogger | None = None,
     clock: Callable[[], float] = perf_counter,
 ) -> ScreenStateProbeResult:
-    """逐个匹配界面候选图片并返回一轮探测结果。"""
+    """按传入顺序探测候选，首次命中后将剩余候选标为跳过。"""
     if batch_image_locator is None and image_locator is None:
         raise RuntimeError("image locator is required for screen state probe")
     total_started_at = clock()
@@ -68,7 +68,6 @@ def probe_screen_state(
             )
         )
         if match is not None:
-            # 当前界面候选按优先级排序；命中后剩余候选不再继续截图匹配。
             results.extend(
                 ScreenStateCandidateResult(
                     candidate=remaining_candidate,

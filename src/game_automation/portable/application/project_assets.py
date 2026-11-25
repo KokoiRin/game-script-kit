@@ -15,10 +15,10 @@ TASK_FOLDER = "scripts"
 
 
 def image_asset_root(project_root: Path = PROJECT_ROOT) -> Path:
-    """返回项目图片资源目录路径。"""
+    """以给定数据根拼接 assets 路径，具体素材的存在性由使用方检查。"""
     return project_root / IMAGE_ASSET_FOLDER
 
 
 def task_root(project_root: Path = PROJECT_ROOT) -> Path:
-    """返回项目 Python 任务目录路径。"""
+    """以给定数据根拼接 scripts 路径，任务发现负责处理目录尚未建立的情形。"""
     return project_root / TASK_FOLDER

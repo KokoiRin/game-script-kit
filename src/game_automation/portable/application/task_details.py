@@ -37,7 +37,7 @@ def describe_task_details(
     supported_image_suffixes: frozenset[str],
     state_names: tuple[str, ...] | None,
 ) -> TaskDetailsResult:
-    """生成任务详情结果。"""
+    """生成入口和资源检查，缺失依赖时仍返回详情，并以退出码 2 标记。"""
     analysis = analyze_task(task)
     dependency_details = describe_task_dependencies(
         task,

@@ -22,7 +22,7 @@ class RuntimeRequirements:
 
 
 def inspect_runtime_requirements(task: FunctionTask) -> RuntimeRequirements:
-    """从共同静态事实读取所需端口。"""
+    """从声明事实确定颜色、图片和状态端口，动态调用需要由任务作者显式声明依赖。"""
     analysis = analyze_task(task)
     return RuntimeRequirements(
         needs_color_reader=analysis.uses_colors,

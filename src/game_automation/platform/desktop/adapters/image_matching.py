@@ -309,7 +309,7 @@ _TEMPLATE_CACHE_LOCK = threading.Lock()
 
 
 def _elapsed_ms(started_at: float) -> float:
-    """把 perf_counter 起点转换成毫秒耗时。"""
+    """与 perf_counter 的起点相减得到浮点毫秒值，供各匹配阶段统一计时。"""
     return (perf_counter() - started_at) * 1000
 
 
